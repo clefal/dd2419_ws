@@ -41,17 +41,17 @@ class Arm_control(Node):
 def main():
     rclpy.init()
     node = Arm_control()
-    # node.send_msg_start_position()
-    # time.sleep(3.0)
+    node.send_msg_start_position()
+    time.sleep(3.0)
 
-    # node.send_msg_lower_arm()
-    # time.sleep(3.0)
+    node.send_msg_lower_arm()
+    time.sleep(3.0)
 
     node.send_msg_close_grip()
     time.sleep(3.0)
 
-    # node.send_msg_raise_arm()
-    # time.sleep(3.0)
+    node.send_msg_raise_arm()
+    time.sleep(3.0)
     rclpy.shutdown()
 
 if __name__ == '__main__':
