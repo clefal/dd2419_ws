@@ -56,12 +56,20 @@ class Controller(Node):
         self._yaw_turn_thresh = 0.35
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 20 Hz
+        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
 
     def goal_callback(self, msg: PoseStamped):
         self._goal = msg
         self.publish_status('RUNNING')
-        self.get_logger().info('Received new goal')
+
+        gx = msg.pose.position.x
+        gy = msg.pose.position.y
+
+        q = msg.pose.orientation
+        gyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+
+        self.get_logger().info(f'Received new goal: x={gx:.3f}, y={gy:.3f}, yaw={gyaw:.3f} rad')
+
 
     def publish_status(self, s: str):
         msg = String()
