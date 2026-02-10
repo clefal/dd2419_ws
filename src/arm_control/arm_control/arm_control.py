@@ -19,7 +19,7 @@ class Arm_control(Node):
         time.sleep(3.0)
 
         msg = ArmControl()
-        msg.position[0] = 90
+        msg.position[0] = 10
         msg.position[2] = 170
         msg.position[3] = 200
         msg.position[4] = 120
@@ -41,21 +41,37 @@ class Arm_control(Node):
     def send_msg_close_grip(self):
         msg = ArmControl()
         msg.position[0] = 90
+        msg.position[2] = 170
+        msg.position[3] = 200
+        msg.position[4] = 40
+
         self.pub.publish(msg)
 
     def send_msg_open_grip(self):
         msg = ArmControl()
         msg.position[0] = 10
+        msg.position[2] = 170
+        msg.position[3] = 200
+        msg.position[4] = 120
+
         self.pub.publish(msg)
 
     def send_msg_lower_arm(self):
         msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 170
+        msg.position[3] = 200
         msg.position[4] = 40
+
         self.pub.publish(msg)
 
     def send_msg_raise_arm(self):
         msg = ArmControl()
+        msg.position[0] = 90
+        msg.position[2] = 170
+        msg.position[3] = 200
         msg.position[4] = 120
+
         self.pub.publish(msg)
             
 
@@ -65,14 +81,14 @@ def main():
     node.send_msg_start_position()
     time.sleep(3.0)
 
-    # node.send_msg_lower_arm()
-    # time.sleep(3.0)
+    node.send_msg_lower_arm()
+    time.sleep(3.0)
 
-    # node.send_msg_close_grip()
-    # time.sleep(3.0)
+    node.send_msg_close_grip()
+    time.sleep(3.0)
 
-    # node.send_msg_raise_arm()
-    # time.sleep(3.0)
+    node.send_msg_raise_arm()
+    time.sleep(3.0)
     rclpy.shutdown()
 
 if __name__ == '__main__':
