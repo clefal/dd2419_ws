@@ -11,10 +11,23 @@ class Arm_control(Node):
     def send_msg_start_position(self):
         msg = ArmControl()
         msg.position[0] = 10
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
+        msg = ArmControl()
         msg.position[2] = 170
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
+        msg = ArmControl()
         msg.position[3] = 200
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
+        msg = ArmControl()
         msg.position[4] = 120
         self.pub.publish(msg)
+        time.sleep(3.0)
 
 
     def send_msg_close_grip(self):
