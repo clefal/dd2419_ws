@@ -18,10 +18,14 @@ class Arm_control(Node):
         self.pub.publish(msg)
         time.sleep(3.0)
 
-        # msg = ArmControl()
-        # msg.position[2] = 170
-        # self.pub.publish(msg)
-        # time.sleep(3.0)
+        msg = ArmControl()
+        msg.position[0] = 90
+        msg.position[2] = 170
+        msg.position[3] = 200
+        msg.position[4] = 120
+
+        self.pub.publish(msg)
+        time.sleep(3.0)
 
         # msg = ArmControl()
         # msg.position[3] = 200
