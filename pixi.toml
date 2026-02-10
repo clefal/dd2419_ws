@@ -79,6 +79,8 @@ ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
+ros-jazzy-arm-control = { path = "src/arm_control" }
+
 
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }

@@ -658,6 +658,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/zlib-ng-2.3.2-hceb46e0_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
       - conda: https://prefix.dev/conda-forge/linux-64/zziplib-0.13.69-he45264a_2.conda
+      - conda: src/arm_control
+        build: hb0f4dca_0
       - conda: src/aruco_ros/aruco
         build: hb0f4dca_0
       - conda: src/aruco_ros/aruco_msgs
@@ -1251,6 +1253,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/osx-arm64/zlib-ng-2.3.2-hed4e4f5_1.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - conda: https://prefix.dev/conda-forge/osx-arm64/zziplib-0.13.69-h57f5043_2.conda
+      - conda: src/arm_control
+        build: h60d57d3_0
       - conda: src/aruco_ros/aruco
         build: h60d57d3_0
       - conda: src/aruco_ros/aruco_msgs
@@ -1802,6 +1806,8 @@ environments:
       - conda: https://prefix.dev/conda-forge/win-64/zlib-ng-2.3.2-h0261ad2_1.conda
       - conda: https://prefix.dev/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda
       - conda: https://prefix.dev/conda-forge/win-64/zziplib-0.13.69-h3ca93ac_2.conda
+      - conda: src/arm_control
+        build: ha41a7fa_0
       - conda: src/aruco_ros/aruco
         build: ha41a7fa_0
       - conda: src/aruco_ros/aruco_msgs
@@ -12892,6 +12898,60 @@ packages:
   license: BSD-3-Clause
   size: 34340
   timestamp: 1768974403396
+- conda: src/arm_control
+  name: ros-jazzy-arm-control
+  version: 0.0.0
+  build: h60d57d3_0
+  subdir: osx-arm64
+  variants:
+    target_platform: osx-arm64
+  depends:
+  - ros-jazzy-rclpy
+  - ros-jazzy-robp-interfaces
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - libcxx >=21
+  - python_abi 3.12.* *_cp312
+  - numpy >=1.23,<3
+  license: LicenseRef-MIT
+- conda: src/arm_control
+  name: ros-jazzy-arm-control
+  version: 0.0.0
+  build: ha41a7fa_0
+  subdir: win-64
+  variants:
+    c_compiler: vs2022
+    cxx_compiler: vs2022
+    target_platform: win-64
+  depends:
+  - ros-jazzy-rclpy
+  - ros-jazzy-robp-interfaces
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  - ucrt >=10.0.20348.0
+  - python_abi 3.12.* *_cp312
+  - numpy >=1.23,<3
+  license: LicenseRef-MIT
+- conda: src/arm_control
+  name: ros-jazzy-arm-control
+  version: 0.0.0
+  build: hb0f4dca_0
+  subdir: linux-64
+  variants:
+    target_platform: linux-64
+  depends:
+  - ros-jazzy-rclpy
+  - ros-jazzy-robp-interfaces
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - libgcc >=15
+  - libgcc >=15
+  - libstdcxx >=15
+  - python_abi 3.12.* *_cp312
+  - numpy >=1.23,<3
+  license: LicenseRef-MIT
 - conda: src/aruco_ros/aruco
   name: ros-jazzy-aruco
   version: 5.0.5
