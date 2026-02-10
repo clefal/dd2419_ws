@@ -46,7 +46,7 @@ class Controller(Node):
         self._goal = None
 
         # Minimal tuning (duty cycles)
-        self._max_duty = 0.25
+        self._max_duty = 0.3
         self._k_w = 0.4
         self._k_v = 0.6
 
