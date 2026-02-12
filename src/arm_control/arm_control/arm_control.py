@@ -14,18 +14,25 @@ class Arm_control(Node):
         msg.position[2] = 170
         msg.position[3] = 220
         msg.position[4] = 180
-
         self.pub.publish(msg)
+
         time.sleep(3.0)
 
         msg = ArmControl()
         msg.position[0] = 10
         msg.position[2] = 170
-        msg.position[3] = 200
+        msg.position[3] = 210
         msg.position[4] = 120
-
         self.pub.publish(msg)
+
         time.sleep(3.0)
+
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 50
+        msg.position[3] = 210
+        msg.position[4] = 120
+        self.pub.publish(msg)
 
         # msg = ArmControl()
         # msg.position[3] = 200
@@ -37,21 +44,39 @@ class Arm_control(Node):
         # self.pub.publish(msg)
         # time.sleep(3.0)
 
+    def send_msg_raise_camera(self):
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 150
+        msg.position[3] = 190
+        msg.position[4] = 120
+
+        self.pub.publish(msg)
+
+    def send_msg_lower_camera(self):
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 50
+        msg.position[3] = 210
+        msg.position[4] = 120
+
+        self.pub.publish(msg)
 
     def send_msg_close_grip(self):
         msg = ArmControl()
-        msg.position[0] = 90
-        msg.position[2] = 170
-        msg.position[3] = 200
+        msg.position[0] = 100
+        msg.position[2] = 150
+        msg.position[3] = 190
         msg.position[4] = 40
 
         self.pub.publish(msg)
 
+
     def send_msg_open_grip(self):
         msg = ArmControl()
         msg.position[0] = 10
-        msg.position[2] = 170
-        msg.position[3] = 200
+        msg.position[2] = 150
+        msg.position[3] = 190
         msg.position[4] = 120
 
         self.pub.publish(msg)
@@ -59,17 +84,17 @@ class Arm_control(Node):
     def send_msg_lower_arm(self):
         msg = ArmControl()
         msg.position[0] = 10
-        msg.position[2] = 170
-        msg.position[3] = 200
+        msg.position[2] = 150
+        msg.position[3] = 190
         msg.position[4] = 40
 
         self.pub.publish(msg)
 
     def send_msg_raise_arm(self):
         msg = ArmControl()
-        msg.position[0] = 90
-        msg.position[2] = 170
-        msg.position[3] = 200
+        msg.position[0] = 100
+        msg.position[2] = 150
+        msg.position[3] = 190
         msg.position[4] = 120
 
         self.pub.publish(msg)
@@ -79,6 +104,9 @@ def main():
     rclpy.init()
     node = Arm_control()
     node.send_msg_start_position()
+    time.sleep(3.0)
+
+    node.send_msg_raise_camera()
     time.sleep(3.0)
 
     node.send_msg_lower_arm()
