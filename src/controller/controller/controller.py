@@ -149,9 +149,9 @@ class Controller(Node):
         v = clamp(self._k_v * dist, 0.0, self._max_duty)
         w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
         v = max(v, self._v_min)
-
-        left  = clamp(left,  -self._max_duty, self._max_duty)
-        right = clamp(right, -self._max_duty, self._max_duty)
+        
+        left = v - w
+        right = v + w
         self.send_duty(left, right)
 
 
