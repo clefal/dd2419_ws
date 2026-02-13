@@ -59,8 +59,8 @@ class Controller(Node):
 
         # Tolerances
         self._xy_tol = 0.02 #0.1
-        self._yaw_tol = 0.1 #0.25
-        self._yaw_turn_thresh = 0.1 #0.35
+        self._yaw_tol = 0.05 #0.25
+        self._yaw_turn_thresh = 0.05 #0.35
 
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
