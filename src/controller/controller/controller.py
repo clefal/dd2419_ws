@@ -49,6 +49,8 @@ class Controller(Node):
         self._max_duty = 0.3
         self._k_w = 0.4
         self._k_v = 0.6
+        self._v_min = 0.08   # minimum duty that actually moves the robot
+
 
         # Tolerances
         self._xy_tol = 0.05 #0.1
@@ -143,11 +145,13 @@ class Controller(Node):
             return
 
         # DRIVE (with heading correction)
+
         v = clamp(self._k_v * dist, 0.0, self._max_duty)
         w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
+        v = max(v, self._v_min)
 
-        left = v - w
-        right = v + w
+        left  = clamp(left,  -self._max_duty, self._max_duty)
+        right = clamp(right, -self._max_duty, self._max_duty)
         self.send_duty(left, right)
 
 
