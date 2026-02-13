@@ -46,16 +46,21 @@ class Controller(Node):
         self._goal = None
 
         # Minimal tuning (duty cycles)
-        self._max_duty = 0.3
+        self._v_max = 0.3
+        self._v_min = 0.08 #min to make robot move
+
+        self._w_max = 0.2
+        self._w_min = 0.09 #min to make robot move
+
+
         self._k_w = 0.25
         self._k_v = 0.6
-        self._v_min = 0.08   # minimum duty that actually moves the robot
-
+       
 
         # Tolerances
         self._xy_tol = 0.02 #0.1
-        self._yaw_tol = 0.05 #0.25
-        self._yaw_turn_thresh = 0.05 #0.35
+        self._yaw_tol = 0.1 #0.25
+        self._yaw_turn_thresh = 0.1 #0.35
 
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
@@ -134,20 +139,24 @@ class Controller(Node):
                 self._goal = None
                 return
             # Final align
-            w = clamp(self._k_w * yaw_err_final, -self._max_duty, self._max_duty)
+            w = clamp(self._k_w * yaw_err_final, -self._w_max, self._w_max)
+            if abs(w) < self._w_min:
+                w = math.copysign(self._w_min, w)
             self.send_duty(-w, w)
             return
 
         # TURN first if needed
         if abs(yaw_err_to_goal) > self._yaw_turn_thresh:
-            w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
+            w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
+            if abs(w) < self._w_min:
+                w = math.copysign(self._w_min, w)            
             self.send_duty(-w, w)
             return
 
         # DRIVE (with heading correction)
 
-        v = clamp(self._k_v * dist, 0.0, self._max_duty)
-        w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
+        v = clamp(self._k_v * dist, 0.0, self._v_max)
+        w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
         v = max(v, self._v_min)
         
         left = v - w
