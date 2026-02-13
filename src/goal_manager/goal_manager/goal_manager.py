@@ -126,7 +126,7 @@ class GoalManager(Node):
 
                 gx = float(parts[0])
                 gy = float(parts[1])
-                gyaw = float(parts[2])
+                gyaw = math.radians(float(parts[2]))
 
                 if self._waiting_for_result:
                     print('Robot still moving — wait for REACHED/FAILED')
