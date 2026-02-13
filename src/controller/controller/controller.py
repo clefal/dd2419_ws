@@ -51,12 +51,12 @@ class Controller(Node):
         self._k_v = 0.6
 
         # Tolerances
-        self._xy_tol = 0.1
-        self._yaw_tol = 0.25
-        self._yaw_turn_thresh = 0.35
+        self._xy_tol = 0.05 #0.1
+        self._yaw_tol = 0.1 #0.25
+        self._yaw_turn_thresh = 0.1 #0.35
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
+        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
 
     def goal_callback(self, msg: PoseStamped):
         self._goal = msg
@@ -121,8 +121,8 @@ class Controller(Node):
         dist = math.hypot(dx, dy)
 
         heading = math.atan2(dy, dx)
-        yaw_err_to_goal = wrap_angle(heading - yaw)
-        yaw_err_final = wrap_angle(gyaw - yaw)
+        yaw_err_to_goal = wrap_angle(heading - yaw) #pointing angle
+        yaw_err_final = wrap_angle(gyaw - yaw)      #requested goal angle
 
         # REACHED?
         if dist < self._xy_tol:
@@ -142,7 +142,7 @@ class Controller(Node):
             self.send_duty(-w, w)
             return
 
-        # DRIVE (with a little heading correction)
+        # DRIVE (with heading correction)
         v = clamp(self._k_v * dist, 0.0, self._max_duty)
         w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
 
