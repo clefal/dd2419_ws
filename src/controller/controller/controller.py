@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from robp_interfaces.msg import DutyCycles
 
 from tf2_ros import Buffer, TransformListener
@@ -65,6 +65,11 @@ class Controller(Node):
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
 
+        # turn publsiher
+        self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
+
+
+
     def goal_callback(self, msg: PoseStamped):
         self._goal = msg
         self.publish_status('RUNNING')
@@ -88,6 +93,12 @@ class Controller(Node):
         m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
         m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
         self._cmd_pub.publish(m)
+
+        # Publish turning status (True if wheels opposite directions)
+        turning_msg = Bool()
+        turning_msg.data = (left * right < 0.0)
+        self._turn_pub.publish(turning_msg)
+
 
     def stop(self):
         self.send_duty(0.0, 0.0)
