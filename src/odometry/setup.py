@@ -24,8 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'odometry = odometry.odometry:main',
-            'calibration_helper = odometry.calibration_helper:main',
+            'odometry = odometry.odometry:main'
         ],
     },
 )
