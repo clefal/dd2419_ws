@@ -236,3 +236,21 @@ Typical base test:
             except Exception as e:
                 self.get_logger().error(f'command error: {e}')
 
+
+def main():
+    rclpy.init()
+    node = CalibrationHelper()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            node.stop_motors()
+        except Exception:
+            pass
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
