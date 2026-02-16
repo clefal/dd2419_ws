@@ -18,7 +18,7 @@ class CalibrationHelper(Node):
     def __init__(self):
         super().__init__('calibration_helper')
 
-        self._ticks_per_rev = 48 * 64
+        self._ticks_per_rev = 3200 # 48 * 64
         self._recording = False
         self._sum_left = 0
         self._sum_right = 0
