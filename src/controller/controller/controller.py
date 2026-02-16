@@ -39,7 +39,7 @@ class Controller(Node):
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
-        self._fixed_frame = 'odom'
+        self._fixed_frame = 'odom'      # set to localization
         self._base_frame = 'base_link'
 
         # Current goal
