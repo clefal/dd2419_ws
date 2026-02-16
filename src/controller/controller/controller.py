@@ -27,9 +27,14 @@ class CalibrationHelper(Node):
         self._last_radius = None
         self._auto_target_ticks = None
         self._auto_drive_sign = 1.0
+        self._hold_active = False
+        self._hold_left = 0.0
+        self._hold_right = 0.0
 
         self._cmd_pub = self.create_publisher(DutyCycles, '/phidgets/motor/duty_cycles', 10)
         self.create_subscription(Encoders, '/phidgets/motor/encoders', self.encoder_callback, 10)
+        # Keep motor commands alive to avoid robp_phidgets failsafe timeout.
+        self._hold_timer = self.create_timer(0.05, self.hold_tick)
 
         self._thread = threading.Thread(target=self.input_loop, daemon=True)
         self._thread.start()
@@ -66,7 +71,19 @@ class CalibrationHelper(Node):
         self._cmd_pub.publish(m)
 
     def stop_motors(self):
+        self._hold_active = False
         self.send_duty(0.0, 0.0)
+
+    def hold_tick(self):
+        if not self._hold_active:
+            return
+        self.send_duty(self._hold_left, self._hold_right)
+
+    def start_hold(self, left, right):
+        self._hold_left = float(clamp(left, -1.0, 1.0))
+        self._hold_right = float(clamp(right, -1.0, 1.0))
+        self._hold_active = True
+        self.send_duty(self._hold_left, self._hold_right)
 
     def reset_recording(self):
         self._sum_left = 0
@@ -158,7 +175,7 @@ Typical base test:
                     self._recording = True
                     self._auto_target_ticks = wheel_turns * self._ticks_per_rev
                     self._auto_drive_sign = 1.0 if duty >= 0.0 else -1.0
-                    self.send_duty(duty, duty)
+                    self.start_hold(duty, duty)
                     self.get_logger().info(
                         f'auto drive started: duty={duty:.3f}, turns={wheel_turns:.3f}'
                     )
@@ -168,7 +185,7 @@ Typical base test:
                         continue
                     duty = float(cmd[1])
                     self._auto_target_ticks = None
-                    self.send_duty(-duty, duty)
+                    self.start_hold(-duty, duty)
                 elif op == 'calc_r':
                     if len(cmd) != 2:
                         self.get_logger().info('usage: calc_r <distance_m>')
@@ -219,21 +236,3 @@ Typical base test:
             except Exception as e:
                 self.get_logger().error(f'command error: {e}')
 
-
-def main():
-    rclpy.init()
-    node = CalibrationHelper()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        try:
-            node.stop_motors()
-        except Exception:
-            pass
-    rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
