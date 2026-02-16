@@ -45,7 +45,7 @@ class Odometry(Node):
         self._yaw = 0.0
 
         # Drive model constants
-        self._ticks_per_rev = 48 * 64
+        self._ticks_per_rev = 48 * 64   #measured: 3200, not 3074
         self._wheel_radius = 0.04921
         self._base = 0.31
 
