@@ -22,8 +22,11 @@ class CalibrationHelper(Node):
         self._recording = False
         self._sum_left = 0
         self._sum_right = 0
+        self._progress_left = 0.0
+        self._progress_right = 0.0
         self._last_radius = None
         self._auto_target_ticks = None
+        self._auto_drive_sign = 1.0
 
         self._cmd_pub = self.create_publisher(DutyCycles, '/phidgets/motor/duty_cycles', 10)
         self.create_subscription(Encoders, '/phidgets/motor/encoders', self.encoder_callback, 10)
@@ -36,13 +39,22 @@ class CalibrationHelper(Node):
     def encoder_callback(self, msg: Encoders):
         if not self._recording:
             return
-        self._sum_left += int(msg.delta_encoder_left)
-        self._sum_right += int(msg.delta_encoder_right)
-        if self._auto_target_ticks is not None and self.avg_abs_ticks() >= self._auto_target_ticks:
+        dl = int(msg.delta_encoder_left)
+        dr = int(msg.delta_encoder_right)
+        self._sum_left += dl
+        self._sum_right += dr
+
+        if self._auto_target_ticks is not None:
+            # Count only progress in commanded direction to avoid cancellation by jitter/slip.
+            self._progress_left += max(0.0, self._auto_drive_sign * dl)
+            self._progress_right += max(0.0, self._auto_drive_sign * dr)
+
+        if self._auto_target_ticks is not None and self.avg_progress_ticks() >= self._auto_target_ticks:
             self.stop_motors()
             self._recording = False
             self.get_logger().info(
-                f'auto drive complete at avg_ticks={self.avg_abs_ticks():.1f}. '
+                f'auto drive complete at progress_ticks={self.avg_progress_ticks():.1f}, '
+                f'net_ticks={self.avg_abs_ticks():.1f}. '
                 'Use calc_r <distance_m>.'
             )
             self._auto_target_ticks = None
@@ -59,9 +71,14 @@ class CalibrationHelper(Node):
     def reset_recording(self):
         self._sum_left = 0
         self._sum_right = 0
+        self._progress_left = 0.0
+        self._progress_right = 0.0
 
     def avg_abs_ticks(self):
         return 0.5 * (abs(self._sum_left) + abs(self._sum_right))
+
+    def avg_progress_ticks(self):
+        return 0.5 * (self._progress_left + self._progress_right)
 
     def print_status(self):
         self.get_logger().info(
@@ -76,22 +93,12 @@ Calibration helper commands:
   reset
   record on|off
   stop
-  drive <duty>        # both wheels same sign
   drive_turns <duty> <wheel_turns>
   spin <duty>         # in-place spin: left=-duty, right=+duty
   calc_r <distance_m>
   calc_b <turns> <radius_m>
   calc_b_last_r <turns>
   quit
-
-Typical radius test:
-  reset
-  record on
-  drive 0.18
-  (run straight, stop at tape mark)
-  stop
-  record off
-  calc_r 3.0
 
 Alternative radius test (fixed wheel turns, then tape-measure):
   drive_turns 0.18 10
@@ -138,13 +145,6 @@ Typical base test:
                     self.stop_motors()
                     self._auto_target_ticks = None
                     self.get_logger().info('motors stopped')
-                elif op == 'drive':
-                    if len(cmd) != 2:
-                        self.get_logger().info('usage: drive <duty>')
-                        continue
-                    duty = float(cmd[1])
-                    self._auto_target_ticks = None
-                    self.send_duty(duty, duty)
                 elif op == 'drive_turns':
                     if len(cmd) != 3:
                         self.get_logger().info('usage: drive_turns <duty> <wheel_turns>')
@@ -157,6 +157,7 @@ Typical base test:
                     self.reset_recording()
                     self._recording = True
                     self._auto_target_ticks = wheel_turns * self._ticks_per_rev
+                    self._auto_drive_sign = 1.0 if duty >= 0.0 else -1.0
                     self.send_duty(duty, duty)
                     self.get_logger().info(
                         f'auto drive started: duty={duty:.3f}, turns={wheel_turns:.3f}'
