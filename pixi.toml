@@ -81,6 +81,8 @@ ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
+ros-jazzy-arm-control = { path = "src/arm_control" }
+
 ros-jazzy-mapping = { path = "src/mapping" }
 ros-jazzy-callibration-helper = { path = "src/callibration_helper" }
 
@@ -94,6 +96,7 @@ ros-jazzy-detection = { path = "src/detection" }
 argcomplete = ">=3.6.3,<4"
 colcon-common-extensions = ">=0.3.0,<0.4"
 pynput = ">=1.8.1,<2"
+ros-jazzy-std-msgs = ">=5.3.6,<6"
 colour-science = ">=0.4.7,<0.5"
 scikit-learn = ">=1.8.0,<2"
 
