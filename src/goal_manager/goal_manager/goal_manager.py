@@ -48,7 +48,7 @@ class GoalManager(Node):
 
 
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
-        self._arm_status_pub = self.create_publisher(String, '/arm/status', 10)
+        self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
         self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.blue_cube_callback, 10)
