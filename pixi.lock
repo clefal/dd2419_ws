@@ -12908,6 +12908,7 @@ packages:
   depends:
   - ros-jazzy-rclpy
   - ros-jazzy-robp-interfaces
+  - ros-jazzy-std-msgs
   - ros2-distro-mutex >=0.13,<0.14
   - ros2-distro-mutex >=0.13.0,<0.14.0a0
   - libcxx >=21
@@ -12926,6 +12927,7 @@ packages:
   depends:
   - ros-jazzy-rclpy
   - ros-jazzy-robp-interfaces
+  - ros-jazzy-std-msgs
   - ros2-distro-mutex >=0.13,<0.14
   - ros2-distro-mutex >=0.13.0,<0.14.0a0
   - vc >=14.3,<15
@@ -12944,6 +12946,7 @@ packages:
   depends:
   - ros-jazzy-rclpy
   - ros-jazzy-robp-interfaces
+  - ros-jazzy-std-msgs
   - ros2-distro-mutex >=0.13,<0.14
   - ros2-distro-mutex >=0.13.0,<0.14.0a0
   - libgcc >=15
