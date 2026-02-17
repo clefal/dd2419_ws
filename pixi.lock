@@ -664,6 +664,8 @@ environments:
         build: hb0f4dca_0
       - conda: src/aruco_ros/aruco_ros
         build: hb0f4dca_0
+      - conda: src/callibration_helper
+        build: hb0f4dca_0
       - conda: src/controller
         build: hb0f4dca_0
       - conda: src/detection
@@ -1259,6 +1261,8 @@ environments:
         build: h60d57d3_0
       - conda: src/aruco_ros/aruco_ros
         build: h60d57d3_0
+      - conda: src/callibration_helper
+        build: h60d57d3_0
       - conda: src/controller
         build: h60d57d3_0
       - conda: src/detection
@@ -1811,6 +1815,8 @@ environments:
       - conda: src/aruco_ros/aruco_msgs
         build: ha41a7fa_0
       - conda: src/aruco_ros/aruco_ros
+        build: ha41a7fa_0
+      - conda: src/callibration_helper
         build: ha41a7fa_0
       - conda: src/controller
         build: ha41a7fa_0
@@ -13164,6 +13170,75 @@ packages:
   license: Apache-2.0
   size: 85054
   timestamp: 1768988095274
+- conda: src/callibration_helper
+  name: ros-jazzy-callibration-helper
+  version: 0.0.0
+  build: h60d57d3_0
+  subdir: osx-arm64
+  variants:
+    target_platform: osx-arm64
+  depends:
+  - ros-jazzy-robp-interfaces
+  - ros-jazzy-geometry-msgs
+  - ros-jazzy-nav-msgs
+  - numpy
+  - numpy >=1.23,<3
+  - ros-jazzy-rclpy
+  - ros-jazzy-tf-transformations
+  - ros-jazzy-tf2-ros
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - libcxx >=21
+  - python_abi 3.12.* *_cp312
+  license: LicenseRef-MIT
+- conda: src/callibration_helper
+  name: ros-jazzy-callibration-helper
+  version: 0.0.0
+  build: ha41a7fa_0
+  subdir: win-64
+  variants:
+    c_compiler: vs2022
+    cxx_compiler: vs2022
+    target_platform: win-64
+  depends:
+  - ros-jazzy-robp-interfaces
+  - ros-jazzy-geometry-msgs
+  - ros-jazzy-nav-msgs
+  - numpy
+  - numpy >=1.23,<3
+  - ros-jazzy-rclpy
+  - ros-jazzy-tf-transformations
+  - ros-jazzy-tf2-ros
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  - ucrt >=10.0.20348.0
+  - python_abi 3.12.* *_cp312
+  license: LicenseRef-MIT
+- conda: src/callibration_helper
+  name: ros-jazzy-callibration-helper
+  version: 0.0.0
+  build: hb0f4dca_0
+  subdir: linux-64
+  variants:
+    target_platform: linux-64
+  depends:
+  - ros-jazzy-robp-interfaces
+  - ros-jazzy-geometry-msgs
+  - ros-jazzy-nav-msgs
+  - numpy
+  - numpy >=1.23,<3
+  - ros-jazzy-rclpy
+  - ros-jazzy-tf-transformations
+  - ros-jazzy-tf2-ros
+  - ros2-distro-mutex >=0.13,<0.14
+  - ros2-distro-mutex >=0.13.0,<0.14.0a0
+  - libgcc >=15
+  - libgcc >=15
+  - libstdcxx >=15
+  - python_abi 3.12.* *_cp312
+  license: LicenseRef-MIT
 - conda: https://prefix.dev/robostack-jazzy/linux-64/ros-jazzy-camera-calibration-parsers-5.1.7-np2py312h2ed9cc7_14.conda
   sha256: dcab5bfc2450672cf82fbee5821c3832f252c2baefa760bb775f75986e43a332
   md5: 84fbd61439101b4dd33aa0c201839486
