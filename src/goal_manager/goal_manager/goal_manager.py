@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import random
 import math
 import sys
 import threading
@@ -44,8 +43,6 @@ class GoalManager(Node):
         if self.manual_goal:
             thread = threading.Thread(target=self.manual_input_loop, daemon=True)
             thread.start()
-        else:
-            self.publish_new_goal()
 
     # ----------------------------
 
@@ -55,8 +52,6 @@ class GoalManager(Node):
 
         if msg.data in ('REACHED', 'FAILED'):
             self._waiting_for_result = False
-            if not self.manual_goal:
-                self.publish_new_goal()
 
     # ----------------------------
 
@@ -89,24 +84,6 @@ class GoalManager(Node):
         self._waiting_for_result = True
 
         self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
-
-    # ----------------------------
-
-    def publish_new_goal(self):
-        robot_xy = self.get_robot_xy()
-
-        for _ in range(50):
-            gx = random.uniform(self._xmin, self._xmax)
-            gy = random.uniform(self._ymin, self._ymax)
-
-            if robot_xy is None:
-                break
-
-            rx, ry = robot_xy
-            if math.hypot(gx - rx, gy - ry) > self._min_dist:
-                break
-
-        self.publish_goal(gx, gy, 0.0)
 
     # ----------------------------
 

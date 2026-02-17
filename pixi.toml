@@ -28,6 +28,7 @@ odometry = { cmd = "ros2 run odometry odometry" }
 controller = { cmd = "ros2 run controller controller" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
 callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
+workspace = { cmd = "ros2 launch mapping workspace_loader.launch.py" }
 
 [tasks.install_udev_rules]
 cmd = '''
@@ -80,6 +81,7 @@ ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
+ros-jazzy-mapping = { path = "src/mapping" }
 ros-jazzy-callibration-helper = { path = "src/callibration_helper" }
 
 # Boot camp
@@ -92,6 +94,8 @@ ros-jazzy-detection = { path = "src/detection" }
 argcomplete = ">=3.6.3,<4"
 colcon-common-extensions = ">=0.3.0,<0.4"
 pynput = ">=1.8.1,<2"
+colour-science = ">=0.4.7,<0.5"
+scikit-learn = ">=1.8.0,<2"
 
 [target.linux-64.dependencies]
 # ROS
