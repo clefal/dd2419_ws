@@ -27,7 +27,6 @@ driver = { cmd = "ros2 run driver driver" }
 odometry = { cmd = "ros2 run odometry odometry" }
 controller = { cmd = "ros2 run controller controller" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
-workspace = { cmd = "ros2 launch mapping workspace_loader.launch.py" }
 
 [tasks.install_udev_rules]
 cmd = '''
@@ -80,7 +79,6 @@ ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
-ros-jazzy-mapping = { path = "src/mapping" }
 
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }
