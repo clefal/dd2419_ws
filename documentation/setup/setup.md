@@ -14,7 +14,8 @@ run without pixi run:
 ```bash
 ssh group3@{ip}
 ssh group3@10.97.32.242
-sshpass -p 'group3' ssh group3@10.97.32.242
+sshpass -p 'group3' ssh group3@10.97.32.242 
+--> 192.168.1.63
 ```
 
 1. Run any launch. For example

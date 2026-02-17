@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from robp_interfaces.msg import DutyCycles
 
 from tf2_ros import Buffer, TransformListener
@@ -46,22 +46,42 @@ class Controller(Node):
         self._goal = None
 
         # Minimal tuning (duty cycles)
-        self._max_duty = 0.25
-        self._k_w = 0.4
+        self._v_max = 0.3
+        self._v_min = 0.08 #min to make robot move
+
+        self._w_max = 0.2
+        self._w_min = 0.09 #min to make robot move
+
+
+        self._k_w = 0.25
         self._k_v = 0.6
+       
 
         # Tolerances
-        self._xy_tol = 0.1
-        self._yaw_tol = 0.25
-        self._yaw_turn_thresh = 0.35
+        self._xy_tol = 0.02 #0.1
+        self._yaw_tol = 0.05 #0.25
+        self._yaw_turn_thresh = 0.25 #0.35
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 20 Hz
+        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
+
+        # turn publsiher
+        self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
+
+
 
     def goal_callback(self, msg: PoseStamped):
         self._goal = msg
         self.publish_status('RUNNING')
-        self.get_logger().info('Received new goal')
+
+        gx = msg.pose.position.x
+        gy = msg.pose.position.y
+
+        q = msg.pose.orientation
+        gyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+
+        self.get_logger().info(f'Received new goal: x={gx:.3f}, y={gy:.3f}, yaw={gyaw:.3f} rad')
+
 
     def publish_status(self, s: str):
         msg = String()
@@ -73,6 +93,12 @@ class Controller(Node):
         m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
         m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
         self._cmd_pub.publish(m)
+
+        # Publish turning status (True if wheels opposite directions)
+        turning_msg = Bool()
+        turning_msg.data = (left * right < 0.0)
+        self._turn_pub.publish(turning_msg)
+
 
     def stop(self):
         self.send_duty(0.0, 0.0)
@@ -113,8 +139,8 @@ class Controller(Node):
         dist = math.hypot(dx, dy)
 
         heading = math.atan2(dy, dx)
-        yaw_err_to_goal = wrap_angle(heading - yaw)
-        yaw_err_final = wrap_angle(gyaw - yaw)
+        yaw_err_to_goal = wrap_angle(heading - yaw) #pointing angle
+        yaw_err_final = wrap_angle(gyaw - yaw)      #requested goal angle
 
         # REACHED?
         if dist < self._xy_tol:
@@ -124,20 +150,26 @@ class Controller(Node):
                 self._goal = None
                 return
             # Final align
-            w = clamp(self._k_w * yaw_err_final, -self._max_duty, self._max_duty)
+            w = clamp(self._k_w * yaw_err_final, -self._w_max, self._w_max)
+            if abs(w) < self._w_min:
+                w = math.copysign(self._w_min, w)
             self.send_duty(-w, w)
             return
 
         # TURN first if needed
         if abs(yaw_err_to_goal) > self._yaw_turn_thresh:
-            w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
+            w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
+            if abs(w) < self._w_min:
+                w = math.copysign(self._w_min, w)            
             self.send_duty(-w, w)
             return
 
-        # DRIVE (with a little heading correction)
-        v = clamp(self._k_v * dist, 0.0, self._max_duty)
-        w = clamp(self._k_w * yaw_err_to_goal, -self._max_duty, self._max_duty)
+        # DRIVE (with heading correction)
 
+        v = clamp(self._k_v * dist, 0.0, self._v_max)
+        w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
+        v = max(v, self._v_min)
+        
         left = v - w
         right = v + w
         self.send_duty(left, right)
