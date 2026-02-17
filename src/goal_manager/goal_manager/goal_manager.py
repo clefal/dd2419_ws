@@ -34,7 +34,7 @@ class GoalManager(Node):
         self._state = AutoState.IDLE
         self._latest_blue_cube = None
         self._blue_detection_locked = False
-        self._approach_distance = 0.2
+        self._approach_distance = 0.18
 
         self._search_x = 3.0
         self._search_y = 0.0
