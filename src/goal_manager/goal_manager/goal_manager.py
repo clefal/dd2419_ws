@@ -88,7 +88,7 @@ class GoalManager(Node):
         self._goal_pub.publish(goal)
         self._waiting_for_result = True
 
-        self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}')
+        self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
 
     # ----------------------------
 
@@ -111,7 +111,7 @@ class GoalManager(Node):
     # ----------------------------
 
     def manual_input_loop(self):
-        self.get_logger().info('Manual goal mode: type "x y" and press Enter')
+        self.get_logger().info('Manual goal mode: type "x y yaw" and press Enter')
 
         while rclpy.ok():
             try:
@@ -120,21 +120,22 @@ class GoalManager(Node):
                     continue
 
                 parts = line.strip().split()
-                if len(parts) != 2:
-                    print('Enter: x y')
+                if len(parts) != 3:
+                    print('Enter: x y yaw')
                     continue
 
                 gx = float(parts[0])
                 gy = float(parts[1])
+                gyaw = math.radians(float(parts[2]))
 
                 if self._waiting_for_result:
                     print('Robot still moving — wait for REACHED/FAILED')
                     continue
 
-                self.publish_goal(gx, gy, 0.0)
+                self.publish_goal(gx, gy, gyaw)
 
             except Exception:
-                print('Invalid input. Use: x y')
+                print('Invalid input. Use: x y yaw')
 
 # ----------------------------
 
