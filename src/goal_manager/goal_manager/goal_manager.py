@@ -8,9 +8,9 @@ from enum import Enum
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped, PointStamped
+from geometry_msgs.msg import PoseStamped, PointStamped, PoseArray
 from std_msgs.msg import String
-from tf_transformations import quaternion_from_euler
+from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
 
 
@@ -29,12 +29,17 @@ class GoalManager(Node):
     def __init__(self):
         super().__init__('goal_manager')
 
-        self.manual_goal = False
+        self.manual_goal = True
         
         self._state = AutoState.IDLE
         self._latest_blue_cube = None
         self._blue_detection_locked = False
         self._approach_distance = 0.18
+
+        self._merge_radius = 0.10  # m, deduplicate detections
+        self._blue_cubes = []      # list of (x, y) in fixed frame
+        self._target_blue = None   # (x, y) in fixed frame
+
 
         self._search_x = 3.0
         self._search_y = 0.0
@@ -43,12 +48,16 @@ class GoalManager(Node):
         self._home_y = 0.0
         self._home_yaw = 0.0
 
-        self._fixed_frame = 'odom'
+        self._fixed_frame = 'map'
         self._base_frame = 'base_link'
 
 
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
+        self._blue_cubes_pub = self.create_publisher(PoseArray, '/nav/objects/blue_cubes', 10)
+        self._blue_target_pub = self.create_publisher(PoseStamped, '/nav/target/blue_cube', 10)
+
+        
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
         self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.blue_cube_callback, 10)
@@ -98,6 +107,13 @@ class GoalManager(Node):
         if self._state == AutoState.WAIT_PICKUP_RESULT:
             if msg.data == 'PICK_UP_SUCCESS':
                 self.get_logger().info('Arm pickup succeeded. Returning home.')
+                # Remove picked cube from list (best-effort) and clear current target
+                if self._target_blue is not None:
+                    tx, ty = self._target_blue
+                    self._blue_cubes = [(x, y) for (x, y) in self._blue_cubes if math.hypot(x - tx, y - ty) > self._merge_radius]
+                self._target_blue = None
+                self.publish_blue_topics()
+
                 self._state = AutoState.RETURN_HOME
                 self.publish_goal(self._home_x, self._home_y, self._home_yaw)
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
@@ -118,50 +134,154 @@ class GoalManager(Node):
 
     # ----------------------------
 
+
+
+    def point_to_fixed_xy(self, msg: PointStamped):
+        """
+        Transform PointStamped into self._fixed_frame using TF.
+        Returns (x, y) in fixed frame or None.
+        """
+        try:
+            t = self._tf_buffer.lookup_transform(
+                self._fixed_frame,
+                msg.header.frame_id,
+                rclpy.time.Time()
+            )
+        except Exception:
+            return None
+
+        tx = t.transform.translation.x
+        ty = t.transform.translation.y
+        q = t.transform.rotation
+        yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+
+        # rotate + translate
+        x_local = msg.point.x
+        y_local = msg.point.y
+        x = tx + (x_local * math.cos(yaw) - y_local * math.sin(yaw))
+        y = ty + (x_local * math.sin(yaw) + y_local * math.cos(yaw))
+        return (x, y)
+
+
+    def publish_blue_topics(self):
+        # Publish cube list
+        pa = PoseArray()
+        pa.header.stamp = self.get_clock().now().to_msg()
+        pa.header.frame_id = self._fixed_frame
+        for (x, y) in self._blue_cubes:
+            p = PoseStamped()
+            # PoseArray stores Pose, so create Pose then append
+            pose = PoseStamped().pose
+            pose.position.x = float(x)
+            pose.position.y = float(y)
+            pose.position.z = 0.0
+            pose.orientation.w = 1.0
+            pa.poses.append(pose)
+        self._blue_cubes_pub.publish(pa)
+
+        # Publish current target cube pose (if any)
+        if self._target_blue is not None:
+            tx, ty = self._target_blue
+            tgt = PoseStamped()
+            tgt.header.stamp = pa.header.stamp
+            tgt.header.frame_id = self._fixed_frame
+            tgt.pose.position.x = float(tx)
+            tgt.pose.position.y = float(ty)
+            tgt.pose.position.z = 0.0
+            tgt.pose.orientation.w = 1.0
+            self._blue_target_pub.publish(tgt)
+
+
     def blue_cube_callback(self, msg: PointStamped):
         if self.manual_goal:
             return
 
-        if self._blue_detection_locked:
+        # Accept detections in SEARCH, APPROACH_OBJECT, RETURN_HOME
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME):
             return
 
-        if self._state != AutoState.SEARCH:
+        obj_xy = self.point_to_fixed_xy(msg)
+        if obj_xy is None:
+            self.get_logger().warn('Blue cube detected, but TF is unavailable. Ignoring detection.')
             return
 
+        ox, oy = obj_xy
+
+        # Deduplicate by merge radius
+        is_new = True
+        for i, (cx, cy) in enumerate(self._blue_cubes):
+            if math.hypot(ox - cx, oy - cy) <= self._merge_radius:
+                # Same cube: update stored position (simple replace)
+                self._blue_cubes[i] = (ox, oy)
+                is_new = False
+                break
+
+        if is_new:
+            self._blue_cubes.append((ox, oy))
+            self.get_logger().info(f'New blue cube added at x={ox:.2f}, y={oy:.2f} (total={len(self._blue_cubes)})')
+
+        # Always publish cube topics so planner can avoid them (even during RETURN_HOME)
+        self.publish_blue_topics()
+
+        # During RETURN_HOME: do NOT switch goal (we're carrying)
+        if self._state == AutoState.RETURN_HOME:
+            return
+
+        # Need robot pose to select closest target
         robot_xy = self.get_robot_xy()
         if robot_xy is None:
-            self.get_logger().warn('Blue cube detected, but robot pose is unavailable. Ignoring detection.')
+            self.get_logger().warn('Blue cube detected, but robot pose is unavailable. Ignoring goal update.')
+            return
+        rx, ry = robot_xy
+
+        # Select closest cube as target (for now: always switch on new cube; thrashing prevention later)
+        best = None
+        best_d = float('inf')
+        for (cx, cy) in self._blue_cubes:
+            d = math.hypot(cx - rx, cy - ry)
+            if d < best_d:
+                best_d = d
+                best = (cx, cy)
+
+        if best is None:
             return
 
-        self._latest_blue_cube = msg
-        rx, ry = robot_xy
-        ox = msg.point.x
-        oy = msg.point.y
+        # If target unchanged (within merge radius), keep it
+        if self._target_blue is not None:
+            if math.hypot(best[0] - self._target_blue[0], best[1] - self._target_blue[1]) <= self._merge_radius:
+                # Still same target; no need to spam goals
+                return
 
-        dx = ox - rx
-        dy = oy - ry
+        # Switch target
+        self._target_blue = best
+        self.publish_blue_topics()  # publish updated target immediately
+
+        tx, ty = best
+        dx = tx - rx
+        dy = ty - ry
         dist = math.hypot(dx, dy)
         if dist < 1e-6:
-            self.get_logger().warn('Blue cube detection is too close to robot pose; ignoring detection.')
             return
 
         heading_to_object = math.atan2(dy, dx)
+
+        # Approach point with standoff distance
         if dist <= self._approach_distance:
-            ax = rx
-            ay = ry
+            ax, ay = rx, ry
         else:
-            ax = ox - self._approach_distance * math.cos(heading_to_object)
-            ay = oy - self._approach_distance * math.sin(heading_to_object)
+            ax = tx - self._approach_distance * math.cos(heading_to_object)
+            ay = ty - self._approach_distance * math.sin(heading_to_object)
 
-        ayaw = math.atan2(oy - ay, ox - ax)
+        ayaw = math.atan2(ty - ay, tx - ax)
 
-        self._blue_detection_locked = True
+        # Enter/keep approach state; trigger replanning via new goal
         self._state = AutoState.APPROACH_OBJECT
         self.get_logger().info(
-            f'Blue cube detected at x={ox:.2f}, y={oy:.2f}. '
-            f'Preempting SEARCH goal with approach goal x={ax:.2f}, y={ay:.2f}, yaw={ayaw:.2f}.'
+            f'Target blue cube at x={tx:.2f}, y={ty:.2f}. '
+            f'Publishing approach goal x={ax:.2f}, y={ay:.2f}, yaw={ayaw:.2f}.'
         )
         self.publish_goal(ax, ay, ayaw)
+
 
     # ----------------------------
 
