@@ -35,6 +35,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mapping = mapping.mapping:main',
+            'mapping_prob = mapping.mapping_prob:main',
             'workspace_loader = mapping.workspace_loader:main',
         ],
     },

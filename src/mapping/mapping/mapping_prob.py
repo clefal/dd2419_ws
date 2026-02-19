@@ -98,7 +98,8 @@ class Mapping(Node):
             return
 
         self.skipped_scans = 0
-
+        
+        self.get_logger().info(f"{msg.header.frame_id}")
         try:
             tf = self.tf_buffer.lookup_transform(
                 "map",
@@ -116,6 +117,8 @@ class Mapping(Node):
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
         )
 
+        self.get_logger().info(f"X: {x_robot}, Y: {y_robot}")
+
         filtered_ranges = self.median_filter_scan(msg.ranges, kernel_size=25)
 
         for i in range(len(filtered_ranges)):
@@ -126,7 +129,6 @@ class Mapping(Node):
 
 
 
-            
             r = msg.ranges[i]
             if not math.isfinite(r) or r < msg.range_min or r > msg.range_max:
                 continue
@@ -138,7 +140,7 @@ class Mapping(Node):
             y = y_robot + (x_scan * math.sin(yaw) + y_scan * math.cos(yaw))
             if np.isnan(x) or np.isnan(y):
                 continue
-            self.grid.update(x, y, 100)
+            self.grid.update(x, y, occupied=True)
 
         occupancy_grid_msg = OccupancyGrid()
         occupancy_grid_msg.header.stamp = msg.header.stamp
@@ -192,25 +194,50 @@ if __name__ == '__main__':
 
 class OcupancyGridData:
     def __init__(self, size, resolution, origin):
-        self.size = size # m
-        self.resolution = resolution # m/cell
-        self.width = int(size // resolution) 
+        self.size = size
+        self.resolution = resolution
+        self.width = int(size // resolution)
         self.height = int(size // resolution)
-        self.origin = origin # x, y in m
-        self.grid = np.zeros((self.height, self.width), dtype=np.int8)
+        self.origin = origin
 
-    def update(self, x, y, occupancy):
-        if x < self.origin[0] or x > self.origin[0] + self.size or y < self.origin[1] or y > self.origin[1] + self.size:
+        # Log-odds grid (float)
+        self.log_odds = np.zeros((self.height, self.width), dtype=np.float32)
+
+        # Parameters
+        self.l_occ = 0.85    # log odds increase for occupied
+        self.l_free = -0.4   # log odds decrease for free
+        self.l_min = -5
+        self.l_max = 5
+
+    def update(self, x, y, occupied=True):
+        if x < self.origin[0] or x > self.origin[0] + self.size:
             return
-        
+        if y < self.origin[1] or y > self.origin[1] + self.size:
+            return
+
         x_index = int((x - self.origin[0]) // self.resolution)
         y_index = int((y - self.origin[1]) // self.resolution)
 
-        if x_index < 0 or x_index >= self.width or y_index < 0 or y_index >= self.height:
+        if x_index < 0 or x_index >= self.width:
+            return
+        if y_index < 0 or y_index >= self.height:
             return
 
-        self.grid[y_index, x_index] = occupancy
+        if occupied:
+            self.log_odds[y_index, x_index] += self.l_occ
+        else:
+            self.log_odds[y_index, x_index] += self.l_free
+
+        # Clamp
+        self.log_odds[y_index, x_index] = np.clip(
+            self.log_odds[y_index, x_index],
+            self.l_min,
+            self.l_max
+        )
 
     def get_data(self):
-        # Convert data to int8[] data
-        return self.grid.reshape(-1).tolist()
+        probs = 1 - 1 / (1 + np.exp(self.log_odds))  # sigmoid
+
+        occupancy = (probs * 100).astype(np.int8)
+
+        return occupancy.reshape(-1).tolist()

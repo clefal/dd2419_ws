@@ -25,6 +25,7 @@ Check tf tree
 ros2 run tf2_tools view_frames
 ```
 
+
 ```bash
 pixi run ros2 bag play --read-ahead-queue-size 100 -r 1.0 --clock 100 --start-paused rosbags/obj_det_odom_opti_rosbag
 ```
