@@ -169,13 +169,13 @@ class Controller(Node):
     @staticmethod
     def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
-        Requirement: each wheel command is either 0 or |duty| >= min_dc.
-        Minimal forcing:
-          - If both wheels are commanded in the same direction and one is just under min_dc,
-            scale BOTH up to preserve curvature ratio instead of killing one wheel.
-          - Finally, per-wheel clamp small magnitudes to 0.
+        Requirement: each wheel is either 0 or |duty| >= min_dc.
+
+        - If both wheels same direction and one is just under min_dc: scale BOTH up to preserve ratio.
+        - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
+        - Finally: clamp tiny magnitudes to 0.
         """
-        # Same direction: optionally scale up both to keep ratio
+        # Same direction (forward/back): scale both to keep ratio
         if left * right > 0.0:
             aL, aR = abs(left), abs(right)
             m = min(aL, aR)
@@ -184,14 +184,20 @@ class Controller(Node):
                 left *= scale
                 right *= scale
 
-        # Per-wheel deadzone: force tiny to 0
+        # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
+        if left * right < 0.0:
+            if abs(left) > 0.0 and abs(left) < min_dc:
+                left = math.copysign(min_dc, left)
+            if abs(right) > 0.0 and abs(right) < min_dc:
+                right = math.copysign(min_dc, right)
+
+        # Per-wheel deadzone: tiny magnitudes become 0
         if 0.0 < abs(left) < min_dc:
             left = 0.0
         if 0.0 < abs(right) < min_dc:
             right = 0.0
 
         return left, right
-
     # ----------------------------
 
     def control_tick(self):
@@ -228,6 +234,7 @@ class Controller(Node):
                 w = clamp(yaw_err, -1.0, 1.0) * wmax
                 left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
                 self.send_duty(left, right)
+                self.get_logger().info(f"cmd: L={left:.3f} R={right:.3f}")
                 return
 
             self.stop()
