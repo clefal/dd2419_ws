@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import math
-
+from typing import Tuple
 import rclpy
 from rclpy.node import Node
 
@@ -155,7 +155,7 @@ class Controller(Node):
         return (px, py, len(self._path_xy) - 1)
 
     @staticmethod
-    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> tuple[float, float]:
+    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
         Requirement: each wheel command is either 0 or |duty| >= min_dc.
         Minimal forcing:
