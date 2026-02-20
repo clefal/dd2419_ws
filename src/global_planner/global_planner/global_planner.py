@@ -65,14 +65,14 @@ class GlobalPlannerNode(Node):
         self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10)
         self.sub_cubes = self.create_subscription(
             PoseArray,
-            "/nav/objects/blue_cubes",
-            self.on_blue_cubes,
+            "/nav/objects/cubes",
+            self.on_cubes,
             10,
         )
 
         self.sub_target_cube = self.create_subscription(
             PoseStamped,
-            "/nav/target/blue_cube",
+            "/nav/target/cube",
             self.on_target_cube,
             10,
         )
@@ -102,7 +102,7 @@ class GlobalPlannerNode(Node):
         self._map: Optional[OccupancyGrid] = None
         self._meta: Optional[GridMeta] = None
         self._goal_msg: Optional[PoseStamped] = None
-        self._blue_cubes: List[Tuple[float, float]] = []   # in map frame
+        self._cubes: List[Tuple[float, float]] = []   # in map frame
         self._target_cube: Optional[Tuple[float, float]] = None
 
 
@@ -125,8 +125,8 @@ class GlobalPlannerNode(Node):
         self._plan_and_publish(reason="new_goal")
 
 
-    def on_blue_cubes(self, msg: PoseArray) -> None:
-        self._blue_cubes = [
+    def on_cubes(self, msg: PoseArray) -> None:
+        self._cubes = [
             (p.position.x, p.position.y)
             for p in msg.poses
         ]
@@ -235,7 +235,7 @@ class GlobalPlannerNode(Node):
         cube_radius = 0.015
         r_cells = int(math.ceil(cube_radius / meta.resolution))
 
-        for (cx, cy) in self._blue_cubes:
+        for (cx, cy) in self._cubes:
             if self._target_cube is not None:
                 tx, ty = self._target_cube
                 if math.hypot(cx - tx, cy - ty) < 0.10:

@@ -32,13 +32,13 @@ class GoalManager(Node):
         self.manual_goal = True
         
         self._state = AutoState.IDLE
-        self._latest_blue_cube = None
-        self._blue_detection_locked = False
+        self._latest_cube = None
+        self._detection_locked = False
         self._approach_distance = 0.18
 
         self._merge_radius = 0.10  # m, deduplicate detections
-        self._blue_cubes = []      # list of (x, y) in fixed frame
-        self._target_blue = None   # (x, y) in fixed frame
+        self._cubes = []      # list of (x, y) in fixed frame
+        self._target_ = None   # (x, y) in fixed frame
 
 
         self._search_x = 3.0
@@ -51,19 +51,30 @@ class GoalManager(Node):
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
 
+        self._object_frame_prefix = 'object'
+        self._box_frame = 'box'
+        self._max_static_objects = 50
+
+        self._start_x = 0.0
+        self._start_y = 0.0
+        self._start_yaw = 0.0
+
 
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
-        self._blue_cubes_pub = self.create_publisher(PoseArray, '/nav/objects/blue_cubes', 10)
-        self._blue_target_pub = self.create_publisher(PoseStamped, '/nav/target/blue_cube', 10)
+        self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
+        self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.blue_cube_callback, 10)
+        self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+
+        self._static_loaded = False
+        self.create_timer(0.5, self.try_load_static_frames_once)
 
         self._waiting_for_result = False
 
@@ -108,11 +119,11 @@ class GoalManager(Node):
             if msg.data == 'PICK_UP_SUCCESS':
                 self.get_logger().info('Arm pickup succeeded. Returning home.')
                 # Remove picked cube from list (best-effort) and clear current target
-                if self._target_blue is not None:
-                    tx, ty = self._target_blue
-                    self._blue_cubes = [(x, y) for (x, y) in self._blue_cubes if math.hypot(x - tx, y - ty) > self._merge_radius]
-                self._target_blue = None
-                self.publish_blue_topics()
+                if self._target_ is not None:
+                    tx, ty = self._target_
+                    self._cubes = [(x, y) for (x, y) in self._cubes if math.hypot(x - tx, y - ty) > self._merge_radius]
+                self._target_ = None
+                self.publish_topics()
 
                 self._state = AutoState.RETURN_HOME
                 self.publish_goal(self._home_x, self._home_y, self._home_yaw)
@@ -125,13 +136,63 @@ class GoalManager(Node):
         if self._state == AutoState.WAIT_DROP_RESULT:
             if msg.data == 'DROP_SUCCESS':
                 self.get_logger().info('Drop succeeded. Entering IDLE state.')
-                self._blue_detection_locked = False
+                self._detection_locked = False
                 self._state = AutoState.IDLE
             elif msg.data == 'DROP_FAIL_NO_OBJECT':
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')
             else:
                 self.get_logger().info(f'Arm result received while waiting for drop: {msg.data}')
 
+
+    def lookup_xy_yaw(self, parent_frame: str, child_frame: str):
+        try:
+            t = self._tf_buffer.lookup_transform(parent_frame, child_frame, rclpy.time.Time())
+        except Exception:
+            return None
+        x = t.transform.translation.x
+        y = t.transform.translation.y
+        q = t.transform.rotation
+        yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        return (x, y, yaw)
+    
+
+    def try_load_static_frames_once(self):
+        if self._static_loaded:
+            return
+
+        # 1) box -> set home
+        box_pose = self.lookup_xy_yaw(self._fixed_frame, self._box_frame)
+        if box_pose is None:
+            # workspace_loader not ready yet
+            return
+
+        bx, by, byaw = box_pose
+        self._home_x, self._home_y, self._home_yaw = bx, by, byaw
+        self.get_logger().info(f'Loaded box frame as home: x={bx:.2f}, y={by:.2f}, yaw={byaw:.2f}')
+
+        # 2) start pose (robot in map)
+        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
+        if robot_pose is not None:
+            self._start_x, self._start_y, self._start_yaw = robot_pose
+            self.get_logger().info(f'Loaded start pose (robot in map): x={self._start_x:.2f}, y={self._start_y:.2f}, yaw={self._start_yaw:.2f}')
+
+        # 3) objects -> seed cube list
+        seeded = 0
+        for i in range(self._max_static_objects):
+            child = f'{self._object_frame_prefix}{i}'
+            obj_pose = self.lookup_xy_yaw(self._fixed_frame, child)
+            if obj_pose is None:
+                # assume contiguous indices; stop at first missing
+                break
+            ox, oy, _ = obj_pose
+            self._cubes.append((ox, oy))
+            seeded += 1
+
+        if seeded > 0:
+            self.get_logger().info(f'Seeded {seeded} cubes from static TF frames ({self._object_frame_prefix}0..).')
+            self.publish_topics()
+
+        self._static_loaded = True
     # ----------------------------
 
 
@@ -163,12 +224,12 @@ class GoalManager(Node):
         return (x, y)
 
 
-    def publish_blue_topics(self):
+    def publish_topics(self):
         # Publish cube list
         pa = PoseArray()
         pa.header.stamp = self.get_clock().now().to_msg()
         pa.header.frame_id = self._fixed_frame
-        for (x, y) in self._blue_cubes:
+        for (x, y) in self._cubes:
             p = PoseStamped()
             # PoseArray stores Pose, so create Pose then append
             pose = PoseStamped().pose
@@ -177,11 +238,11 @@ class GoalManager(Node):
             pose.position.z = 0.0
             pose.orientation.w = 1.0
             pa.poses.append(pose)
-        self._blue_cubes_pub.publish(pa)
+        self._cubes_pub.publish(pa)
 
         # Publish current target cube pose (if any)
-        if self._target_blue is not None:
-            tx, ty = self._target_blue
+        if self._target_ is not None:
+            tx, ty = self._target_
             tgt = PoseStamped()
             tgt.header.stamp = pa.header.stamp
             tgt.header.frame_id = self._fixed_frame
@@ -189,10 +250,10 @@ class GoalManager(Node):
             tgt.pose.position.y = float(ty)
             tgt.pose.position.z = 0.0
             tgt.pose.orientation.w = 1.0
-            self._blue_target_pub.publish(tgt)
+            self._target_pub.publish(tgt)
 
 
-    def blue_cube_callback(self, msg: PointStamped):
+    def cube_callback(self, msg: PointStamped):
         if self.manual_goal:
             return
 
@@ -202,26 +263,26 @@ class GoalManager(Node):
 
         obj_xy = self.point_to_fixed_xy(msg)
         if obj_xy is None:
-            self.get_logger().warn('Blue cube detected, but TF is unavailable. Ignoring detection.')
+            self.get_logger().warn('Cube detected, but TF is unavailable. Ignoring detection.')
             return
 
         ox, oy = obj_xy
 
         # Deduplicate by merge radius
         is_new = True
-        for i, (cx, cy) in enumerate(self._blue_cubes):
+        for i, (cx, cy) in enumerate(self._cubes):
             if math.hypot(ox - cx, oy - cy) <= self._merge_radius:
                 # Same cube: update stored position (simple replace)
-                self._blue_cubes[i] = (ox, oy)
+                self._cubes[i] = (ox, oy)
                 is_new = False
                 break
 
         if is_new:
-            self._blue_cubes.append((ox, oy))
-            self.get_logger().info(f'New blue cube added at x={ox:.2f}, y={oy:.2f} (total={len(self._blue_cubes)})')
+            self._cubes.append((ox, oy))
+            self.get_logger().info(f'New cube added at x={ox:.2f}, y={oy:.2f} (total={len(self._cubes)})')
 
         # Always publish cube topics so planner can avoid them (even during RETURN_HOME)
-        self.publish_blue_topics()
+        self.publish_topics()
 
         # During RETURN_HOME: do NOT switch goal (we're carrying)
         if self._state == AutoState.RETURN_HOME:
@@ -230,14 +291,14 @@ class GoalManager(Node):
         # Need robot pose to select closest target
         robot_xy = self.get_robot_xy()
         if robot_xy is None:
-            self.get_logger().warn('Blue cube detected, but robot pose is unavailable. Ignoring goal update.')
+            self.get_logger().warn('Cube detected, but robot pose is unavailable. Ignoring goal update.')
             return
         rx, ry = robot_xy
 
         # Select closest cube as target (for now: always switch on new cube; thrashing prevention later)
         best = None
         best_d = float('inf')
-        for (cx, cy) in self._blue_cubes:
+        for (cx, cy) in self._cubes:
             d = math.hypot(cx - rx, cy - ry)
             if d < best_d:
                 best_d = d
@@ -247,14 +308,14 @@ class GoalManager(Node):
             return
 
         # If target unchanged (within merge radius), keep it
-        if self._target_blue is not None:
-            if math.hypot(best[0] - self._target_blue[0], best[1] - self._target_blue[1]) <= self._merge_radius:
+        if self._target_ is not None:
+            if math.hypot(best[0] - self._target_[0], best[1] - self._target_[1]) <= self._merge_radius:
                 # Still same target; no need to spam goals
                 return
 
         # Switch target
-        self._target_blue = best
-        self.publish_blue_topics()  # publish updated target immediately
+        self._target_ = best
+        self.publish_topics()  # publish updated target immediately
 
         tx, ty = best
         dx = tx - rx
@@ -277,7 +338,7 @@ class GoalManager(Node):
         # Enter/keep approach state; trigger replanning via new goal
         self._state = AutoState.APPROACH_OBJECT
         self.get_logger().info(
-            f'Target blue cube at x={tx:.2f}, y={ty:.2f}. '
+            f'Target  cube at x={tx:.2f}, y={ty:.2f}. '
             f'Publishing approach goal x={ax:.2f}, y={ay:.2f}, yaw={ayaw:.2f}.'
         )
         self.publish_goal(ax, ay, ayaw)
