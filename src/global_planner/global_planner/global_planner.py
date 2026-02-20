@@ -40,8 +40,8 @@ class GlobalPlannerNode(Node):
 
         # Planning knobs
         self.declare_parameter("w_heuristic", 1.8)          # Weighted A*: f = g + w*h
-        self.declare_parameter("occ_lethal", 70)            # >= lethal => not traversable (0..100)
-        self.declare_parameter("unknown_is_lethal", True)   # OccupancyGrid unknown is -1
+        self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
+        self.declare_parameter("unknown_is_lethal", False)   # OccupancyGrid unknown is -1
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("publish_on_map_update", False)
@@ -214,7 +214,7 @@ class GlobalPlannerNode(Node):
         planning.info = raw.info
         lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
 
-        robot_radius = 0.15
+        robot_radius = 0.05 #0.15
         margin = 0.01
         r_lethal_cells = int(math.ceil((robot_radius + margin) / meta.resolution))
 
