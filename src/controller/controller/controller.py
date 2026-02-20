@@ -125,6 +125,8 @@ class Controller(Node):
         self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
 
         self.publish_status('RUNNING')
+        
+        self.get_logger().info(f"Received path: {len(msg.poses)} poses")
 
     # ----------------------------
 
