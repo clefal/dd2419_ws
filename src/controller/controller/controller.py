@@ -5,6 +5,8 @@ from typing import Tuple
 import rclpy
 from rclpy.node import Node
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+
 from std_msgs.msg import String, Bool
 from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
@@ -35,8 +37,16 @@ class Controller(Node):
         self._status_pub = self.create_publisher(String, '/nav/status', 10)
         self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
 
-        self.create_subscription(Path, '/nav/global_path', self.path_callback, 10)
 
+        path_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.create_subscription(Path, '/nav/global_path', self.path_callback, path_qos)
+
+    
         # TF: map -> base_link
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -125,7 +135,7 @@ class Controller(Node):
         self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
 
         self.publish_status('RUNNING')
-        
+
         self.get_logger().info(f"Received path: {len(msg.poses)} poses")
 
     # ----------------------------
