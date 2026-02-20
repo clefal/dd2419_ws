@@ -5,15 +5,15 @@ import math
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String, Bool
+from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
 
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion
 
 
-def wrap_angle(a):
+def wrap_angle(a: float) -> float:
     while a > math.pi:
         a -= 2.0 * math.pi
     while a < -math.pi:
@@ -21,7 +21,7 @@ def wrap_angle(a):
     return a
 
 
-def clamp(x, lo, hi):
+def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
@@ -33,62 +33,52 @@ class Controller(Node):
         # Publishers / subscribers
         self._cmd_pub = self.create_publisher(DutyCycles, '/phidgets/motor/duty_cycles', 10)
         self._status_pub = self.create_publisher(String, '/nav/status', 10)
-        self.create_subscription(PoseStamped, '/nav/goal', self.goal_callback, 10)
+        self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
 
-        # TF to get robot pose (odom -> base_link)
+        self.create_subscription(Path, '/nav/global_path', self.path_callback, 10)
+
+        # TF to get robot pose (map -> base_link)
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
-        self._fixed_frame = 'odom'
+        self._fixed_frame = 'map'
         self._base_frame = 'base_link'
 
-        # Current goal
-        self._goal = None
+        # Latest path (stored as list of (x, y) in fixed frame)
+        self._path_xy = []
+        self._path_frame = None
+        self._last_path_stamp = None
 
-        # Minimal tuning (duty cycles)
-        self._v_max = 0.3
-        self._v_min = 0.08 #min to make robot move
+        # ----------------------------
+        # Parameters (with sensible defaults for a small indoor diff-drive)
+        # NOTE: These "speed" params end up as duty-cycle commands in this implementation
+        #       (because your existing controller maps v,w directly to duty cycles).
+        self.declare_parameter('lookahead_distance', 0.45)      # m
+        self.declare_parameter('nominal_linear_speed', 0.18)    # duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.22)       # duty-equivalent
+        self.declare_parameter('goal_tolerance', 0.10)          # m
+        self.declare_parameter('align_final_yaw', False)        # optional
 
-        self._w_max = 0.2
-        self._w_min = 0.09 #min to make robot move
+        # Minimal tuning (duty cycles) - kept compatible with your current controller
+        self._v_min = 0.08   # motors might not actuate below this (your note)
+        self._w_min = 0.09   # min turning-on-spot command
+        self._yaw_tol = 0.05 # rad, used only if align_final_yaw=True
 
-
-        self._k_w = 0.25
-        self._k_v = 0.6
-       
-
-        # Tolerances
-        self._xy_tol = 0.02 #0.1
-        self._yaw_tol = 0.05 #0.25
-        self._yaw_turn_thresh = 0.25 #0.35
+        # Turn-in-place behavior threshold
+        # If the lookahead point is "behind" us too much, rotate on the spot to reacquire the path
+        self._turn_in_place_yaw_thresh = 0.60  # rad
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
+        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
 
-        # turn publsiher
-        self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
-
-
-
-    def goal_callback(self, msg: PoseStamped):
-        self._goal = msg
-        self.publish_status('RUNNING')
-
-        gx = msg.pose.position.x
-        gy = msg.pose.position.y
-
-        q = msg.pose.orientation
-        gyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
-
-        self.get_logger().info(f'Received new goal: x={gx:.3f}, y={gy:.3f}, yaw={gyaw:.3f} rad')
-
+    # ----------------------------
 
     def publish_status(self, s: str):
         msg = String()
         msg.data = s
         self._status_pub.publish(msg)
 
-    def send_duty(self, left, right):
+    def send_duty(self, left: float, right: float):
         m = DutyCycles()
         m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
         m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
@@ -99,9 +89,10 @@ class Controller(Node):
         turning_msg.data = (left * right < 0.0)
         self._turn_pub.publish(turning_msg)
 
-
     def stop(self):
         self.send_duty(0.0, 0.0)
+
+    # ----------------------------
 
     def get_pose_2d(self):
         try:
@@ -115,61 +106,205 @@ class Controller(Node):
         yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
         return x, y, yaw
 
+    def path_callback(self, msg: Path):
+        frame = msg.header.frame_id.strip() if msg.header.frame_id else ''
+        if frame == '':
+            self.get_logger().warn('Received /nav/global_path with empty frame_id; ignoring.')
+            return
+
+        self._path_frame = frame
+        self._last_path_stamp = msg.header.stamp
+
+        if len(msg.poses) == 0:
+            self._path_xy = []
+            self.publish_status('IDLE')
+            return
+
+        # If path is not in fixed_frame, try to transform points to fixed_frame using TF.
+        # If TF not available, reject with warning (per requirements).
+        if frame != self._fixed_frame:
+            tf = self._lookup_tf_2d(self._fixed_frame, frame)
+            if tf is None:
+                self.get_logger().warn(
+                    f'Path frame mismatch: path in "{frame}", controller fixed_frame "{self._fixed_frame}", '
+                    f'and TF is unavailable. Ignoring path.'
+                )
+                self._path_xy = []
+                self.publish_status('FAILED')
+                return
+
+            tx, ty, tyaw = tf
+            out = []
+            for ps in msg.poses:
+                px = ps.pose.position.x
+                py = ps.pose.position.y
+                # rotate + translate from "frame" into fixed_frame
+                x = tx + (px * math.cos(tyaw) - py * math.sin(tyaw))
+                y = ty + (px * math.sin(tyaw) + py * math.cos(tyaw))
+                out.append((x, y))
+            self._path_xy = out
+        else:
+            self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
+
+        self.publish_status('RUNNING')
+
+    def _lookup_tf_2d(self, target_frame: str, source_frame: str):
+        """
+        Returns (tx, ty, tyaw) for transform target_frame <- source_frame, or None.
+        This is a 2D approximation suitable for planar navigation.
+        """
+        try:
+            t = self._tf_buffer.lookup_transform(target_frame, source_frame, rclpy.time.Time())
+        except Exception:
+            return None
+
+        tx = t.transform.translation.x
+        ty = t.transform.translation.y
+        q = t.transform.rotation
+        tyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        return (tx, ty, tyaw)
+
+    # ----------------------------
+
+    def _closest_path_index(self, rx: float, ry: float) -> int:
+        """
+        Returns index of closest path point to robot.
+        """
+        best_i = 0
+        best_d2 = float('inf')
+        for i, (px, py) in enumerate(self._path_xy):
+            dx = px - rx
+            dy = py - ry
+            d2 = dx*dx + dy*dy
+            if d2 < best_d2:
+                best_d2 = d2
+                best_i = i
+        return best_i
+
+    def _lookahead_point(self, rx: float, ry: float, lookahead: float):
+        """
+        Pure Pursuit target selection:
+        1) find closest point index on path
+        2) walk forward until distance >= lookahead
+        If no such point exists, return final path point.
+        Returns (tx, ty, idx) or None if path empty.
+        """
+        if not self._path_xy:
+            return None
+
+        i0 = self._closest_path_index(rx, ry)
+
+        # Walk forward to the first point at/after lookahead distance
+        for i in range(i0, len(self._path_xy)):
+            px, py = self._path_xy[i]
+            if math.hypot(px - rx, py - ry) >= lookahead:
+                return (px, py, i)
+
+        # Otherwise use the last point
+        px, py = self._path_xy[-1]
+        return (px, py, len(self._path_xy) - 1)
+
+    # ----------------------------
+
     def control_tick(self):
-        if self._goal is None:
+        # Edge case: no path -> stop motors
+        if not self._path_xy:
+            self.stop()
             return
 
         pose = self.get_pose_2d()
         if pose is None:
             self.stop()
             self.publish_status('FAILED')
-            self._goal = None
-            self.get_logger().warn('No TF pose available (odom->base_link).')
+            self.get_logger().warn('No TF pose available (map->base_link).')
             return
 
-        x, y, yaw = pose
+        rx, ry, ryaw = pose
 
-        gx = self._goal.pose.position.x
-        gy = self._goal.pose.position.y
-        qg = self._goal.pose.orientation
-        gyaw = euler_from_quaternion([qg.x, qg.y, qg.z, qg.w])[2]
+        # Stop if close to end of path
+        gx, gy = self._path_xy[-1]
+        goal_tol = float(self.get_parameter('goal_tolerance').value)
+        dist_to_goal = math.hypot(gx - rx, gy - ry)
 
-        dx = gx - x
-        dy = gy - y
-        dist = math.hypot(dx, dy)
+        if dist_to_goal <= goal_tol:
+            if bool(self.get_parameter('align_final_yaw').value):
+                # Optional: align to final pose yaw if available (best-effort)
+                # If Path poses have orientation, use last pose orientation.
+                # We only have (x,y) stored, so we attempt to align to heading of final segment.
+                if len(self._path_xy) >= 2:
+                    x2, y2 = self._path_xy[-1]
+                    x1, y1 = self._path_xy[-2]
+                    desired_yaw = math.atan2(y2 - y1, x2 - x1)
+                    yaw_err = wrap_angle(desired_yaw - ryaw)
+                    if abs(yaw_err) <= self._yaw_tol:
+                        self.stop()
+                        self.publish_status('REACHED')
+                        self._path_xy = []
+                        return
+                    wmax = float(self.get_parameter('max_angular_speed').value)
+                    w = clamp(yaw_err, -1.0, 1.0)  # normalized-ish before scaling below
+                    w = clamp(w * wmax, -wmax, wmax)
+                    if abs(w) < self._w_min:
+                        w = math.copysign(self._w_min, w)
+                    self.send_duty(-w, w)
+                    return
 
-        heading = math.atan2(dy, dx)
-        yaw_err_to_goal = wrap_angle(heading - yaw) #pointing angle
-        yaw_err_final = wrap_angle(gyaw - yaw)      #requested goal angle
+            self.stop()
+            self.publish_status('REACHED')
+            self._path_xy = []
+            return
 
-        # REACHED?
-        if dist < self._xy_tol:
-            if abs(yaw_err_final) < self._yaw_tol:
-                self.stop()
-                self.publish_status('REACHED')
-                self._goal = None
-                return
-            # Final align
-            w = clamp(self._k_w * yaw_err_final, -self._w_max, self._w_max)
+        # Pure Pursuit target selection
+        lookahead = float(self.get_parameter('lookahead_distance').value)
+        lookahead = max(0.05, lookahead)  # avoid degenerate division
+        tgt = self._lookahead_point(rx, ry, lookahead)
+        if tgt is None:
+            self.stop()
+            return
+        tx, ty, _ = tgt
+
+        # Transform target point into robot frame (x_r forward, y_r left)
+        dx = tx - rx
+        dy = ty - ry
+        cos_y = math.cos(ryaw)
+        sin_y = math.sin(ryaw)
+        x_r = cos_y * dx + sin_y * dy
+        y_r = -sin_y * dx + cos_y * dy
+
+        # If the target is "behind" us, rotate in place to reacquire path direction
+        heading_to_tgt = math.atan2(dy, dx)
+        yaw_err = wrap_angle(heading_to_tgt - ryaw)
+        if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            w = clamp(yaw_err, -1.0, 1.0)
+            w = clamp(w * wmax, -wmax, wmax)
             if abs(w) < self._w_min:
                 w = math.copysign(self._w_min, w)
             self.send_duty(-w, w)
             return
 
-        # TURN first if needed
-        if abs(yaw_err_to_goal) > self._yaw_turn_thresh:
-            w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
-            if abs(w) < self._w_min:
-                w = math.copysign(self._w_min, w)            
-            self.send_duty(-w, w)
-            return
+        # Pure Pursuit curvature kappa = 2*y_r / L^2
+        kappa = (2.0 * y_r) / (lookahead * lookahead)
 
-        # DRIVE (with heading correction)
+        # Command: w = v * kappa
+        v_nom = float(self.get_parameter('nominal_linear_speed').value)
+        wmax = float(self.get_parameter('max_angular_speed').value)
 
-        v = clamp(self._k_v * dist, 0.0, self._v_max)
-        w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
-        v = max(v, self._v_min)
-        
+        # Slightly reduce v when curvature is high (helps indoors)
+        # (still minimal + safe; no extra dependencies)
+        v = v_nom / (1.0 + 1.5 * abs(kappa))
+        v = clamp(v, 0.0, v_nom)
+
+        w = v * kappa
+        w = clamp(w, -wmax, wmax)
+
+        # Enforce minimum effective commands (duty-cycle domain)
+        if v > 0.0 and v < self._v_min:
+            v = self._v_min
+        if abs(w) > 0.0 and abs(w) < self._w_min:
+            w = math.copysign(self._w_min, w)
+
+        # Convert (v, w) to left/right duty cycles exactly like your current controller
         left = v - w
         right = v + w
         self.send_duty(left, right)

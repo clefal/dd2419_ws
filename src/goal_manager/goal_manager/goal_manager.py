@@ -135,9 +135,39 @@ class GoalManager(Node):
 
         if self._state == AutoState.WAIT_DROP_RESULT:
             if msg.data == 'DROP_SUCCESS':
-                self.get_logger().info('Drop succeeded. Entering IDLE state.')
+                self.get_logger().info('Drop succeeded.')
+
                 self._detection_locked = False
-                self._state = AutoState.IDLE
+
+                # If we still have cubes, go for the closest one; else go to SEARCH point
+                if len(self._cubes) > 0:
+                    robot_xy = self.get_robot_xy()
+                    if robot_xy is not None:
+                        rx, ry = robot_xy
+                        best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
+                        self._target_ = best
+                        self.publish_topics()
+
+                        tx, ty = best
+                        heading = math.atan2(ty - ry, tx - rx)
+                        dist = math.hypot(tx - rx, ty - ry)
+                        if dist > 1e-6:
+                            if dist <= self._approach_distance:
+                                ax, ay = rx, ry
+                            else:
+                                ax = tx - self._approach_distance * math.cos(heading)
+                                ay = ty - self._approach_distance * math.sin(heading)
+                            ayaw = math.atan2(ty - ay, tx - ax)
+
+                            self._state = AutoState.APPROACH_OBJECT
+                            self.publish_goal(ax, ay, ayaw)
+                            return
+
+                # No cubes known: return to SEARCH
+                self._state = AutoState.SEARCH
+                self.publish_goal(self._search_x, self._search_y, self._search_yaw)
+                self.get_logger().info('State SEARCH: navigating to fixed search point while detection runs.')
+                
             elif msg.data == 'DROP_FAIL_NO_OBJECT':
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')
             else:
@@ -191,6 +221,27 @@ class GoalManager(Node):
         if seeded > 0:
             self.get_logger().info(f'Seeded {seeded} cubes from static TF frames ({self._object_frame_prefix}0..).')
             self.publish_topics()
+        
+        if (not self.manual_goal) and (self._state in (AutoState.IDLE, AutoState.INITIALIZATION, AutoState.SEARCH)) and len(self._cubes) > 0:
+            # Kick off by selecting closest cube as target (same logic as cube_callback)
+            robot_xy = self.get_robot_xy()
+            if robot_xy is not None:
+                rx, ry = robot_xy
+                best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
+                self._target_ = best
+                self.publish_topics()
+                tx, ty = best
+                heading = math.atan2(ty - ry, tx - rx)
+                dist = math.hypot(tx - rx, ty - ry)
+                if dist > 1e-6:
+                    if dist <= self._approach_distance:
+                        ax, ay = rx, ry
+                    else:
+                        ax = tx - self._approach_distance * math.cos(heading)
+                        ay = ty - self._approach_distance * math.sin(heading)
+                    ayaw = math.atan2(ty - ay, tx - ax)
+                    self._state = AutoState.APPROACH_OBJECT
+                    self.publish_goal(ax, ay, ayaw)
 
         self._static_loaded = True
     # ----------------------------
