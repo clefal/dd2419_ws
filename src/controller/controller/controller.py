@@ -46,13 +46,12 @@ class Controller(Node):
 
         # Latest path (stored as list of (x, y) in fixed frame)
         self._path_xy = []
-        self._path_frame = None
-        self._last_path_stamp = None
+        self._goal_yaw = None
 
         # ----------------------------
         # Parameters 
 
-        self.declare_parameter('lookahead_distance', 0.7)      # m
+        self.declare_parameter('lookahead_distance', 0.3)      # m
         self.declare_parameter('nominal_linear_speed', 0.18)    # duty-equivalent
         self.declare_parameter('max_angular_speed', 0.22)       # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.10)          # m
@@ -106,61 +105,30 @@ class Controller(Node):
         return x, y, yaw
 
     def path_callback(self, msg: Path):
-        frame = msg.header.frame_id.strip() if msg.header.frame_id else ''
-        if frame == '':
-            self.get_logger().warn('Received /nav/global_path with empty frame_id; ignoring.')
+        frame = (msg.header.frame_id or '').strip()
+        if frame != self._fixed_frame:
+            self.get_logger().warn(
+                f'Received /nav/global_path in frame "{frame}", expected "{self._fixed_frame}". Ignoring.'
+            )
+            self._path_xy = []
+            self._goal_yaw = None
+            self.publish_status('FAILED')
             return
-
-        self._path_frame = frame
-        self._last_path_stamp = msg.header.stamp
 
         if len(msg.poses) == 0:
             self._path_xy = []
+            self._goal_yaw = None
             self.publish_status('IDLE')
             return
 
-        # If path is not in fixed_frame, try to transform points to fixed_frame using TF.
-        # If TF not available, reject with warning (per requirements).
-        if frame != self._fixed_frame:
-            tf = self._lookup_tf_2d(self._fixed_frame, frame)
-            if tf is None:
-                self.get_logger().warn(
-                    f'Path frame mismatch: path in "{frame}", controller fixed_frame "{self._fixed_frame}", '
-                    f'and TF is unavailable. Ignoring path.'
-                )
-                self._path_xy = []
-                self.publish_status('FAILED')
-                return
+        self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
 
-            tx, ty, tyaw = tf
-            out = []
-            for ps in msg.poses:
-                px = ps.pose.position.x
-                py = ps.pose.position.y
-                # rotate + translate from "frame" into fixed_frame
-                x = tx + (px * math.cos(tyaw) - py * math.sin(tyaw))
-                y = ty + (px * math.sin(tyaw) + py * math.cos(tyaw))
-                out.append((x, y))
-            self._path_xy = out
-        else:
-            self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
+        # Store final yaw from last pose orientation (optional use in align_final_yaw mode)
+        q = msg.poses[-1].pose.orientation
+        self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
 
         self.publish_status('RUNNING')
 
-    def _lookup_tf_2d(self, target_frame: str, source_frame: str):
-        """
-        Returns (tx, ty, tyaw) for transform target_frame <- source_frame, or None.
-        """
-        try:
-            t = self._tf_buffer.lookup_transform(target_frame, source_frame, rclpy.time.Time())
-        except Exception:
-            return None
-
-        tx = t.transform.translation.x
-        ty = t.transform.translation.y
-        q = t.transform.rotation
-        tyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
-        return (tx, ty, tyaw)
 
     # ----------------------------
 
@@ -232,6 +200,9 @@ class Controller(Node):
                     x2, y2 = self._path_xy[-1]
                     x1, y1 = self._path_xy[-2]
                     desired_yaw = math.atan2(y2 - y1, x2 - x1)
+                    if self._goal_yaw is None:
+                        self.get_logger().warn('No goal yaw specified. How can this be?')   #TODO: does this ever happen?
+                    desired_yaw = self._goal_yaw if self._goal_yaw is not None else desired_yaw
                     yaw_err = wrap_angle(desired_yaw - ryaw)
                     if abs(yaw_err) <= self._yaw_tol:
                         self.stop()

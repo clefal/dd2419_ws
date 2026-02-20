@@ -35,8 +35,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("map_topic", "/map/occupancy_grid")
         self.declare_parameter("goal_topic", "/nav/goal")
         self.declare_parameter("path_topic", "/nav/global_path")
-        self.declare_parameter("global_frame", "map")
-        self.declare_parameter("robot_frame", "base_link")
+
 
         # Planning knobs
         self.declare_parameter("w_heuristic", 1.8)          # Weighted A*: f = g + w*h
@@ -50,9 +49,9 @@ class GlobalPlannerNode(Node):
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
         self.path_topic = self.get_parameter("path_topic").get_parameter_value().string_value
-        self.global_frame = self.get_parameter("global_frame").get_parameter_value().string_value
-        self.robot_frame = self.get_parameter("robot_frame").get_parameter_value().string_value
-
+        
+        self.global_frame = "map"
+        self.robot_frame = "base_link"
    
         map_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
