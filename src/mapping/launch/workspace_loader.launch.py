@@ -54,7 +54,7 @@ def generate_launch_description():
                 '--frame-id', 'base_link',
                 '--child-frame-id', 'realsense_camera_depth_optical_frame'
             ]
-        )
+        ),
 
         # --- Static TF: base_link -> camera ---
         Node(
