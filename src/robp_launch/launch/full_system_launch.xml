@@ -17,7 +17,7 @@
   <node pkg="mapping" exec="mapping_prob" name="mapping" output="log"/>
 
   <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
-  <node pkg="controller" exec="controller" name="controller" output="log"/>
+  <!-- node pkg="controller" exec="controller" name="controller" output="log"/>
 
 
 
