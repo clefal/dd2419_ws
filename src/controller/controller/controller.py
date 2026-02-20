@@ -50,22 +50,21 @@ class Controller(Node):
         self._last_path_stamp = None
 
         # ----------------------------
-        # Parameters (with sensible defaults for a small indoor diff-drive)
-        # NOTE: These "speed" params end up as duty-cycle commands in this implementation
-        #       (because your existing controller maps v,w directly to duty cycles).
+        # Parameters 
+
         self.declare_parameter('lookahead_distance', 0.7)      # m
         self.declare_parameter('nominal_linear_speed', 0.18)    # duty-equivalent
         self.declare_parameter('max_angular_speed', 0.22)       # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.10)          # m
-        self.declare_parameter('align_final_yaw', False)        # optional
+        self.declare_parameter('align_final_yaw', True)    
+        self.declare_parameter('steering_gain', 0.55)
 
-        # Minimal tuning (duty cycles) - kept compatible with your current controller
-        self._v_min = 0.08   # motors might not actuate below this (your note)
+        # Minimal tuning (duty cycles) 
+        self._v_min = 0.08   # motors might not actuate below this
         self._w_min = 0.09   # min turning-on-spot command
         self._yaw_tol = 0.05 # rad, used only if align_final_yaw=True
 
         # Turn-in-place behavior threshold
-        # If the lookahead point is "behind" us too much, rotate on the spot to reacquire the path
         self._turn_in_place_yaw_thresh = 0.60  # rad
 
         # Control loop
@@ -151,7 +150,6 @@ class Controller(Node):
     def _lookup_tf_2d(self, target_frame: str, source_frame: str):
         """
         Returns (tx, ty, tyaw) for transform target_frame <- source_frame, or None.
-        This is a 2D approximation suitable for planar navigation.
         """
         try:
             t = self._tf_buffer.lookup_transform(target_frame, source_frame, rclpy.time.Time())
@@ -229,7 +227,6 @@ class Controller(Node):
         if dist_to_goal <= goal_tol:
             if bool(self.get_parameter('align_final_yaw').value):
                 # Optional: align to final pose yaw if available (best-effort)
-                # If Path poses have orientation, use last pose orientation.
                 # We only have (x,y) stored, so we attempt to align to heading of final segment.
                 if len(self._path_xy) >= 2:
                     x2, y2 = self._path_xy[-1]
@@ -290,12 +287,12 @@ class Controller(Node):
         v_nom = float(self.get_parameter('nominal_linear_speed').value)
         wmax = float(self.get_parameter('max_angular_speed').value)
 
-        # Slightly reduce v when curvature is high (helps indoors)
-        # (still minimal + safe; no extra dependencies)
-        v = v_nom / (1.0 + 1.5 * abs(kappa))
+        # Slightly reduce v when curvature is high
+        v = v_nom / (1.0 + 3 * abs(kappa))
         v = clamp(v, 0.0, v_nom)
 
-        w = v * kappa
+        k_steer = float(self.get_parameter('steering_gain').value)
+        w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
 
         # Enforce minimum effective commands (duty-cycle domain)
@@ -304,7 +301,7 @@ class Controller(Node):
         if abs(w) > 0.0 and abs(w) < self._w_min:
             w = math.copysign(self._w_min, w)
 
-        # Convert (v, w) to left/right duty cycles exactly like your current controller
+        # Convert (v, w) to left/right duty cycles 
         left = v - w
         right = v + w
         self.send_duty(left, right)

@@ -53,7 +53,7 @@ class GlobalPlannerNode(Node):
         self.global_frame = self.get_parameter("global_frame").get_parameter_value().string_value
         self.robot_frame = self.get_parameter("robot_frame").get_parameter_value().string_value
 
-        # QoS: map is often latched/transient
+   
         map_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -188,6 +188,16 @@ class GlobalPlannerNode(Node):
             ps.pose.position.z = 0.0
             ps.pose.orientation.w = 1.0
             path_msg.poses.append(ps)
+
+        # Set final pose orientation to the goal orientation (yaw)
+        if len(path_msg.poses) > 0 and self._goal_msg is not None:
+            if self._goal_msg.header.frame_id == self.global_frame or self._goal_msg.header.frame_id == "":
+                path_msg.poses[-1].pose.orientation = self._goal_msg.pose.orientation
+            else:
+                self.get_logger().warn(
+                    f"Goal frame '{self._goal_msg.header.frame_id}' != global_frame '{self.global_frame}'. "
+                    "Leaving path end orientation as identity."
+                )
 
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
