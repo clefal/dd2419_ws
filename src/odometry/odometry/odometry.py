@@ -94,6 +94,7 @@ class Odometry(Node):
         y -- y coordinate of the 2D pose
         yaw -- yaw of the 2D pose (in radians)
         """
+        # self.get_logger().info(f'entered broadcast transform')
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'

@@ -29,6 +29,10 @@ controller = { cmd = "ros2 run controller controller" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
 callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
 localization =  { cmd = "ros2 run localization localization" }
+static_transforms = { cmd = "ros2 launch robp_launch frames_launch.xml" }
+workspace = { cmd = "ros2 launch mapping workspace_loader.launch.py" }
+mapping = { cmd = "ros2 run mapping mapping_prob" }
+
 [tasks.install_udev_rules]
 cmd = '''
 echo "Copying udev rules" &&
@@ -80,8 +84,12 @@ ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
+<<<<<<< HEAD
 ros-jazzy-callibration-helper = { path = "src/callibration_helper" }
 ros-jazzy-localization = { path = "src/localization" }
+=======
+ros-jazzy-mapping = { path = "src/mapping" }
+>>>>>>> dev_mapping
 
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }

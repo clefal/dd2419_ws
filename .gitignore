@@ -62,3 +62,5 @@ bags/*
 
 # VS Code
 .vscode
+
+/rosbags
