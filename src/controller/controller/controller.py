@@ -37,33 +37,31 @@ class Controller(Node):
 
         self.create_subscription(Path, '/nav/global_path', self.path_callback, 10)
 
-        # TF to get robot pose (map -> base_link)
+        # TF: map -> base_link
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
 
-        # Latest path (stored as list of (x, y) in fixed frame)
+        # Latest path (map frame)
         self._path_xy = []
         self._goal_yaw = None
 
-        # ----------------------------
-        # Parameters 
-
-        self.declare_parameter('lookahead_distance', 0.3)      # m
-        self.declare_parameter('nominal_linear_speed', 0.18)    # duty-equivalent
-        self.declare_parameter('max_angular_speed', 0.22)       # duty-equivalent
-        self.declare_parameter('goal_tolerance', 0.10)          # m
-        self.declare_parameter('align_final_yaw', True)    
+        # Parameters
+        self.declare_parameter('lookahead_distance', 0.3)        # m
+        self.declare_parameter('nominal_linear_speed', 0.18)     # duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.22)        # duty-equivalent
+        self.declare_parameter('goal_tolerance', 0.10)           # m
+        self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.55)
 
-        # Minimal tuning (duty cycles) 
-        self._v_min = 0.08   # motors might not actuate below this
-        self._yaw_tol = 0.05 # rad, used only if align_final_yaw=True
+        # Motor deadzone requirement: each wheel is 0 or |duty| >= this
+        self._dc_min = 0.08
 
-        # Turn-in-place behavior threshold
+        # When to turn in place to reacquire path direction
         self._turn_in_place_yaw_thresh = 0.60  # rad
+        self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
@@ -81,7 +79,7 @@ class Controller(Node):
         m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
         self._cmd_pub.publish(m)
 
-        # Publish turning status (True if wheels opposite directions)
+        # True when turning on the spot (opposite directions)
         turning_msg = Bool()
         turning_msg.data = (left * right < 0.0)
         self._turn_pub.publish(turning_msg)
@@ -122,73 +120,59 @@ class Controller(Node):
 
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
 
-        # Store final yaw from last pose orientation (optional use in align_final_yaw mode)
+        # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
         self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
 
         self.publish_status('RUNNING')
 
-
     # ----------------------------
 
     def _closest_path_index(self, rx: float, ry: float) -> int:
-        """
-        Returns index of closest path point to robot.
-        """
         best_i = 0
         best_d2 = float('inf')
         for i, (px, py) in enumerate(self._path_xy):
             dx = px - rx
             dy = py - ry
-            d2 = dx*dx + dy*dy
+            d2 = dx * dx + dy * dy
             if d2 < best_d2:
                 best_d2 = d2
                 best_i = i
         return best_i
 
     def _lookahead_point(self, rx: float, ry: float, lookahead: float):
-        """
-        Pure Pursuit target selection:
-        1) find closest point index on path
-        2) walk forward until distance >= lookahead
-        If no such point exists, return final path point.
-        Returns (tx, ty, idx) or None if path empty.
-        """
         if not self._path_xy:
             return None
 
         i0 = self._closest_path_index(rx, ry)
 
-        # Walk forward to the first point at/after lookahead distance
         for i in range(i0, len(self._path_xy)):
             px, py = self._path_xy[i]
             if math.hypot(px - rx, py - ry) >= lookahead:
                 return (px, py, i)
 
-        # Otherwise use the last point
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
-    
 
+    @staticmethod
     def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> tuple[float, float]:
         """
-        Ensure each wheel is either 0 or |duty| >= min_dc.
+        Requirement: each wheel command is either 0 or |duty| >= min_dc.
         Minimal forcing:
-        - If both wheels are trying to go the same direction and one is too small,
-            scale BOTH up to keep curvature ratio instead of zeroing one wheel.
-        - Otherwise (turn-in-place / mixed signs), just clamp small magnitudes to 0.
+          - If both wheels are commanded in the same direction and one is just under min_dc,
+            scale BOTH up to preserve curvature ratio instead of killing one wheel.
+          - Finally, per-wheel clamp small magnitudes to 0.
         """
-        # Same direction (forward or backward): scale up both to keep steering ratio
+        # Same direction: optionally scale up both to keep ratio
         if left * right > 0.0:
             aL, aR = abs(left), abs(right)
             m = min(aL, aR)
-
             if 0.0 < m < min_dc:
                 scale = min_dc / m
                 left *= scale
                 right *= scale
 
-        # Finally, per-wheel: small magnitudes become 0 (meets your requirement exactly)
+        # Per-wheel deadzone: force tiny to 0
         if 0.0 < abs(left) < min_dc:
             left = 0.0
         if 0.0 < abs(right) < min_dc:
@@ -199,7 +183,7 @@ class Controller(Node):
     # ----------------------------
 
     def control_tick(self):
-        # Edge case: no path -> stop motors
+        # Empty path -> stop
         if not self._path_xy:
             self.stop()
             return
@@ -213,50 +197,43 @@ class Controller(Node):
 
         rx, ry, ryaw = pose
 
-        # Stop if close to end of path
+        # Goal check
         gx, gy = self._path_xy[-1]
         goal_tol = float(self.get_parameter('goal_tolerance').value)
         dist_to_goal = math.hypot(gx - rx, gy - ry)
 
         if dist_to_goal <= goal_tol:
-            if bool(self.get_parameter('align_final_yaw').value):
-                # Optional: align to final pose yaw if available (best-effort)
-                # We only have (x,y) stored, so we attempt to align to heading of final segment.
-                if len(self._path_xy) >= 2:
-                    x2, y2 = self._path_xy[-1]
-                    x1, y1 = self._path_xy[-2]
-                    desired_yaw = math.atan2(y2 - y1, x2 - x1)
-                    if self._goal_yaw is None:
-                        self.get_logger().warn('No goal yaw specified. How can this be?')   #TODO: does this ever happen?
-                    desired_yaw = self._goal_yaw if self._goal_yaw is not None else desired_yaw
-                    yaw_err = wrap_angle(desired_yaw - ryaw)
-                    if abs(yaw_err) <= self._yaw_tol:
-                        self.stop()
-                        self.publish_status('REACHED')
-                        self._path_xy = []
-                        return
-                    wmax = float(self.get_parameter('max_angular_speed').value)
-                    w = clamp(yaw_err, -1.0, 1.0)  # normalized-ish before scaling below
-                    w = clamp(w * wmax, -wmax, wmax)
-                    left, right = enforce_motor_deadzone_pair(-w, w, self._v_min)
-                    self.send_duty(left, right)
+            if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
+                yaw_err = wrap_angle(self._goal_yaw - ryaw)
+                if abs(yaw_err) <= self._yaw_tol:
+                    self.stop()
+                    self.publish_status('REACHED')
+                    self._path_xy = []
                     return
+
+                wmax = float(self.get_parameter('max_angular_speed').value)
+                # Simple proportional-in-duty turning in place
+                w = clamp(yaw_err, -1.0, 1.0) * wmax
+                left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+                self.send_duty(left, right)
+                return
 
             self.stop()
             self.publish_status('REACHED')
             self._path_xy = []
             return
 
-        # Pure Pursuit target selection
+        # Lookahead target
         lookahead = float(self.get_parameter('lookahead_distance').value)
-        lookahead = max(0.05, lookahead)  # avoid degenerate division
+        lookahead = max(0.05, lookahead)
         tgt = self._lookahead_point(rx, ry, lookahead)
         if tgt is None:
             self.stop()
             return
+
         tx, ty, _ = tgt
 
-        # Transform target point into robot frame (x_r forward, y_r left)
+        # Target in robot frame
         dx = tx - rx
         dy = ty - ry
         cos_y = math.cos(ryaw)
@@ -264,36 +241,37 @@ class Controller(Node):
         x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
 
-        # If the target is "behind" us, rotate in place to reacquire path direction
+        # If target behind / too misaligned -> turn in place
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
             wmax = float(self.get_parameter('max_angular_speed').value)
-            w = clamp(yaw_err, -1.0, 1.0)
-            w = clamp(w * wmax, -wmax, wmax)
-            left, right = enforce_motor_deadzone_pair(-w, w, self._v_min)
+            w = clamp(yaw_err, -1.0, 1.0) * wmax
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
             self.send_duty(left, right)
             return
 
-        # Pure Pursuit curvature kappa = 2*y_r / L^2
+        # Pure Pursuit curvature: kappa = 2*y_r / L^2
         kappa = (2.0 * y_r) / (lookahead * lookahead)
 
-        # Command: w = v * kappa
         v_nom = float(self.get_parameter('nominal_linear_speed').value)
         wmax = float(self.get_parameter('max_angular_speed').value)
+        k_steer = float(self.get_parameter('steering_gain').value)
 
-        # Slightly reduce v when curvature is high
-        v = v_nom / (1.0 + 3 * abs(kappa))
+        # Slow down in curves (simple, stable indoors)
+        v = v_nom / (1.0 + 3.0 * abs(kappa))
         v = clamp(v, 0.0, v_nom)
 
-        k_steer = float(self.get_parameter('steering_gain').value)
+        # Steering
         w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
 
+        # Convert to wheel duties
         left = v - w
         right = v + w
 
-        left, right = enforce_motor_deadzone_pair(left, right, self._v_min)
+        # Enforce only the actuator requirement at the wheel level
+        left, right = self.enforce_motor_deadzone_pair(left, right, self._dc_min)
 
         self.send_duty(left, right)
 
