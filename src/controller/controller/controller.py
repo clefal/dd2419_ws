@@ -53,7 +53,7 @@ class Controller(Node):
         # Parameters (with sensible defaults for a small indoor diff-drive)
         # NOTE: These "speed" params end up as duty-cycle commands in this implementation
         #       (because your existing controller maps v,w directly to duty cycles).
-        self.declare_parameter('lookahead_distance', 0.6)      # m
+        self.declare_parameter('lookahead_distance', 0.7)      # m
         self.declare_parameter('nominal_linear_speed', 0.18)    # duty-equivalent
         self.declare_parameter('max_angular_speed', 0.22)       # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.10)          # m
