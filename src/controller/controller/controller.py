@@ -60,7 +60,6 @@ class Controller(Node):
 
         # Minimal tuning (duty cycles) 
         self._v_min = 0.08   # motors might not actuate below this
-        self._w_min = 0.09   # min turning-on-spot command
         self._yaw_tol = 0.05 # rad, used only if align_final_yaw=True
 
         # Turn-in-place behavior threshold
@@ -169,6 +168,33 @@ class Controller(Node):
         # Otherwise use the last point
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
+    
+
+    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> tuple[float, float]:
+        """
+        Ensure each wheel is either 0 or |duty| >= min_dc.
+        Minimal forcing:
+        - If both wheels are trying to go the same direction and one is too small,
+            scale BOTH up to keep curvature ratio instead of zeroing one wheel.
+        - Otherwise (turn-in-place / mixed signs), just clamp small magnitudes to 0.
+        """
+        # Same direction (forward or backward): scale up both to keep steering ratio
+        if left * right > 0.0:
+            aL, aR = abs(left), abs(right)
+            m = min(aL, aR)
+
+            if 0.0 < m < min_dc:
+                scale = min_dc / m
+                left *= scale
+                right *= scale
+
+        # Finally, per-wheel: small magnitudes become 0 (meets your requirement exactly)
+        if 0.0 < abs(left) < min_dc:
+            left = 0.0
+        if 0.0 < abs(right) < min_dc:
+            right = 0.0
+
+        return left, right
 
     # ----------------------------
 
@@ -212,9 +238,8 @@ class Controller(Node):
                     wmax = float(self.get_parameter('max_angular_speed').value)
                     w = clamp(yaw_err, -1.0, 1.0)  # normalized-ish before scaling below
                     w = clamp(w * wmax, -wmax, wmax)
-                    if abs(w) < self._w_min:
-                        w = math.copysign(self._w_min, w)
-                    self.send_duty(-w, w)
+                    left, right = enforce_motor_deadzone_pair(-w, w, self._v_min)
+                    self.send_duty(left, right)
                     return
 
             self.stop()
@@ -246,9 +271,8 @@ class Controller(Node):
             wmax = float(self.get_parameter('max_angular_speed').value)
             w = clamp(yaw_err, -1.0, 1.0)
             w = clamp(w * wmax, -wmax, wmax)
-            if abs(w) < self._w_min:
-                w = math.copysign(self._w_min, w)
-            self.send_duty(-w, w)
+            left, right = enforce_motor_deadzone_pair(-w, w, self._v_min)
+            self.send_duty(left, right)
             return
 
         # Pure Pursuit curvature kappa = 2*y_r / L^2
@@ -266,15 +290,11 @@ class Controller(Node):
         w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
 
-        # Enforce minimum effective commands (duty-cycle domain)
-        if v > 0.0 and v < self._v_min:
-            v = self._v_min
-        if abs(w) > 0.0 and abs(w) < self._w_min:
-            w = math.copysign(self._w_min, w)
-
-        # Convert (v, w) to left/right duty cycles 
         left = v - w
         right = v + w
+
+        left, right = enforce_motor_deadzone_pair(left, right, self._v_min)
+
         self.send_duty(left, right)
 
 
