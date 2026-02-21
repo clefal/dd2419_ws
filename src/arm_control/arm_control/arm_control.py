@@ -20,8 +20,9 @@ class Arm_control(Node):
         self.time = np.full((6), 3000)
 
         self.bridge = CvBridge()
+        self.center_pub = self.create_publisher(Int32MultiArray, '/green_cube_center', 10)
 
-        self.pub = self.create_publisher(Image, '/green_mask', 10)
+        self.mask_pub = self.create_publisher(Image, '/green_mask', 10)
 
         self.control = self.create_publisher(ArmControl, '/arm/control', 10)
 
