@@ -26,11 +26,8 @@ class Arm_control(Node):
         self.position = [40, 120, 30, 220, 180, 120]
         self.time = np.full((6), 3000)
 
-
-
-
     def send_msg_start_position(self):
-        msg = Arm_control()
+        msg = ArmControl()
         self.position[3] = 166.4
         msg.position = self.position
         msg.time = self.time
