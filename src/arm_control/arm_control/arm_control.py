@@ -5,6 +5,7 @@ from rclpy.node import Node
 from robp_interfaces.msg import ArmControl
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
 import cv2
 
 #TODO: make it faster??
@@ -16,6 +17,10 @@ class Arm_control(Node):
         self.holding_object = False
         self.position = [40, 120, 30, 220, 180, 120]
         self.time = np.full((6), 3000)
+
+        self.bridge = CvBridge()
+
+        self.pub = self.create_publisher(Image, '/green_mask', 10)
 
         self.control = self.create_publisher(ArmControl, '/arm/control', 10)
 
@@ -35,27 +40,19 @@ class Arm_control(Node):
         #     10                    
         # )
 
+    def camera_callback(self, msg):
+        # Convert ROS image -> OpenCV
+        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-    def yuy2_to_bgr(self, msg: Image):
-        yuy = np.frombuffer(msg.data, dtype=np.uint8)
-        yuy = yuy.reshape((msg.height, msg.width, 2))
-        bgr = cv2.cvtColor(yuy, cv2.COLOR_YUV2BGR_YUY2)
-        return bgr
-
-    def image_callback(self, msg):
-        if msg.encoding == 'yuv422_yuy2':
-            frame = self.yuy2_to_bgr(msg)
-        else:
-            raise NotImplementedError(f"Encoding {msg.encoding} not supported")
-
+        # Create green mask
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         lower_green = np.array([40, 40, 40])
         upper_green = np.array([80, 255, 255])
         mask = cv2.inRange(hsv, lower_green, upper_green)
 
-        cv2.imshow("Camera", frame)
-        cv2.imshow("Green Mask", mask)
-        cv2.waitKey(1)
+        # Convert mask to ROS Image and publish
+        mask_msg = self.bridge.cv2_to_imgmsg(mask, encoding='mono8')
+        self.pub.publish(mask_msg)
 
 
     def send_msg_start_position(self):
