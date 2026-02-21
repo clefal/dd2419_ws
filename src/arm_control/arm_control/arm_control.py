@@ -36,24 +36,24 @@ class Arm_control(Node):
         # )
 
 
-    def image_callback(self, msg: Image):
-        if msg.encoding == 'bgr8':
-            print("bgr8")
-            img = np.frombuffer(msg.data, dtype=np.uint8)
-            img = img.reshape(msg.height, msg.width, 3)  # height x width x channels
-        elif msg.encoding == 'mono8':
-            print("mono8")
-            img = np.frombuffer(msg.data, dtype=np.uint8)
-            img = img.reshape(msg.height, msg.width)     # grayscale
+    def yuy2_to_bgr(self, msg: Image):
+        yuy = np.frombuffer(msg.data, dtype=np.uint8)
+        yuy = yuy.reshape((msg.height, msg.width, 2))
+        bgr = cv2.cvtColor(yuy, cv2.COLOR_YUV2BGR_YUY2)
+        return bgr
+
+    def image_callback(self, msg):
+        if msg.encoding == 'yuv422_yuy2':
+            frame = self.yuy2_to_bgr(msg)
         else:
             raise NotImplementedError(f"Encoding {msg.encoding} not supported")
 
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         lower_green = np.array([40, 40, 40])
         upper_green = np.array([80, 255, 255])
         mask = cv2.inRange(hsv, lower_green, upper_green)
 
-        cv2.imshow("Image", img)
+        cv2.imshow("Camera", frame)
         cv2.imshow("Green Mask", mask)
         cv2.waitKey(1)
 
