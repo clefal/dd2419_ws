@@ -4,6 +4,8 @@ import numpy as np
 from rclpy.node import Node
 from robp_interfaces.msg import ArmControl
 from std_msgs.msg import String
+from sensor_msgs.msg import Image
+import cv2
 
 #TODO: make it faster??
 
@@ -12,7 +14,17 @@ class Arm_control(Node):
         super().__init__('arm_control')
         self.in_idle_position = False
         self.holding_object = False
+        self.position = [40, 120, 30, 220, 180, 120]
+        self.time = np.full((6), 3000)
+
         self.control = self.create_publisher(ArmControl, '/arm/control', 10)
+
+        self.subscription = self.create_subscription(
+            Image,
+            '/arm/camera/image_raw',
+            self.image_callback,
+            10
+        )
 
         # self.res = self.create_publisher(String, '/arm/result', 10)
 
@@ -23,8 +35,28 @@ class Arm_control(Node):
         #     10                    
         # )
 
-        self.position = [40, 120, 30, 220, 180, 120]
-        self.time = np.full((6), 3000)
+
+    def image_callback(self, msg: Image):
+        if msg.encoding == 'bgr8':
+            print("bgr8")
+            img = np.frombuffer(msg.data, dtype=np.uint8)
+            img = img.reshape(msg.height, msg.width, 3)  # height x width x channels
+        elif msg.encoding == 'mono8':
+            print("mono8")
+            img = np.frombuffer(msg.data, dtype=np.uint8)
+            img = img.reshape(msg.height, msg.width)     # grayscale
+        else:
+            raise NotImplementedError(f"Encoding {msg.encoding} not supported")
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower_green = np.array([40, 40, 40])
+        upper_green = np.array([80, 255, 255])
+        mask = cv2.inRange(hsv, lower_green, upper_green)
+
+        cv2.imshow("Image", img)
+        cv2.imshow("Green Mask", mask)
+        cv2.waitKey(1)
+
 
     def send_msg_start_position(self):
         msg = ArmControl()
@@ -43,6 +75,9 @@ class Arm_control(Node):
 
         self.in_idle_position = True
 
+    def is_box_in_pickup_range(self):
+        pass 
+        #something camera something 
 
     #TODO: def send_msg_idle_position(self):
 
@@ -102,8 +137,11 @@ def main():
     print("hi")
     rclpy.init()
     node = Arm_control()
-    node.send_msg_start_position()
-    #rclpy.spin(node)
+    #node.send_msg_start_position()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     rclpy.shutdown()
 
 if __name__ == '__main__':
