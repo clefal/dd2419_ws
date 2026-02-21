@@ -1,5 +1,6 @@
 import rclpy
 import time
+import numpy as np
 from rclpy.node import Node
 from robp_interfaces.msg import ArmControl
 from std_msgs.msg import String
@@ -9,165 +10,164 @@ from std_msgs.msg import String
 class Arm_control(Node):
     def __init__(self):
         super().__init__('arm_control')
-        self.in_start_position = False
+        self.in_idle_position = False
         self.holding_object = False
-        self.pub = self.create_publisher(ArmControl, '/arm/control', 10)
+        self.control = self.create_publisher(ArmControl, '/arm/control', 10)
 
-        self.res = self.create_publisher(String, '/arm/result', 10)
+        # self.res = self.create_publisher(String, '/arm/result', 10)
 
-        self.subscription = self.create_subscription(
-            String,
-            '/arm/action',       
-            self.change_position,   
-            10                    
-        )
+        # self.subscription = self.create_subscription(
+        #     String,
+        #     '/arm/action',       
+        #     self.change_position,   
+        #     10                    
+        # )
+
+        self.position = [40, 120, 30, 220, 180, 120]
+        self.time = np.full((6), 3000)
+
+
+
 
     def send_msg_start_position(self):
-        msg = ArmControl()
-        msg.position[0] = 40
-        msg.position[2] = 170
-        msg.position[3] = 220
-        msg.position[4] = 180
-        self.pub.publish(msg)
+        msg = Arm_control()
+        self.position[3] = 166.4
+        msg.position = self.position
+        msg.time = self.time
+        self.control.publish(msg)
+        time.sleep(max(msg.time)/1000)
 
-        time.sleep(3.0)
+        self.position[2] = 16.6
+        self.position[4] = 89.8
+        msg.position = self.position
+        msg.time = self.time
+        self.control.publish(msg)
+        time.sleep(max(msg.time)/1000)
 
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 170
-        msg.position[3] = 210
-        msg.position[4] = 120
-        self.pub.publish(msg)
+        self.in_idle_position = True
 
-        time.sleep(3.0)
 
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 50
-        msg.position[3] = 210
-        msg.position[4] = 120
-        self.pub.publish(msg)
-        time.sleep(3.0)
+    #TODO: def send_msg_idle_position(self):
 
-        self.in_start_position = True
+    # def publish_res(self, data):
+    #     msg = String()
+    #     msg.data = data
+    #     self.res.publish(msg)
 
-    def send_msg_raise_camera(self):
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 150
-        msg.position[3] = 190
-        msg.position[4] = 120
+    # def start_position(self):
+    #     self.send_msg_start_position()
+    #     self.publish_res("START_SUCCESS")
 
-        self.pub.publish(msg)
-        time.sleep(3.0)
+    # def pick_up_object(self):
+    #     if (self.in_start_position):
+    #         self.send_msg_raise_camera()
+    #         time.sleep(3.0)
 
-    def send_msg_lower_camera(self):
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 50
-        msg.position[3] = 210
-        msg.position[4] = 120
+    #         self.send_msg_lower_arm()
+    #         time.sleep(3.0)
 
-        self.pub.publish(msg)
-        time.sleep(3.0)
+    #         self.send_msg_close_grip()
+    #         time.sleep(3.0)
 
-    def send_msg_close_grip(self):
-        msg = ArmControl()
-        msg.position[0] = 100
-        msg.position[2] = 150
-        msg.position[3] = 190
-        msg.position[4] = 40
+    #         self.send_msg_raise_arm()
+    #         time.sleep(3.0)
 
-        self.pub.publish(msg)
-        time.sleep(3.0)
+    #         self.in_start_position = False
+    #         self.holding_object = True #TODO: check that an object is actually in arm
+    #         self.publish_res("PICK_UP_SUCCESS")
+    #         if (not self.holding_object):
+    #             self.publish_res("PICK_UP_FAIL_NO_OBJECT")
+    #             self.get_logger().error(f'Failed to pick up object: Object not in arm')
 
-    def send_msg_open_grip(self):
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 150
-        msg.position[3] = 190
-        msg.position[4] = 120
+    #     else:
+    #         self.publish_res("PICK_UP_FAIL_NO_START")
+    #         self.get_logger().error(f'Can not initilize pick up: Arm not in start position')
 
-        self.pub.publish(msg)
-        time.sleep(3.0)
+    # def drop_object(self):
+    #     if (self.holding_object):
+    #         self.send_msg_open_grip()
+    #         self.holding_object = False
+    #         self.send_msg_start_position()
+    #         self.publish_res("DROP_SUCCESS")
+    #     else:
+    #         self.publish_res("DROP_FAIL_NO_OBJECT")
+    #         self.get_logger().error(f'Can not drop object: Not holdning an object')
 
-    def send_msg_lower_arm(self):
-        msg = ArmControl()
-        msg.position[0] = 10
-        msg.position[2] = 150
-        msg.position[3] = 190
-        msg.position[4] = 40
-
-        self.pub.publish(msg)
-        time.sleep(3.0)
-
-    def send_msg_raise_arm(self):
-        msg = ArmControl()
-        msg.position[0] = 100
-        msg.position[2] = 150
-        msg.position[3] = 190
-        msg.position[4] = 120
-
-        self.pub.publish(msg)
-        time.sleep(3.0)
-
-    def publish_res(self, data):
-        msg = String()
-        msg.data = data
-        self.res.publish(msg)
-
-    def start_position(self):
-        self.send_msg_start_position()
-        self.publish_res("START_SUCCESS")
-
-    def pick_up_object(self):
-        if (self.in_start_position):
-            self.send_msg_raise_camera()
-            time.sleep(3.0)
-
-            self.send_msg_lower_arm()
-            time.sleep(3.0)
-
-            self.send_msg_close_grip()
-            time.sleep(3.0)
-
-            self.send_msg_raise_arm()
-            time.sleep(3.0)
-
-            self.in_start_position = False
-            self.holding_object = True #TODO: check that an object is actually in arm
-            self.publish_res("PICK_UP_SUCCESS")
-            if (not self.holding_object):
-                self.publish_res("PICK_UP_FAIL_NO_OBJECT")
-                self.get_logger().error(f'Failed to pick up object: Object not in arm')
-
-        else:
-            self.publish_res("PICK_UP_FAIL_NO_START")
-            self.get_logger().error(f'Can not initilize pick up: Arm not in start position')
-
-    def drop_object(self):
-        if (self.holding_object):
-            self.send_msg_open_grip()
-            self.holding_object = False
-            self.send_msg_start_position()
-            self.publish_res("DROP_SUCCESS")
-        else:
-            self.publish_res("DROP_FAIL_NO_OBJECT")
-            self.get_logger().error(f'Can not drop object: Not holdning an object')
-
-    def change_position(self, msg):    
-        if msg.data == "START":
-            self.start_position()
-        elif msg.data == "PICK_UP":
-            self.pick_up_object()
-        elif msg.data == "DROP":
-            self.drop_object()
+    # def change_position(self, msg):    
+    #     if msg.data == "START":
+    #         self.start_position()
+    #     elif msg.data == "PICK_UP":
+    #         self.pick_up_object()
+    #     elif msg.data == "DROP":
+    #         self.drop_object()
 
 def main():
+    print("hi")
     rclpy.init()
     node = Arm_control()
-    rclpy.spin(node)
+    node.send_msg_start_position()
+    #rclpy.spin(node)
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
+
+# def send_msg_raise_camera(self):
+#     msg = ArmControl()
+#     msg.position[0] = 10
+#     msg.position[2] = 150
+#     msg.position[3] = 190
+#     msg.position[4] = 120
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
+
+# def send_msg_lower_camera(self):
+#     msg = ArmControl()
+#     msg.position[0] = 10
+#     msg.position[2] = 50
+#     msg.position[3] = 210
+#     msg.position[4] = 120
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
+
+# def send_msg_close_grip(self):
+#     msg = ArmControl()
+#     msg.position[0] = 100
+#     msg.position[2] = 150
+#     msg.position[3] = 190
+#     msg.position[4] = 40
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
+
+# def send_msg_open_grip(self):
+#     msg = ArmControl()
+#     msg.position[0] = 10
+#     msg.position[2] = 150
+#     msg.position[3] = 190
+#     msg.position[4] = 120
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
+
+# def send_msg_lower_arm(self):
+#     msg = ArmControl()
+#     msg.position[0] = 10
+#     msg.position[2] = 150
+#     msg.position[3] = 190
+#     msg.position[4] = 40
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
+
+# def send_msg_raise_arm(self):
+#     msg = ArmControl()
+#     msg.position[0] = 100
+#     msg.position[2] = 150
+#     msg.position[3] = 190
+#     msg.position[4] = 120
+
+#     self.pub.publish(msg)
+#     time.sleep(3.0)
