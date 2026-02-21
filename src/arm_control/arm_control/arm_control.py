@@ -40,7 +40,7 @@ class Arm_control(Node):
         #     10                    
         # )
 
-    def camera_callback(self, msg):
+    def image_callback(self, msg):
         # Convert ROS image -> OpenCV
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
