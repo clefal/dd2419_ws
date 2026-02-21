@@ -162,7 +162,7 @@ def main():
     print("hi")
     rclpy.init()
     node = Arm_control()
-    #node.send_msg_start_position()
+    node.send_msg_start_position()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
