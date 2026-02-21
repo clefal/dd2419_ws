@@ -6,6 +6,7 @@ from robp_interfaces.msg import ArmControl
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
+from std_msgs.msg import Int32MultiArray
 import cv2
 
 #TODO: make it faster??
@@ -40,19 +41,45 @@ class Arm_control(Node):
         #     10                    
         # )
 
-    def image_callback(self, msg):
-        # Convert ROS image -> OpenCV
-        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+    def image_callback(self, msg: Image):
+        if msg.encoding == 'bgr8':
+            frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        elif msg.encoding == 'yuv422_yuy2':
+            yuy = np.frombuffer(msg.data, dtype=np.uint8).reshape((msg.height, msg.width, 2))
+            frame = cv2.cvtColor(yuy, cv2.COLOR_YUV2BGR_YUY2)
+        else:
+            raise NotImplementedError(f"Encoding {msg.encoding} not supported")
 
-        # Create green mask
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
         lower_green = np.array([40, 40, 40])
         upper_green = np.array([80, 255, 255])
         mask = cv2.inRange(hsv, lower_green, upper_green)
 
-        # Convert mask to ROS Image and publish
         mask_msg = self.bridge.cv2_to_imgmsg(mask, encoding='mono8')
-        self.pub.publish(mask_msg)
+        self.mask_pub.publish(mask_msg)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return  
+
+        largest_contour = max(contours, key=cv2.contourArea)
+
+        if cv2.contourArea(largest_contour) < 500:
+            return
+
+        M = cv2.moments(largest_contour)
+        if M['m00'] == 0:
+            return
+
+        cx = int(M['m10'] / M['m00'])
+        cy = int(M['m01'] / M['m00'])
+        self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
+
+        msg_out = Int32MultiArray()
+        msg_out.data = [cx, cy]
+        self.center_pub.publish(msg_out)
 
 
     def send_msg_start_position(self):
