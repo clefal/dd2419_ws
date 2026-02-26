@@ -72,6 +72,7 @@ class Localization(Node):
         try:
             t = self._tf_buffer.lookup_transform(self._odom_frame, self._base_frame, rclpy.time.Time())
         except Exception:
+            print(f'Could not lookup transform {self._odom_frame} -> {self._base_frame}')
             return
 
         x = t.transform.translation.x

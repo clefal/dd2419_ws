@@ -15,5 +15,5 @@ mkdir rosbags
 and then run
 
 ```bash
-pixi run ros2 bag record -o milestone0 /lidar/scan /phidgets/imu /phidgets/motor/encoders /realsense/depth/color/points /realsense/depth/image_rect_raw /realsense/color/image_raw/compressed /arm/feedback arm/camera/image_raw
+pixi run ros2 bag record -o icp_data2 /lidar/scan /phidgets/imu/data_raw /phidgets/motor/encoders /realsense/depth/color/points /realsense/depth/image_rect_raw /realsense/color/image_raw/compressed
 ```

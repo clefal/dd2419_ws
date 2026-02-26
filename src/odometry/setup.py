@@ -24,7 +24,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'odometry = odometry.odometry:main'
+            'odometry = odometry.odometry:main',
+            'odometry_comparation = odometry.odometry_comparation:main',
+            'odometry_original = odometry.odometry_original:main'
         ],
     },
 )
