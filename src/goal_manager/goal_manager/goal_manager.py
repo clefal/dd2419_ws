@@ -47,6 +47,7 @@ class GoalManager(Node):
         self._home_x = 0.0
         self._home_y = 0.0
         self._home_yaw = 0.0
+        self._box_side_offset = 0.28    #TODO
 
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
@@ -61,6 +62,7 @@ class GoalManager(Node):
 
 
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
+        self._goal_candidates_pub = self.create_publisher(PoseArray, '/nav/goal_candidates', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
         self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
         self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
@@ -126,7 +128,7 @@ class GoalManager(Node):
                 self.publish_topics()
 
                 self._state = AutoState.RETURN_HOME
-                self.publish_goal(self._home_x, self._home_y, self._home_yaw)
+                self.publish_box_goal_candidates()
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
             else:
@@ -426,6 +428,41 @@ class GoalManager(Node):
         self._waiting_for_result = True
 
         self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
+
+    def publish_box_goal_candidates(self):
+        # Approach box from its two long sides (left/right in box local frame).
+        ux = math.cos(self._home_yaw)
+        uy = math.sin(self._home_yaw)
+
+        cands = [
+            (self._home_x + self._box_side_offset * ux, self._home_y + self._box_side_offset * uy),
+            (self._home_x - self._box_side_offset * ux, self._home_y - self._box_side_offset * uy),
+        ]
+
+        pa = PoseArray()
+        pa.header.stamp = self.get_clock().now().to_msg()
+        pa.header.frame_id = self._fixed_frame
+
+        for (gx, gy) in cands:
+            pose = PoseStamped().pose
+            pose.position.x = float(gx)
+            pose.position.y = float(gy)
+            pose.position.z = 0.0
+            yaw_to_box = math.atan2(self._home_y - gy, self._home_x - gx)
+            q = quaternion_from_euler(0.0, 0.0, yaw_to_box)
+            pose.orientation.x = q[0]
+            pose.orientation.y = q[1]
+            pose.orientation.z = q[2]
+            pose.orientation.w = q[3]
+            pa.poses.append(pose)
+
+        self._goal_candidates_pub.publish(pa)
+        self._waiting_for_result = True
+        self.get_logger().info(
+            f'Box goal candidates sent: '
+            f'c0=({cands[0][0]:.2f},{cands[0][1]:.2f}), '
+            f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f})'
+        )
 
     # ----------------------------
 

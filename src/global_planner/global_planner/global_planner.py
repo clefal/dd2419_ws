@@ -33,6 +33,7 @@ class GlobalPlannerNode(Node):
         # Topics / frames
         self.declare_parameter("map_topic", "/map/occupancy_grid")
         self.declare_parameter("goal_topic", "/nav/goal")
+        self.declare_parameter("goal_candidates_topic", "/nav/goal_candidates")
         self.declare_parameter("path_topic", "/nav/global_path")
 
 
@@ -46,6 +47,7 @@ class GlobalPlannerNode(Node):
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
+        self.goal_candidates_topic = self.get_parameter("goal_candidates_topic").get_parameter_value().string_value
         self.path_topic = self.get_parameter("path_topic").get_parameter_value().string_value
         
         self.global_frame = "map"
@@ -60,6 +62,9 @@ class GlobalPlannerNode(Node):
 
         self.sub_map = self.create_subscription(OccupancyGrid, self.map_topic, self.on_map, map_qos)
         self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10)
+        self.sub_goal_candidates = self.create_subscription(
+            PoseArray, self.goal_candidates_topic, self.on_goal_candidates, 10
+        )
         self.sub_cubes = self.create_subscription(
             PoseArray,
             "/nav/objects/cubes",
@@ -130,6 +135,9 @@ class GlobalPlannerNode(Node):
             f"Goal received: frame='{msg.header.frame_id}', pos=({msg.pose.position.x:.2f},{msg.pose.position.y:.2f}), yaw={yaw:.2f} rad"
         )
         self._plan_and_publish(reason="new_goal")
+
+    def on_goal_candidates(self, msg: PoseArray) -> None:
+        self._plan_and_publish_candidates(msg, reason="goal_candidates")
 
 
     def on_cubes(self, msg: PoseArray) -> None:
@@ -213,6 +221,95 @@ class GlobalPlannerNode(Node):
 
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
+
+    def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
+        if self._map is None or self._meta is None:
+            self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if len(msg.poses) == 0:
+            self.get_logger().warn("Received empty goal candidate list.")
+            self._publish_empty_path(reason="empty_goal_candidates")
+            return
+
+        frame = (msg.header.frame_id or "").strip()
+        if frame not in ("", self.global_frame):
+            self.get_logger().warn(
+                f"Goal candidates frame '{frame}' != global_frame '{self.global_frame}'. Ignoring."
+            )
+            self._publish_empty_path(reason="goal_candidates_wrong_frame")
+            return
+
+        start_xy = self._get_robot_xy_in_map()
+        if start_xy is None:
+            self.get_logger().warn("TF unavailable (map->base_link); cannot plan candidate goals.")
+            return
+
+        start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
+        if start_idx is None:
+            self.get_logger().warn("Start is outside the grid bounds; cannot plan candidate goals.")
+            self._publish_empty_path(reason="start_outside_grid_candidates")
+            return
+
+        planning_map = self.build_planning_grid(self._map, self._meta)
+        self.pub_planning_grid.publish(planning_map)
+
+        best_path_idx = None
+        best_pose = None
+        best_cost = None
+
+        for pose in msg.poses:
+            goal_idx = self.world_to_grid(pose.position.x, pose.position.y, self._meta)
+            if goal_idx is None:
+                continue
+
+            path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
+            if path_idx is None or len(path_idx) == 0:
+                continue
+
+            pcost = self._path_total_cost(path_idx, planning_map, self._meta)
+            if best_cost is None or pcost < best_cost:
+                best_cost = pcost
+                best_path_idx = path_idx
+                best_pose = pose
+
+        if best_path_idx is None or best_pose is None:
+            self.get_logger().warn(f"Planning failed ({reason}). No feasible candidate path.")
+            self._publish_empty_path(reason=f"planning_failed_{reason}")
+            return
+
+        path_msg = Path()
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = self.global_frame
+
+        for (gx, gy) in best_path_idx:
+            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
+            ps = PoseStamped()
+            ps.header = path_msg.header
+            ps.pose.position.x = wx
+            ps.pose.position.y = wy
+            ps.pose.position.z = 0.0
+            ps.pose.orientation.w = 1.0
+            path_msg.poses.append(ps)
+
+        path_msg.poses[-1].pose.orientation = best_pose.orientation
+        self.pub_path.publish(path_msg)
+        self.get_logger().info(
+            f"Published candidate path with {len(path_msg.poses)} poses (reason={reason}, candidates={len(msg.poses)}, cost={best_cost:.2f})."
+        )
+
+    def _path_total_cost(self, path_idx: List[GridIndex], occ: OccupancyGrid, meta: GridMeta) -> float:
+        if len(path_idx) <= 1:
+            return 0.0
+
+        total = 0.0
+        for i in range(1, len(path_idx)):
+            x0, y0 = path_idx[i - 1]
+            x1, y1 = path_idx[i]
+            dx = abs(x1 - x0)
+            dy = abs(y1 - y0)
+            step = math.sqrt(2.0) if (dx == 1 and dy == 1) else 1.0
+            total += step + self.cell_penalty(x1, y1, occ, meta)
+        return total
 
     def _publish_empty_path(self, reason: str = "unknown") -> None:
         path_msg = Path()

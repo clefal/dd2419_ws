@@ -7,11 +7,8 @@ Panels:
         - /Global Options1
         - /Status1
         - /Path1
-        - /Path1/Status1
-        - /Path1/Topic1
         - /Map1
-        - /Map2
-        - /Map2/Topic1
+        - /Map1/Topic1
       Splitter Ratio: 0.5
     Tree Height: 1156
   - Class: rviz_common/Selection
@@ -39,7 +36,7 @@ Visualization Manager:
       Cell Size: 1
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
-      Enabled: false
+      Enabled: true
       Line Style:
         Line Width: 0.029999999329447746
         Value: Lines
@@ -52,7 +49,7 @@ Visualization Manager:
       Plane: XY
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
-      Value: false
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -75,7 +72,7 @@ Visualization Manager:
       Shaft Length: 0.10000000149011612
       Topic:
         Depth: 5
-        Durability Policy: Transient Local
+        Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
@@ -87,23 +84,23 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: false
-      Enabled: false
+      Enabled: true
       Name: Map
       Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /map/occupancy_grid
+        Value: /nav/planning_grid
       Update Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /map/occupancy_grid_updates
+        Value: /nav/planning_grid_updates
       Use Timestamp: false
-      Value: false
+      Value: true
     - Class: rviz_default_plugins/TF
       Enabled: true
       Filter (blacklist): ""
@@ -189,29 +186,6 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /path
       Value: true
-    - Alpha: 0.699999988079071
-      Binary representation: false
-      Binary threshold: 100
-      Class: rviz_default_plugins/Map
-      Color Scheme: map
-      Draw Behind: false
-      Enabled: true
-      Name: Map
-      Topic:
-        Depth: 5
-        Durability Policy: Transient Local
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /nav/planning_grid
-      Update Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /nav/planning_grid_updates
-      Use Timestamp: false
-      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -258,7 +232,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 13.693438529968262
+      Distance: 3.2480592727661133
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -273,10 +247,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.1653976440429688
+      Pitch: 0.7347971200942993
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.0553996562957764
+      Yaw: 3.0554025173187256
     Saved: ~
 Window Geometry:
   Displays:
