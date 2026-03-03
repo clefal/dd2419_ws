@@ -74,7 +74,7 @@ class GoalManager(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._static_loaded = False
-        #self.create_timer(0.5, self.try_load_static_frames_once)
+        self.create_timer(0.5, self.try_load_static_frames_once)
 
         self._waiting_for_result = False
 
