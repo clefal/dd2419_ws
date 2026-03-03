@@ -122,12 +122,22 @@ class GlobalPlannerNode(Node):
     def on_map(self, msg: OccupancyGrid) -> None:
         self._map = msg
         self._meta = self._extract_meta(msg)
+        self.get_logger().info(
+            "Map received: "
+            f"frame='{msg.header.frame_id}', size={msg.info.width}x{msg.info.height}, "
+            f"res={msg.info.resolution:.3f}, origin=({msg.info.origin.position.x:.2f},{msg.info.origin.position.y:.2f})"
+        )
 
         if self.get_parameter("publish_on_map_update").get_parameter_value().bool_value and self._goal_msg is not None:
             self._plan_and_publish(reason="map_update")
 
     def on_goal(self, msg: PoseStamped) -> None:
         self._goal_msg = msg
+        q = msg.pose.orientation
+        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self.get_logger().info(
+            f"Goal received: frame='{msg.header.frame_id}', pos=({msg.pose.position.x:.2f},{msg.pose.position.y:.2f}), yaw={yaw:.2f} rad"
+        )
         self._plan_and_publish(reason="new_goal")
 
 
@@ -147,6 +157,7 @@ class GlobalPlannerNode(Node):
     # Planning orchestration
     # -------------------------
     def _plan_and_publish(self, reason: str) -> None:
+        self.get_logger().info(f"Planning triggered (reason={reason}).")
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan.")
             return
@@ -163,9 +174,14 @@ class GlobalPlannerNode(Node):
 
         start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
         goal_idx = self.world_to_grid(goal_xy[0], goal_xy[1], self._meta)
+        self.get_logger().info(
+            f"Planning inputs: start_xy=({start_xy[0]:.2f},{start_xy[1]:.2f}) -> {start_idx}, "
+            f"goal_xy=({goal_xy[0]:.2f},{goal_xy[1]:.2f}) -> {goal_idx}"
+        )
 
         if start_idx is None or goal_idx is None:
             self.get_logger().warn("Start or goal is outside the grid bounds; cannot plan.")
+            self._publish_empty_path(reason="start_or_goal_outside_grid")
             return
 
         # Run Weighted A*
@@ -177,7 +193,7 @@ class GlobalPlannerNode(Node):
 
         if path_idx is None or len(path_idx) == 0:
             self.get_logger().warn(f"Planning failed ({reason}). No path found.")
-            self._publish_empty_path()
+            self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
         # Convert to nav_msgs/Path in map frame
@@ -208,11 +224,12 @@ class GlobalPlannerNode(Node):
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
-    def _publish_empty_path(self) -> None:
+    def _publish_empty_path(self, reason: str = "unknown") -> None:
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = self.global_frame
         self.pub_path.publish(path_msg)
+        self.get_logger().warn(f"Published EMPTY path (reason={reason}).")
 
     def _get_robot_xy_in_map(self) -> Optional[Tuple[float, float]]:
         try:
@@ -399,10 +416,12 @@ class GlobalPlannerNode(Node):
         max_ms = self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value
 
         if not self.cell_is_traversable(start[0], start[1], occ, meta):
-            self.get_logger().warn("Start cell is not traversable.")
+            v = occ.data[self.idx_to_flat(start[0], start[1], meta)]
+            self.get_logger().warn(f"Start cell is not traversable: idx={start}, occ={v}")
             return None
         if not self.cell_is_traversable(goal[0], goal[1], occ, meta):
-            self.get_logger().warn("Goal cell is not traversable.")
+            v = occ.data[self.idx_to_flat(goal[0], goal[1], meta)]
+            self.get_logger().warn(f"Goal cell is not traversable: idx={goal}, occ={v}")
             return None
 
         # Neighbor moves: (dx, dy, base_cost)
@@ -431,7 +450,9 @@ class GlobalPlannerNode(Node):
             # soft time guard
             elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e6
             if elapsed > float(max_ms):
-                self.get_logger().warn(f"Planning exceeded {max_ms} ms; aborting.")
+                self.get_logger().warn(
+                    f"Planning exceeded {max_ms} ms; aborting. expanded={len(g_score)}, open_set={len(open_heap)}"
+                )
                 return None
 
             _, g_curr, current = heapq.heappop(open_heap)
@@ -467,6 +488,9 @@ class GlobalPlannerNode(Node):
                     f = tentative_g + w * heuristic(neighbor, goal)
                     heapq.heappush(open_heap, (f, tentative_g, neighbor))
 
+        self.get_logger().warn(
+            f"Weighted A* exhausted search space without reaching goal. expanded={len(g_score)}"
+        )
         return None
 
     @staticmethod
