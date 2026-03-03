@@ -44,7 +44,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
-        self.declare_parameter("cube_approach_radius", 0.17)
+        self.declare_parameter("cube_approach_radius", 0.16)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
