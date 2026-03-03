@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'odometry'
+package_name = 'localization'
 
 setup(
     name=package_name,
@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='dduberg',
-    maintainer_email='danielduberg@gmail.com',
+    maintainer='robot',
+    maintainer_email='mgassmann@ethz.ch',
     description='TODO: Package description',
     license='MIT',
     extras_require={
@@ -24,9 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'odometry = odometry.odometry:main',
-            'odometry_comparation = odometry.odometry_comparation:main',
-            'odometry_original = odometry.odometry_original:main'
+            'localization = localization.localization:main'
         ],
     },
 )

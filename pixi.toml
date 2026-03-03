@@ -28,6 +28,8 @@ odometry = { cmd = "ros2 run odometry odometry" }
 controller = { cmd = "ros2 run controller controller" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
 global_planner = { cmd = "ros2 run global_planner global_planner" }
+callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
+localization =  { cmd = "ros2 run localization localization" }
 static_transforms = { cmd = "ros2 launch robp_launch frames_launch.xml" }
 callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
 workspace = { cmd = "ros2 launch mapping workspace_loader.launch.py" }
@@ -90,6 +92,8 @@ ros-jazzy-global-planner = { path = "src/global_planner" }
 
 ros-jazzy-mapping = { path = "src/mapping" }
 ros-jazzy-callibration-helper = { path = "src/callibration_helper" }
+ros-jazzy-localization = { path = "src/localization" }
+
 
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }

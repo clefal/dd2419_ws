@@ -13,9 +13,9 @@ echo $ROS_DOMAIN_ID
 run without pixi run:
 ```bash
 ssh group3@{ip}
-ssh group3@10.97.32.242
-sshpass -p 'group3' ssh group3@10.97.32.242 
---> 192.168.1.63
+ssh group3@192.168.1.63
+sshpass -p 'group3' ssh group3@192.168.1.63
+sshpass -p 'group3' ssh group3@10.94.192.242
 ```
 
 1. Run any launch. For example
