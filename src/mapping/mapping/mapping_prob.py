@@ -34,7 +34,7 @@ class Mapping(Node):
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
         self.range_min = 0.1
-        self.range_max = 4.0
+        self.range_max = 10.0
 
         # Filter params
         self.median_filter_kernel_size = 5
