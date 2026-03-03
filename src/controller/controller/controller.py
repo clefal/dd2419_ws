@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 import math
-from typing import Tuple
+from typing import Tuple, Optional, List
+
 import rclpy
 from rclpy.node import Node
-
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
 from std_msgs.msg import String, Bool, Float32
@@ -72,6 +72,10 @@ class Controller(Node):
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.5)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.02)           # s (0.05=20Hz, 0.1=10Hz)
+        
+        self.declare_parameter('vel_filter_alpha', 0.65)         # 0..1 (higher = more smoothing)
+        self.declare_parameter('yaw_filter_alpha', 0.70)         # 0..1
+        self.declare_parameter('min_turn_duty', 0.10)            # duty-equivalent for in-place turning (>= deadzone margin)
 
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
@@ -80,6 +84,14 @@ class Controller(Node):
         # When to turn in place to reacquire path direction
         self._turn_in_place_yaw_thresh = 0.60  # rad
         self._yaw_tol = 0.05  # rad for final alignment
+
+        # State for filtering
+        self._v_filt = 0.0
+        self._w_filt = 0.0
+
+        # Path progress (avoid snapping backwards)
+        self._last_path_idx = 0
+        self._closest_search_window = 40  # points forward to search
 
         # Control loop
               
@@ -145,9 +157,12 @@ class Controller(Node):
 
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
 
-        # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
         self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+
+        self._last_path_idx = 0
+        self._v_filt = 0.0
+        self._w_filt = 0.0
 
         self.publish_status('RUNNING')
 
@@ -162,6 +177,7 @@ class Controller(Node):
         if d <= 0.0:
             self.get_logger().warn(f'Ignoring non-positive backup distance: {d:.3f}')
             return
+
         self._backup_active = True
         self._backup_target_m = d
         self._backup_start_xy = None
@@ -173,15 +189,25 @@ class Controller(Node):
     # ----------------------------
 
     def _closest_path_index(self, rx: float, ry: float) -> int:
-        best_i = 0
+        """Closest index search constrained to a forward window to prevent jumping backwards."""
+        if not self._path_xy:
+            return 0
+
+        lo = self._last_path_idx
+        hi = min(len(self._path_xy) - 1, lo + self._closest_search_window)
+
+        best_i = lo
         best_d2 = float('inf')
-        for i, (px, py) in enumerate(self._path_xy):
+        for i in range(lo, hi + 1):
+            px, py = self._path_xy[i]
             dx = px - rx
             dy = py - ry
             d2 = dx * dx + dy * dy
             if d2 < best_d2:
                 best_d2 = d2
                 best_i = i
+
+        self._last_path_idx = best_i
         return best_i
 
     def _lookahead_point(self, rx: float, ry: float, lookahead: float):
@@ -198,41 +224,51 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
-    @staticmethod
-    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
-        """
-        Requirement: each wheel is either 0 or |duty| >= min_dc.
+    # ----------------------------
 
-        - If both wheels same direction and one is just under min_dc: scale BOTH up to preserve ratio.
-        - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
-        - Finally: clamp tiny magnitudes to 0.
+    def _lowpass(self, prev: float, new: float, alpha: float) -> float:
+        alpha = clamp(alpha, 0.0, 0.98)
+        return alpha * prev + (1.0 - alpha) * new
+
+    def _apply_deadzone_smooth(self, left: float, right: float, v_sign: float) -> Tuple[float, float]:
         """
-        # Same direction (forward/back): scale both to keep ratio
+        Smooth-ish deadzone handling:
+        - For normal driving (same direction): if one wheel would drop below dc_min, add a small equal "boost"
+          to both wheels to lift the smaller one over the threshold while preserving (right-left) turning difference.
+        - For turning in place (opposite directions): enforce minimum magnitude per wheel (needed to actually rotate).
+        - Clamp tiny residuals to 0.
+        """
+        min_dc = self._dc_min
+
+        # Turn in place: ensure both wheels exceed deadzone
+        if left * right < 0.0:
+            if abs(left) > 0.0:
+                left = math.copysign(max(abs(left), min_dc), left)
+            if abs(right) > 0.0:
+                right = math.copysign(max(abs(right), min_dc), right)
+            return clamp(left, -1.0, 1.0), clamp(right, -1.0, 1.0)
+
+        # Same direction: lift the smaller wheel with a shared additive boost (preserves curvature)
         if left * right > 0.0:
             aL, aR = abs(left), abs(right)
             m = min(aL, aR)
             if 0.0 < m < min_dc:
-                scale = min_dc / m
-                left *= scale
-                right *= scale
+                boost = (min_dc - m)
+                left += v_sign * boost
+                right += v_sign * boost
 
-        # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
-        if left * right < 0.0:
-            if abs(left) > 0.0 and abs(left) < min_dc:
-                left = math.copysign(min_dc, left)
-            if abs(right) > 0.0 and abs(right) < min_dc:
-                right = math.copysign(min_dc, right)
-
-        # Per-wheel deadzone: tiny magnitudes become 0
+        # Anything still under deadzone -> 0 (avoid buzzing)
         if 0.0 < abs(left) < min_dc:
             left = 0.0
         if 0.0 < abs(right) < min_dc:
             right = 0.0
 
-        return left, right
+        return clamp(left, -1.0, 1.0), clamp(right, -1.0, 1.0)
+
     # ----------------------------
 
     def control_tick(self):
+        # Backup maneuver (simple reverse)
         if self._backup_active:
             pose = self.get_pose_2d()
             if pose is None:
@@ -257,7 +293,10 @@ class Controller(Node):
                 )
                 return
 
-            left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            left = -self._backup_duty
+            right = -self._backup_duty
+            v_sign = -1.0
+            left, right = self._apply_deadzone_smooth(left, right, v_sign)
             self.send_duty(left, right)
             return
 
@@ -280,6 +319,7 @@ class Controller(Node):
         goal_tol = float(self.get_parameter('goal_tolerance').value)
         dist_to_goal = math.hypot(gx - rx, gy - ry)
 
+        # Final alignment (if within goal radius)
         if dist_to_goal <= goal_tol:
             if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
                 yaw_err = wrap_angle(self._goal_yaw - ryaw)
@@ -291,9 +331,17 @@ class Controller(Node):
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
                 k_turn = float(self.get_parameter('turn_gain').value)
-                w = clamp(k_turn * yaw_err, -wmax, wmax)
+                min_turn = float(self.get_parameter('min_turn_duty').value)
+                min_turn = max(self._dc_min + 0.02, min_turn)
 
-                left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+                w = clamp(k_turn * yaw_err, -wmax, wmax)
+                # ensure it actually turns (overcomes stiction) but still proportional near zero
+                if abs(w) > 0.0:
+                    w = math.copysign(max(abs(w), min_turn), w)
+
+                left = -w
+                right = w
+                left, right = self._apply_deadzone_smooth(left, right, v_sign=0.0)
                 self.send_duty(left, right)
                 return
 
@@ -320,15 +368,22 @@ class Controller(Node):
         x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
 
-        # If target behind / too misaligned -> turn in place
+        # If target behind / too misaligned -> turn in place to reacquire
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
             wmax = float(self.get_parameter('max_angular_speed').value)
             k_turn = float(self.get_parameter('turn_gain').value)
-            w = clamp(k_turn * yaw_err, -wmax, wmax)
+            min_turn = float(self.get_parameter('min_turn_duty').value)
+            min_turn = max(self._dc_min + 0.02, min_turn)
 
-            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+            if abs(w) > 0.0:
+                w = math.copysign(max(abs(w), min_turn), w)
+
+            left = -w
+            right = w
+            left, right = self._apply_deadzone_smooth(left, right, v_sign=0.0)
             self.send_duty(left, right)
             return
 
@@ -339,34 +394,42 @@ class Controller(Node):
         wmax = float(self.get_parameter('max_angular_speed').value)
         k_steer = float(self.get_parameter('steering_gain').value)
 
-
-        # Slow down in curves (simple, stable indoors)
+        # --- Speed shaping ---
+        # 1) Curve-based slowdown
         v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
         v_curve = clamp(v_curve, 0.0, v_nom)
 
-        # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
+        # 2) Goal-approach slowdown (smooth stop)
         slow_radius = float(self.get_parameter('goal_slow_radius').value)
         v_min = float(self.get_parameter('min_linear_speed').value)
-
         slow_radius = max(0.05, slow_radius)
-        v_min = max(self._dc_min + 0.02, min(v_min, v_nom))  # keep above deadzone margin
+        v_min = max(self._dc_min + 0.02, min(v_min, v_nom))
 
         approach = clamp(dist_to_goal / slow_radius, 0.0, 1.0)
         v_goal = v_min + (v_nom - v_min) * approach
 
-        v = min(v_curve, v_goal)
-        v = clamp(v, 0.0, v_nom)
+        v_cmd = min(v_curve, v_goal)
 
-        # Steering
-        w = k_steer * v * kappa
-        w = clamp(w, -wmax, wmax)
+        # --- Steering ---
+        w_cmd = k_steer * v_cmd * kappa
+        w_cmd = clamp(w_cmd, -wmax, wmax)
+
+        # --- Filtering (optional but recommended) ---
+        a_v = float(self.get_parameter('vel_filter_alpha').value)
+        a_w = float(self.get_parameter('yaw_filter_alpha').value)
+        self._v_filt = self._lowpass(self._v_filt, v_cmd, a_v)
+        self._w_filt = self._lowpass(self._w_filt, w_cmd, a_w)
+
+        v = self._v_filt
+        w = self._w_filt
 
         # Convert to wheel duties
         left = v - w
         right = v + w
 
-        # Enforce only the actuator requirement at the wheel level
-        left, right = self.enforce_motor_deadzone_pair(left, right, self._dc_min)
+        # Deadzone smoothing / compensation
+        v_sign = 1.0 if v >= 0.0 else -1.0
+        left, right = self._apply_deadzone_smooth(left, right, v_sign=v_sign)
 
         self.send_duty(left, right)
 
@@ -378,11 +441,8 @@ def main():
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    finally:
-        try:
-            node.stop()
-        except Exception:
-            pass
+    node.stop()
+    node.destroy_node()
     rclpy.shutdown()
 
 
