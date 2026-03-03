@@ -75,8 +75,6 @@ class Controller(Node):
 
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
-        self._last_debug_ns = 0
-        self._debug_period_ns = int(0.5 * 1e9)  # 2 Hz debug print cap
 
     # ----------------------------
 
@@ -98,14 +96,6 @@ class Controller(Node):
 
     def stop(self):
         self.send_duty(0.0, 0.0)
-
-    def _debug(self, msg: str):
-        now_ns = self.get_clock().now().nanoseconds
-        if (now_ns - self._last_debug_ns) >= self._debug_period_ns:
-            self.get_logger().info(msg)
-            self._last_debug_ns = now_ns
-
-    # ----------------------------
 
     def get_pose_2d(self):
         try:
@@ -217,7 +207,6 @@ class Controller(Node):
     def control_tick(self):
         # Empty path -> stop
         if not self._path_xy:
-            self._debug('control_tick: no active path, sending stop command.')
             self.stop()
             return
 
@@ -236,7 +225,6 @@ class Controller(Node):
         dist_to_goal = math.hypot(gx - rx, gy - ry)
 
         if dist_to_goal <= goal_tol:
-            self._debug(f'At goal position: dist={dist_to_goal:.3f} <= tol={goal_tol:.3f}. Checking final yaw...')
             if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
                 yaw_err = wrap_angle(self._goal_yaw - ryaw)
                 if abs(yaw_err) <= self._yaw_tol:
@@ -250,9 +238,6 @@ class Controller(Node):
                 w = clamp(yaw_err, -1.0, 1.0) * wmax
                 left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
                 self.send_duty(left, right)
-                self._debug(
-                    f"Final yaw align: yaw_err={yaw_err:.3f}, cmd L={left:.3f} R={right:.3f}"
-                )
                 return
 
             self.stop()
@@ -286,9 +271,6 @@ class Controller(Node):
             w = clamp(yaw_err, -1.0, 1.0) * wmax
             left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
             self.send_duty(left, right)
-            self._debug(
-                f"Turn-in-place: yaw_err={yaw_err:.3f}, x_r={x_r:.3f}, target=({tx:.2f},{ty:.2f}), cmd L={left:.3f} R={right:.3f}"
-            )
             return
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
@@ -314,9 +296,6 @@ class Controller(Node):
         left, right = self.enforce_motor_deadzone_pair(left, right, self._dc_min)
 
         self.send_duty(left, right)
-        self._debug(
-            f"Track path: pos=({rx:.2f},{ry:.2f},{ryaw:.2f}), tgt=({tx:.2f},{ty:.2f}), y_r={y_r:.3f}, kappa={kappa:.3f}, v={v:.3f}, w={w:.3f}, cmd L={left:.3f} R={right:.3f}"
-        )
 
 
 def main():

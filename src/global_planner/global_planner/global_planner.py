@@ -122,11 +122,6 @@ class GlobalPlannerNode(Node):
     def on_map(self, msg: OccupancyGrid) -> None:
         self._map = msg
         self._meta = self._extract_meta(msg)
-        self.get_logger().info(
-            "Map received: "
-            f"frame='{msg.header.frame_id}', size={msg.info.width}x{msg.info.height}, "
-            f"res={msg.info.resolution:.3f}, origin=({msg.info.origin.position.x:.2f},{msg.info.origin.position.y:.2f})"
-        )
 
         if self.get_parameter("publish_on_map_update").get_parameter_value().bool_value and self._goal_msg is not None:
             self._plan_and_publish(reason="map_update")
@@ -157,7 +152,6 @@ class GlobalPlannerNode(Node):
     # Planning orchestration
     # -------------------------
     def _plan_and_publish(self, reason: str) -> None:
-        self.get_logger().info(f"Planning triggered (reason={reason}).")
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan.")
             return
