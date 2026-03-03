@@ -24,7 +24,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'localization = localization.localization:main'
+            'localization = localization.localization:main',
+            'icp_scan_to_map = localization.icp_scan_to_map:main',
+            'icp_scan_to_scan = localization.icp_scan_to_scan:main'
         ],
     },
 )

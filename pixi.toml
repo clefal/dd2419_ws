@@ -98,6 +98,7 @@ ros-jazzy-detection = { path = "src/detection" }
 argcomplete = ">=3.6.3,<4"
 colcon-common-extensions = ">=0.3.0,<0.4"
 pynput = ">=1.8.1,<2"
+scipy = "*"
 
 [target.linux-64.dependencies]
 # ROS

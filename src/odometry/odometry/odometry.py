@@ -31,6 +31,12 @@ class Odometry(Node):
     def __init__(self):
         super().__init__('odometry')
 
+        # Params
+        self.declare_parameter("encoder_correction_gain", 0.1)
+        self.declare_parameter("wheel_radius", 0.04921)
+        self.declare_parameter("ticks_per_rev", 48 * 64) # measured: 3200, not 3074
+        self.declare_parameter("base", 0.3075)
+
         # TF broadcaster
         self._tf_broadcaster = TransformBroadcaster(self)
 
@@ -70,14 +76,14 @@ class Odometry(Node):
         # Complementary filter gains
         # -------------------------
         # Encoder correction gain (0..1). Smaller = trust IMU more.
-        self._k = 0.0
+        self._k = self.get_parameter("encoder_correction_gain").value
 
         # -------------------------
         # Robot model constants
         # -------------------------
-        self._ticks_per_rev = 48 * 64   # measured: 3200, not 3074
-        self._wheel_radius = 0.04921
-        self._base = 0.3075
+        self._ticks_per_rev = self.get_parameter("ticks_per_rev").value   # measured: 3200, not 3074
+        self._wheel_radius = self.get_parameter("wheel_radius").value
+        self._base = self.get_parameter("base").value
 
     def imu_callback(self, msg: Imu):
         t = stamp_to_sec(msg.header.stamp)
@@ -100,7 +106,7 @@ class Odometry(Node):
         self._last_imu_t = t
 
         # Gyro z (yaw rate)
-        omega_z = - msg.angular_velocity.z
+        omega_z = (-1) * msg.angular_velocity.z # IMPORTANT: IMU seems to be inverted
 
         # Predict (integrate gyro)
         self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
