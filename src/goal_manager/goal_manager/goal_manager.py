@@ -41,8 +41,8 @@ class GoalManager(Node):
         self._target_ = None   # (x, y) in fixed frame
 
 
-        self._search_x = 3.0
-        self._search_y = 0.0
+        self._search_x = 2.0
+        self._search_y = 1.0
         self._search_yaw = 0.0
         self._home_x = 0.0
         self._home_y = 0.0
