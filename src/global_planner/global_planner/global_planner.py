@@ -42,7 +42,6 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("unknown_is_lethal", False)   # OccupancyGrid unknown is -1
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("allow_diagonal", True)
-        self.declare_parameter("publish_on_map_update", False)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
@@ -122,9 +121,6 @@ class GlobalPlannerNode(Node):
     def on_map(self, msg: OccupancyGrid) -> None:
         self._map = msg
         self._meta = self._extract_meta(msg)
-
-        if self.get_parameter("publish_on_map_update").get_parameter_value().bool_value and self._goal_msg is not None:
-            self._plan_and_publish(reason="map_update")
 
     def on_goal(self, msg: PoseStamped) -> None:
         self._goal_msg = msg
