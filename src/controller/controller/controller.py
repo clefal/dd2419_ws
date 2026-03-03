@@ -63,9 +63,16 @@ class Controller(Node):
         self.declare_parameter('lookahead_distance', 0.4)        # m
         self.declare_parameter('nominal_linear_speed', 0.35)     # duty-equivalent
         self.declare_parameter('max_angular_speed', 0.2)        # duty-equivalent
-        self.declare_parameter('goal_tolerance', 0.10)           # m
+        self.declare_parameter('goal_tolerance', 0.05)           # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.5)
+
+
+        self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
+        self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
+        self.declare_parameter('turn_gain', 0.7)                 # duty-per-rad for in-place turning
+        self.declare_parameter('control_period', 0.01)           # s (0.05=20Hz, 0.1=10Hz)
+
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
@@ -75,7 +82,10 @@ class Controller(Node):
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
+              
+        period = float(self.get_parameter('control_period').value)
+        self._timer = self.create_timer(period, self.control_tick)
+        
         self._backup_active = False
         self._backup_target_m = 0.0
         self._backup_start_xy = None
@@ -280,8 +290,9 @@ class Controller(Node):
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
-                # Simple proportional-in-duty turning in place
-                w = clamp(yaw_err, -1.0, 1.0) * wmax
+                k_turn = float(self.get_parameter('turn_gain').value)
+                w = clamp(k_turn * yaw_err, -wmax, wmax)
+
                 left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
                 self.send_duty(left, right)
                 return
@@ -314,7 +325,9 @@ class Controller(Node):
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
             wmax = float(self.get_parameter('max_angular_speed').value)
-            w = clamp(yaw_err, -1.0, 1.0) * wmax
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+
             left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
             self.send_duty(left, right)
             return
@@ -326,8 +339,22 @@ class Controller(Node):
         wmax = float(self.get_parameter('max_angular_speed').value)
         k_steer = float(self.get_parameter('steering_gain').value)
 
+
         # Slow down in curves (simple, stable indoors)
-        v = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = clamp(v_curve, 0.0, v_nom)
+
+        # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
+        slow_radius = float(self.get_parameter('goal_slow_radius').value)
+        v_min = float(self.get_parameter('min_linear_speed').value)
+
+        slow_radius = max(0.05, slow_radius)
+        v_min = max(self._dc_min + 0.02, min(v_min, v_nom))  # keep above deadzone margin
+
+        approach = clamp(dist_to_goal / slow_radius, 0.0, 1.0)
+        v_goal = v_min + (v_nom - v_min) * approach
+
+        v = min(v_curve, v_goal)
         v = clamp(v, 0.0, v_nom)
 
         # Steering
