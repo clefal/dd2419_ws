@@ -34,7 +34,7 @@ class Mapping(Node):
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
         self.range_min = 0.1
-        self.range_max = 4.0
+        self.range_max = 10.0
 
         # Filter params
         self.median_filter_kernel_size = 5
@@ -114,7 +114,7 @@ class Mapping(Node):
 
         self.skipped_scans = 0
         
-        self.get_logger().info(f"{msg.header.frame_id}")
+        #self.get_logger().info(f"{msg.header.frame_id}")
         try:
             tf = self.tf_buffer.lookup_transform(
                 "map",
@@ -132,7 +132,7 @@ class Mapping(Node):
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
         )
 
-        self.get_logger().info(f"X: {x_robot}, Y: {y_robot}")
+        #self.get_logger().info(f"X: {x_robot}, Y: {y_robot}")
 
         filtered_ranges = self.median_filter_scan(msg.ranges, kernel_size=self.median_filter_kernel_size)
 

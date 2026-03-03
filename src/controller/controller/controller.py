@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 
 import math
-
+from typing import Tuple
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import String, Bool
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+
+from std_msgs.msg import String, Bool, Float32
+from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
 
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion
 
 
-def wrap_angle(a):
+def wrap_angle(a: float) -> float:
     while a > math.pi:
         a -= 2.0 * math.pi
     while a < -math.pi:
@@ -21,7 +23,7 @@ def wrap_angle(a):
     return a
 
 
-def clamp(x, lo, hi):
+def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
@@ -33,72 +35,69 @@ class Controller(Node):
         # Publishers / subscribers
         self._cmd_pub = self.create_publisher(DutyCycles, '/phidgets/motor/duty_cycles', 10)
         self._status_pub = self.create_publisher(String, '/nav/status', 10)
-        self.create_subscription(PoseStamped, '/nav/goal', self.goal_callback, 10)
-
-        # TF to get robot pose (odom -> base_link)
-        self._tf_buffer = Buffer()
-        self._tf_listener = TransformListener(self._tf_buffer, self)
-
-        self._fixed_frame = 'odom'      # set to localization
-        self._base_frame = 'base_link'
-
-        # Current goal
-        self._goal = None
-
-        # Minimal tuning (duty cycles)
-        self._v_max = 0.3
-        self._v_min = 0.08 #min to make robot move
-
-        self._w_max = 0.2
-        self._w_min = 0.09 #min to make robot move
-
-
-        self._k_w = 0.25
-        self._k_v = 0.6
-       
-
-        # Tolerances
-        self._xy_tol = 0.02 #0.1
-        self._yaw_tol = 0.05 #0.25
-        self._yaw_turn_thresh = 0.25 #0.35
-
-        # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz, encoders run at 20Hz
-
-        # turn publsiher
         self._turn_pub = self.create_publisher(Bool, '/nav/is_turning', 10)
 
 
+        path_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.create_subscription(Path, '/nav/global_path', self.path_callback, path_qos)
+        self.create_subscription(Float32, '/nav/backup_distance', self.backup_callback, 10)
 
-    def goal_callback(self, msg: PoseStamped):
-        self._goal = msg
-        self.publish_status('RUNNING')
+    
+        # TF: map -> base_link
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
 
-        gx = msg.pose.position.x
-        gy = msg.pose.position.y
+        self._fixed_frame = 'map'
+        self._base_frame = 'base_link'
 
-        q = msg.pose.orientation
-        gyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        # Latest path (map frame)
+        self._path_xy = []
+        self._goal_yaw = None
 
-        self.get_logger().info(f'Received new goal: x={gx:.3f}, y={gy:.3f}, yaw={gyaw:.3f} rad')
+        # Parameters
+        self.declare_parameter('lookahead_distance', 0.3)        # m
+        self.declare_parameter('nominal_linear_speed', 0.18)     # duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.22)        # duty-equivalent
+        self.declare_parameter('goal_tolerance', 0.10)           # m
+        self.declare_parameter('align_final_yaw', True)
+        self.declare_parameter('steering_gain', 0.55)
 
+        # Motor deadzone requirement: each wheel is 0 or |duty| >= this
+        self._dc_min = 0.08
+
+        # When to turn in place to reacquire path direction
+        self._turn_in_place_yaw_thresh = 0.60  # rad
+        self._yaw_tol = 0.05  # rad for final alignment
+
+        # Control loop
+        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
+        self._backup_active = False
+        self._backup_target_m = 0.0
+        self._backup_start_xy = None
+        self._backup_duty = 0.12
+
+    # ----------------------------
 
     def publish_status(self, s: str):
         msg = String()
         msg.data = s
         self._status_pub.publish(msg)
 
-    def send_duty(self, left, right):
+    def send_duty(self, left: float, right: float):
         m = DutyCycles()
         m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
         m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
         self._cmd_pub.publish(m)
 
-        # Publish turning status (True if wheels opposite directions)
+        # True when turning on the spot (opposite directions)
         turning_msg = Bool()
         turning_msg.data = (left * right < 0.0)
         self._turn_pub.publish(turning_msg)
-
 
     def stop(self):
         self.send_duty(0.0, 0.0)
@@ -115,63 +114,233 @@ class Controller(Node):
         yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
         return x, y, yaw
 
+    def path_callback(self, msg: Path):
+        frame = (msg.header.frame_id or '').strip()
+        self.get_logger().info(f"/nav/global_path received: frame='{frame}', poses={len(msg.poses)}")
+        if frame != self._fixed_frame:
+            self.get_logger().warn(
+                f'Received /nav/global_path in frame "{frame}", expected "{self._fixed_frame}". Ignoring.'
+            )
+            self._path_xy = []
+            self._goal_yaw = None
+            self.publish_status('FAILED')
+            return
+
+        if len(msg.poses) == 0:
+            self._path_xy = []
+            self._goal_yaw = None
+            self.publish_status('IDLE')
+            self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
+            return
+
+        self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
+
+        # Final yaw (planner now provides orientation)
+        q = msg.poses[-1].pose.orientation
+        self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+
+        self.publish_status('RUNNING')
+
+        sx, sy = self._path_xy[0]
+        gx, gy = self._path_xy[-1]
+        self.get_logger().info(
+            f"Received path: {len(msg.poses)} poses, start=({sx:.2f},{sy:.2f}), goal=({gx:.2f},{gy:.2f}), goal_yaw={self._goal_yaw:.2f} rad"
+        )
+
+    def backup_callback(self, msg: Float32):
+        d = float(msg.data)
+        if d <= 0.0:
+            self.get_logger().warn(f'Ignoring non-positive backup distance: {d:.3f}')
+            return
+        self._backup_active = True
+        self._backup_target_m = d
+        self._backup_start_xy = None
+        self._path_xy = []
+        self._goal_yaw = None
+        self.publish_status('RUNNING')
+        self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
+
+    # ----------------------------
+
+    def _closest_path_index(self, rx: float, ry: float) -> int:
+        best_i = 0
+        best_d2 = float('inf')
+        for i, (px, py) in enumerate(self._path_xy):
+            dx = px - rx
+            dy = py - ry
+            d2 = dx * dx + dy * dy
+            if d2 < best_d2:
+                best_d2 = d2
+                best_i = i
+        return best_i
+
+    def _lookahead_point(self, rx: float, ry: float, lookahead: float):
+        if not self._path_xy:
+            return None
+
+        i0 = self._closest_path_index(rx, ry)
+
+        for i in range(i0, len(self._path_xy)):
+            px, py = self._path_xy[i]
+            if math.hypot(px - rx, py - ry) >= lookahead:
+                return (px, py, i)
+
+        px, py = self._path_xy[-1]
+        return (px, py, len(self._path_xy) - 1)
+
+    @staticmethod
+    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
+        """
+        Requirement: each wheel is either 0 or |duty| >= min_dc.
+
+        - If both wheels same direction and one is just under min_dc: scale BOTH up to preserve ratio.
+        - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
+        - Finally: clamp tiny magnitudes to 0.
+        """
+        # Same direction (forward/back): scale both to keep ratio
+        if left * right > 0.0:
+            aL, aR = abs(left), abs(right)
+            m = min(aL, aR)
+            if 0.0 < m < min_dc:
+                scale = min_dc / m
+                left *= scale
+                right *= scale
+
+        # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
+        if left * right < 0.0:
+            if abs(left) > 0.0 and abs(left) < min_dc:
+                left = math.copysign(min_dc, left)
+            if abs(right) > 0.0 and abs(right) < min_dc:
+                right = math.copysign(min_dc, right)
+
+        # Per-wheel deadzone: tiny magnitudes become 0
+        if 0.0 < abs(left) < min_dc:
+            left = 0.0
+        if 0.0 < abs(right) < min_dc:
+            right = 0.0
+
+        return left, right
+    # ----------------------------
+
     def control_tick(self):
-        if self._goal is None:
+        if self._backup_active:
+            pose = self.get_pose_2d()
+            if pose is None:
+                self.stop()
+                self.publish_status('FAILED')
+                self.get_logger().warn('Backup failed: no TF pose available (map->base_link).')
+                self._backup_active = False
+                return
+
+            rx, ry, _ = pose
+            if self._backup_start_xy is None:
+                self._backup_start_xy = (rx, ry)
+
+            sx, sy = self._backup_start_xy
+            moved = math.hypot(rx - sx, ry - sy)
+            if moved >= self._backup_target_m:
+                self.stop()
+                self._backup_active = False
+                self.publish_status('REACHED')
+                self.get_logger().info(
+                    f'Backup complete: target={self._backup_target_m:.3f} m, moved={moved:.3f} m'
+                )
+                return
+
+            left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            self.send_duty(left, right)
+            return
+
+        # Empty path -> stop
+        if not self._path_xy:
+            self.stop()
             return
 
         pose = self.get_pose_2d()
         if pose is None:
             self.stop()
             self.publish_status('FAILED')
-            self._goal = None
-            self.get_logger().warn('No TF pose available (odom->base_link).')
+            self.get_logger().warn('No TF pose available (map->base_link).')
             return
 
-        x, y, yaw = pose
+        rx, ry, ryaw = pose
 
-        gx = self._goal.pose.position.x
-        gy = self._goal.pose.position.y
-        qg = self._goal.pose.orientation
-        gyaw = euler_from_quaternion([qg.x, qg.y, qg.z, qg.w])[2]
+        # Goal check
+        gx, gy = self._path_xy[-1]
+        goal_tol = float(self.get_parameter('goal_tolerance').value)
+        dist_to_goal = math.hypot(gx - rx, gy - ry)
 
-        dx = gx - x
-        dy = gy - y
-        dist = math.hypot(dx, dy)
+        if dist_to_goal <= goal_tol:
+            if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
+                yaw_err = wrap_angle(self._goal_yaw - ryaw)
+                if abs(yaw_err) <= self._yaw_tol:
+                    self.stop()
+                    self.publish_status('REACHED')
+                    self._path_xy = []
+                    return
 
-        heading = math.atan2(dy, dx)
-        yaw_err_to_goal = wrap_angle(heading - yaw) #pointing angle
-        yaw_err_final = wrap_angle(gyaw - yaw)      #requested goal angle
-
-        # REACHED?
-        if dist < self._xy_tol:
-            if abs(yaw_err_final) < self._yaw_tol:
-                self.stop()
-                self.publish_status('REACHED')
-                self._goal = None
+                wmax = float(self.get_parameter('max_angular_speed').value)
+                # Simple proportional-in-duty turning in place
+                w = clamp(yaw_err, -1.0, 1.0) * wmax
+                left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+                self.send_duty(left, right)
                 return
-            # Final align
-            w = clamp(self._k_w * yaw_err_final, -self._w_max, self._w_max)
-            if abs(w) < self._w_min:
-                w = math.copysign(self._w_min, w)
-            self.send_duty(-w, w)
+
+            self.stop()
+            self.publish_status('REACHED')
+            self._path_xy = []
             return
 
-        # TURN first if needed
-        if abs(yaw_err_to_goal) > self._yaw_turn_thresh:
-            w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
-            if abs(w) < self._w_min:
-                w = math.copysign(self._w_min, w)            
-            self.send_duty(-w, w)
+        # Lookahead target
+        lookahead = float(self.get_parameter('lookahead_distance').value)
+        lookahead = max(0.05, lookahead)
+        tgt = self._lookahead_point(rx, ry, lookahead)
+        if tgt is None:
+            self.stop()
             return
 
-        # DRIVE (with heading correction)
+        tx, ty, _ = tgt
 
-        v = clamp(self._k_v * dist, 0.0, self._v_max)
-        w = clamp(self._k_w * yaw_err_to_goal, -self._w_max, self._w_max)
-        v = max(v, self._v_min)
-        
+        # Target in robot frame
+        dx = tx - rx
+        dy = ty - ry
+        cos_y = math.cos(ryaw)
+        sin_y = math.sin(ryaw)
+        x_r = cos_y * dx + sin_y * dy
+        y_r = -sin_y * dx + cos_y * dy
+
+        # If target behind / too misaligned -> turn in place
+        heading_to_tgt = math.atan2(dy, dx)
+        yaw_err = wrap_angle(heading_to_tgt - ryaw)
+        if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            w = clamp(yaw_err, -1.0, 1.0) * wmax
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
+            return
+
+        # Pure Pursuit curvature: kappa = 2*y_r / L^2
+        kappa = (2.0 * y_r) / (lookahead * lookahead)
+
+        v_nom = float(self.get_parameter('nominal_linear_speed').value)
+        wmax = float(self.get_parameter('max_angular_speed').value)
+        k_steer = float(self.get_parameter('steering_gain').value)
+
+        # Slow down in curves (simple, stable indoors)
+        v = v_nom / (1.0 + 3.0 * abs(kappa))
+        v = clamp(v, 0.0, v_nom)
+
+        # Steering
+        w = k_steer * v * kappa
+        w = clamp(w, -wmax, wmax)
+
+        # Convert to wheel duties
         left = v - w
         right = v + w
+
+        # Enforce only the actuator requirement at the wheel level
+        left, right = self.enforce_motor_deadzone_pair(left, right, self._dc_min)
+
         self.send_duty(left, right)
 
 
