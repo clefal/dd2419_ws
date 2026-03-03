@@ -70,7 +70,7 @@ class Controller(Node):
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
-        self.declare_parameter('turn_gain', 0.7)                 # duty-per-rad for in-place turning
+        self.declare_parameter('turn_gain', 0.5)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.02)           # s (0.05=20Hz, 0.1=10Hz)
 
 
