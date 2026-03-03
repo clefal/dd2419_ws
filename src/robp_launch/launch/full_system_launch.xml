@@ -7,16 +7,16 @@
   <include file="$(find-pkg-share mapping)/launch/workspace_loader.launch.py"/>
 
   <!-- Hardware/sensors -->
-  <!-- <include file="$(find-pkg-share robp_launch)/launch/arm_launch.yaml"/> -->
-  <!-- <include file="$(find-pkg-share robp_launch)/launch/realsense_launch.yaml"/> -->
-  <!-- <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/> -->
-  <!-- <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/> -->
+  <include file="$(find-pkg-share robp_launch)/launch/arm_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/realsense_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
 
   <!-- Nodes -->
   <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
   <node pkg="mapping" exec="mapping_prob" name="mapping" output="log"/>
 
-  <!-- <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/> -->
+  <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
   <!-- <node pkg="controller" exec="controller" name="controller" output="log"/> -->
 
 
