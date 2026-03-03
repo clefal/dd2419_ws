@@ -35,7 +35,7 @@ class GoalManager(Node):
         self._state = AutoState.IDLE
         self._latest_cube = None
         self._detection_locked = False
-        self._approach_distance = 0.18
+        self._approach_distance = 0.17
 
         self._merge_radius = 0.10  # m, deduplicate detections
         self._cubes = []      # list of (x, y) in fixed frame
@@ -150,7 +150,7 @@ class GoalManager(Node):
 
                 self._detection_locked = False
                 self._state = AutoState.BACKUP_AFTER_DROP
-                self.publish_backup_distance(0.10)
+                self.publish_backup_distance(0.15)
                 
             elif msg.data == 'DROP_FAIL_NO_OBJECT':
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')

@@ -60,12 +60,12 @@ class Controller(Node):
         self._goal_yaw = None
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.3)        # m
-        self.declare_parameter('nominal_linear_speed', 0.18)     # duty-equivalent
-        self.declare_parameter('max_angular_speed', 0.22)        # duty-equivalent
+        self.declare_parameter('lookahead_distance', 0.4)        # m
+        self.declare_parameter('nominal_linear_speed', 0.25)     # duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.2)        # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.10)           # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.55)
+        self.declare_parameter('steering_gain', 0.5)
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
