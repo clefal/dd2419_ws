@@ -7,7 +7,7 @@ from rclpy.node import Node
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String, Bool, Float32
 from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
 
@@ -45,6 +45,7 @@ class Controller(Node):
             depth=1,
         )
         self.create_subscription(Path, '/nav/global_path', self.path_callback, path_qos)
+        self.create_subscription(Float32, '/nav/backup_distance', self.backup_callback, 10)
 
     
         # TF: map -> base_link
@@ -75,6 +76,10 @@ class Controller(Node):
 
         # Control loop
         self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
+        self._backup_active = False
+        self._backup_target_m = 0.0
+        self._backup_start_xy = None
+        self._backup_duty = 0.12
 
     # ----------------------------
 
@@ -142,6 +147,19 @@ class Controller(Node):
             f"Received path: {len(msg.poses)} poses, start=({sx:.2f},{sy:.2f}), goal=({gx:.2f},{gy:.2f}), goal_yaw={self._goal_yaw:.2f} rad"
         )
 
+    def backup_callback(self, msg: Float32):
+        d = float(msg.data)
+        if d <= 0.0:
+            self.get_logger().warn(f'Ignoring non-positive backup distance: {d:.3f}')
+            return
+        self._backup_active = True
+        self._backup_target_m = d
+        self._backup_start_xy = None
+        self._path_xy = []
+        self._goal_yaw = None
+        self.publish_status('RUNNING')
+        self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
+
     # ----------------------------
 
     def _closest_path_index(self, rx: float, ry: float) -> int:
@@ -205,6 +223,34 @@ class Controller(Node):
     # ----------------------------
 
     def control_tick(self):
+        if self._backup_active:
+            pose = self.get_pose_2d()
+            if pose is None:
+                self.stop()
+                self.publish_status('FAILED')
+                self.get_logger().warn('Backup failed: no TF pose available (map->base_link).')
+                self._backup_active = False
+                return
+
+            rx, ry, _ = pose
+            if self._backup_start_xy is None:
+                self._backup_start_xy = (rx, ry)
+
+            sx, sy = self._backup_start_xy
+            moved = math.hypot(rx - sx, ry - sy)
+            if moved >= self._backup_target_m:
+                self.stop()
+                self._backup_active = False
+                self.publish_status('REACHED')
+                self.get_logger().info(
+                    f'Backup complete: target={self._backup_target_m:.3f} m, moved={moved:.3f} m'
+                )
+                return
+
+            left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            self.send_duty(left, right)
+            return
+
         # Empty path -> stop
         if not self._path_xy:
             self.stop()
