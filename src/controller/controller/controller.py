@@ -61,7 +61,7 @@ class Controller(Node):
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.4)        # m
-        self.declare_parameter('nominal_linear_speed', 0.25)     # duty-equivalent
+        self.declare_parameter('nominal_linear_speed', 0.35)     # duty-equivalent
         self.declare_parameter('max_angular_speed', 0.2)        # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.10)           # m
         self.declare_parameter('align_final_yaw', True)
