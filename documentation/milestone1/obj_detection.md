@@ -7,6 +7,7 @@ pixi run ros2 run odometry odometry --ros-args -p use_sim_time:=true
 pixi run ros2 launch robp_launch frames_launch.xml
 pixi run ros2 bag play --read-ahead-queue-size 100 -l -r 1.0 --clock 100 --start-paused ~/dd2419_ws/rosbags/obj_det_odom_opti_rosbag
 pixi run ros2 run detection detection --ros-args -p use_sim_time:=true
+pixi run mapping
 ```
 
 __ssh into the Robot in Clemens Hotspot:__
@@ -57,6 +58,7 @@ __Buffering and Clustering:__
     - then we return the centroid and publish it
     - we do that for all objects, so we do the same thing for every cube
         --> currently we publish all centroids that are detected, we should implement something that checks wich one is more likely since probably one will be noise (if 2 blue objects are detected than one is probablyl noise)
+
 
 
 __What's next?__

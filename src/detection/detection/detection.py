@@ -13,10 +13,14 @@ import sensor_msgs_py.point_cloud2 as pc2
 from sensor_msgs.msg import PointField
 from geometry_msgs.msg import PointStamped
 from tf2_ros import Buffer, TransformListener
-import tf2_geometry_msgs # Required for transform_points
 from scipy.spatial.transform import Rotation
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
+from nav_msgs.msg import OccupancyGrid
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
+import math
+
+
 
 import ctypes
 import struct
@@ -27,37 +31,78 @@ class Detection(Node):
     def __init__(self):
         super().__init__('detection')
 
-        # Initialize the publisher
-        self._pub = self.create_publisher(
-            PointCloud2, '/camera/depth/color/ds_points', 10, callback_group=ReentrantCallbackGroup())
-        
-        self.red_centroid_pub = self.create_publisher(PointStamped, '/detection/objects/red_cube', 10, callback_group=ReentrantCallbackGroup())
-        self.green_centroid_pub = self.create_publisher(PointStamped, '/detection/objects/green_cube', 10, callback_group=ReentrantCallbackGroup())
-        self.blue_centroid_pub = self.create_publisher(PointStamped, '/detection/objects/blue_cube', 10, callback_group=ReentrantCallbackGroup())
-        self.wood_centroid_pub = self.create_publisher(PointStamped, '/detection/objects/wood_cube', 10, callback_group=ReentrantCallbackGroup())
+        ### DECLARE PARAMETERS ###          
+        # Clustering & Detection params
+        self.declare_parameter("min_samples", 10)
+        self.declare_parameter("eps", 0.03)
+        self.declare_parameter("obj_width", 0.03)
+        self.declare_parameter("tolerance", 0.03)
+        self.declare_parameter("buffer_size", 3)
+        self.declare_parameter("max_general_counter", 3000)
+        self.declare_parameter("obstacle_distance_m", 0.15)
+        self.declare_parameter("occupancy_threshold", 51) # threshold used for occupancy grid check
 
-        # Subscribe to point cloud topic and call callback function on each received message
-        self.create_subscription(
-            PointCloud2, '/realsense/depth/color/points', self.cloud_callback, 10, callback_group=ReentrantCallbackGroup())
-        
+        # Topic params
+        self.declare_parameter("input_cloud_topic", "/realsense/depth/color/points")
+        self.declare_parameter("output_pointcloud_topic", "/camera/depth/color/ds_points")
+        self.declare_parameter("red_cube_topic", "/detection/objects/red_cube")
+        self.declare_parameter("green_cube_topic", "/detection/objects/green_cube")
+        self.declare_parameter("blue_cube_topic", "/detection/objects/blue_cube")
+        self.declare_parameter("wood_cube_topic", "/detection/objects/wood_cube")
+        self.declare_parameter("occupancy_grid_topic", "/map/occupancy_grid")
+
+        ### GET PARAMETERS ###
+        # Set clustering & detection params to class attributes
+        self.min_samples = self.get_parameter("min_samples").value
+        self.eps = self.get_parameter("eps").value
+        self.obj_width = self.get_parameter("obj_width").value
+        self.tolerance = self.get_parameter("tolerance").value
+        self.buffer_size = self.get_parameter("buffer_size").value
+        self.max_general_counter = self.get_parameter("max_general_counter").value
+
+        # Fetch topic strings 
+        input_cloud_topic = self.get_parameter("input_cloud_topic").value
+        output_pointcloud_topic = self.get_parameter("output_pointcloud_topic").value
+        red_cube_topic = self.get_parameter("red_cube_topic").value
+        green_cube_topic = self.get_parameter("green_cube_topic").value
+        blue_cube_topic = self.get_parameter("blue_cube_topic").value
+        wood_cube_topic = self.get_parameter("wood_cube_topic").value
+        occupancy_grid_topic = self.get_parameter("occupancy_grid_topic").value
+
+        # ------------------- INTERNAL SETUP ---------------
+        # get thresholds during initialization
         self.thresh = self.get_thresholds()
-
-        # initialize clustering parameters
-        self.min_samples = 5 # min number of samples to be considered one object
-        self.eps = 0.02 # ponints within this distance to each other are considered one object
-        self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
-        self.obj_width = 0.03  # meters
-        self.obj_width = 0.03 # meters
-        self.tolerance = 0.03    # +/- 3cm tolerance
-
-        # initialize TF
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # initialize point buffering
         self.point_buffers = {'red': [], 'green':[], 'blue': [], 'wood':[]}
-        self.buffer_size = 3 # number of pointclouds we buffer before performing the clustering
 
+        # initialize TF and DBSCAN for clustering
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+
+        # Initialize the publisher
+        self._pub = self.create_publisher(
+            PointCloud2, output_pointcloud_topic, 10, callback_group=ReentrantCallbackGroup())
+        
+        self.red_centroid_pub = self.create_publisher(PointStamped, red_cube_topic, 10, callback_group=ReentrantCallbackGroup())
+        self.green_centroid_pub = self.create_publisher(PointStamped, green_cube_topic, 10, callback_group=ReentrantCallbackGroup())
+        self.blue_centroid_pub = self.create_publisher(PointStamped, blue_cube_topic, 10, callback_group=ReentrantCallbackGroup())
+        self.wood_centroid_pub = self.create_publisher(PointStamped, wood_cube_topic, 10, callback_group=ReentrantCallbackGroup())
+
+        # Subscribe to point cloud topic and call callback function on each received message
+        self.create_subscription(
+            PointCloud2, input_cloud_topic, self.cloud_callback, 10, callback_group=ReentrantCallbackGroup())
+        
+        # 1. Define the Latched QoS Profile
+        latched_qos = QoSProfile(
+            depth=1,                                            # Keep only the last message
+            history=QoSHistoryPolicy.KEEP_LAST,                 # Standard history policy for latching
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,     # THIS is what makes it "latched"
+            reliability=QoSReliabilityPolicy.RELIABLE           # Ensure the latched message actually arrives
+        )
+        self.create_subscription(OccupancyGrid, occupancy_grid_topic, self.occupancy_grid_callback, callback_group=ReentrantCallbackGroup(),qos_profile=latched_qos)
+        self.occupancy_grid = None 
 
 
     def cloud_callback(self, msg: PointCloud2):
@@ -83,14 +128,14 @@ class Detection(Node):
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
         # the cleanest solution is to filter the points in the odom/map frame this should be implemented in the future
         # also it should be checked if the 
-        # TODO filter out the floor as well!
 
         points_f = points[geom_mask]
         colors_f = colors[geom_mask]
 
+        # transform points to map coordinates
         points_map = self.transform_points_to_map(points_f, msg.header)
 
-
+        # apply the tresholds to the points and return the filter masks
         red_mask, green_mask, blue_mask, wood_mask = self.get_masks(colors_f) # returns the color masks based on threshold values
 
         # Chek how many red,green,... points we have
@@ -101,9 +146,18 @@ class Detection(Node):
 
         general_counter = red_counter + green_counter + blue_counter + wood_counter
 
-        if general_counter == 0: return # end callback if we have no hits in general
-
+        # end callback if we have no hits in general
+        if general_counter == 0: return 
         
+        # end callback if we detect too many colorful points (because it is likely that there are a lot of false positives)
+        elif general_counter >= self.max_general_counter: 
+            self.get_logger().info(f'many hits by color thresholding, danger of false positives, detection iteration aborted')
+            self.point_buffers['red'] = []
+            self.point_buffers['green'] = []
+            self.point_buffers['blue'] = []
+            self.point_buffers['wood'] = []
+            return
+
         fields = [ # only for visualization in rviz, is actually not relevant
             PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
@@ -199,11 +253,16 @@ class Detection(Node):
                 msg_wood = pc2.create_cloud(centroid_header, fields, all_wood_points)
                 self._pub.publish(msg_wood)
 
-                # for centroid in wood_centroids:     # so that marius can experiment with it i will uncomment this line 
-                    #self.publish_detection(centroid, centroid_header, 'wood')
+                for centroid in wood_centroids:     # so that marius can experiment with it i will uncomment this line 
+                    self.publish_detection(centroid, centroid_header, 'wood')
                     
                 self.point_buffers['wood'] = [] # after publishing clear the buffer
             
+
+    def occupancy_grid_callback(self, msg :OccupancyGrid):
+        #self.get_logger().info(f'revieved occupancy grid message')
+        self.occupancy_grid = msg
+        return
 
     def transform_points_to_map(self, points_np, header :Header):
         """
@@ -241,8 +300,6 @@ class Detection(Node):
             self.get_logger().warn(f'Transform failed: {e}')
             return np.empty((0,3))
 
-
-
     def get_masks(self, colors):
         'gets the colors of the points as imput and returns the color masks'
         # conversion of color spaces from rgb to oklab
@@ -274,8 +331,6 @@ class Detection(Node):
 
         return red_mask, green_mask, blue_mask, wood_mask
     
-
-
     def process_clusters(self, points_3d):
         """
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
@@ -325,6 +380,64 @@ class Detection(Node):
 
         return valid_centroids
     
+    def is_close_to_obstacle(self, x, y):
+        """
+        Checks if a given (x, y) point is within a tunable distance of an obstacle.
+        """
+        if self.occupancy_grid is None:
+            self.get_logger().warn("Occupancy grid is not yet available.")
+            return False
+
+        # 1. Fetch tuning parameters (assuming you declared these in __init__)
+        # Distance to check around the point (in meters)
+        search_radius_m = self.get_parameter("obstacle_distance_m").value
+        # Value at which a cell is considered solid
+        occ_threshold = self.get_parameter("occupancy_threshold").value
+
+        # 2. Extract map metadata
+        resolution = self.occupancy_grid.info.resolution
+        width = self.occupancy_grid.info.width
+        height = self.occupancy_grid.info.height
+        origin_x = self.occupancy_grid.info.origin.position.x
+        origin_y = self.occupancy_grid.info.origin.position.y
+
+        # 3. Convert physical (x, y) to grid indices (col, row)
+        center_col = int((x - origin_x) / resolution)
+        center_row = int((y - origin_y) / resolution)
+
+        # Quick check: is the point even inside the map?
+        if not (0 <= center_col < width and 0 <= center_row < height):
+            self.get_logger().warn("Point is outside the map bounds.")
+            return True # Often safer to treat out-of-bounds as an obstacle
+
+        # 4. Convert search radius from meters to cells
+        radius_cells = math.ceil(search_radius_m / resolution)
+
+        # 5. Search the bounding box around the target point
+        for r_offset in range(-radius_cells, radius_cells + 1):
+            for c_offset in range(-radius_cells, radius_cells + 1):
+                
+                # Check if the offset is within the circular radius (Euclidean distance)
+                if math.sqrt(r_offset**2 + c_offset**2) <= radius_cells:
+                    
+                    check_row = center_row + r_offset
+                    check_col = center_col + c_offset
+
+                    # Ensure the cell we are checking is within grid bounds
+                    if 0 <= check_row < height and 0 <= check_col < width:
+                        
+                        # Calculate the 1D index for the flat data array
+                        # Index = row * width + col
+                        index = check_row * width + check_col
+                        
+                        cell_value = self.occupancy_grid.data[index]
+
+                        # Check against the tunable threshold
+                        if cell_value >= occ_threshold:
+                            return True  # Found an obstacle!
+
+        # If the loop finishes without triggering the threshold, the area is clear
+        return False
 
     def publish_detection(self, centroid, header, color):
         # ToDo add
@@ -334,6 +447,13 @@ class Detection(Node):
         msg.point.y = centroid[1]
         msg.point.z = centroid[2]
 
+        if self.is_close_to_obstacle(centroid[0],centroid[1]):
+            self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
+            return
+        else:
+            self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
+
+
         if color == 'red':
             self.red_centroid_pub.publish(msg)
         elif color == 'green':
@@ -342,7 +462,6 @@ class Detection(Node):
             self.blue_centroid_pub.publish(msg)
         elif color == 'wood':
             self.wood_centroid_pub.publish(msg)
-
 
     def get_thresholds(self):
 
