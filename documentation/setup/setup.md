@@ -25,3 +25,10 @@ pixi run lidar
 ```
 
 1. Open rviz or rqt to send commands or visualize data
+
+Full system launch file:
+
+```bash
+pixi run full_system_launch
+```
+comment out which nodes you want to run or not.
