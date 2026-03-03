@@ -215,17 +215,11 @@ class GoalManager(Node):
                 self._target_ = best
                 self.publish_topics()
                 tx, ty = best
-                heading = math.atan2(ty - ry, tx - rx)
-                dist = math.hypot(tx - rx, ty - ry)
-                if dist > 1e-6:
-                    if dist <= self._approach_distance:
-                        ax, ay = rx, ry
-                    else:
-                        ax = tx - self._approach_distance * math.cos(heading)
-                        ay = ty - self._approach_distance * math.sin(heading)
-                    ayaw = math.atan2(ty - ay, tx - ax)
-                    self._state = AutoState.APPROACH_OBJECT
-                    self.publish_goal(ax, ay, ayaw)
+                self._state = AutoState.APPROACH_OBJECT
+                self.get_logger().info(
+                    f'Target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                )
+                self.publish_goal(tx, ty, 0.0)
 
         self._static_loaded = True
     # ----------------------------
@@ -353,30 +347,12 @@ class GoalManager(Node):
         self.publish_topics()  # publish updated target immediately
 
         tx, ty = best
-        dx = tx - rx
-        dy = ty - ry
-        dist = math.hypot(dx, dy)
-        if dist < 1e-6:
-            return
-
-        heading_to_object = math.atan2(dy, dx)
-
-        # Approach point with standoff distance
-        if dist <= self._approach_distance:
-            ax, ay = rx, ry
-        else:
-            ax = tx - self._approach_distance * math.cos(heading_to_object)
-            ay = ty - self._approach_distance * math.sin(heading_to_object)
-
-        ayaw = math.atan2(ty - ay, tx - ax)
-
-        # Enter/keep approach state; trigger replanning via new goal
+        # Enter/keep approach state; trigger replanning via cube-center goal
         self._state = AutoState.APPROACH_OBJECT
         self.get_logger().info(
-            f'Target  cube at x={tx:.2f}, y={ty:.2f}. '
-            f'Publishing approach goal x={ax:.2f}, y={ay:.2f}, yaw={ayaw:.2f}.'
+            f'Target cube at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
         )
-        self.publish_goal(ax, ay, ayaw)
+        self.publish_goal(tx, ty, 0.0)
 
 
     # ----------------------------
@@ -473,19 +449,12 @@ class GoalManager(Node):
                 self.publish_topics()
 
                 tx, ty = best
-                heading = math.atan2(ty - ry, tx - rx)
-                dist = math.hypot(tx - rx, ty - ry)
-                if dist > 1e-6:
-                    if dist <= self._approach_distance:
-                        ax, ay = rx, ry
-                    else:
-                        ax = tx - self._approach_distance * math.cos(heading)
-                        ay = ty - self._approach_distance * math.sin(heading)
-                    ayaw = math.atan2(ty - ay, tx - ax)
-
-                    self._state = AutoState.APPROACH_OBJECT
-                    self.publish_goal(ax, ay, ayaw)
-                    return
+                self._state = AutoState.APPROACH_OBJECT
+                self.get_logger().info(
+                    f'Target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                )
+                self.publish_goal(tx, ty, 0.0)
+                return
 
         # No cubes known: return to SEARCH
         self._state = AutoState.SEARCH

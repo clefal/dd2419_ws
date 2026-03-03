@@ -10,7 +10,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray
 from tf2_ros import Buffer, TransformListener
-from tf_transformations import euler_from_quaternion
+from tf_transformations import euler_from_quaternion, quaternion_from_euler
 
 
 GridIndex = Tuple[int, int]  # (gx, gy)
@@ -44,6 +44,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
+        self.declare_parameter("cube_approach_radius", 0.17)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -194,6 +195,13 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
+        # For cube goals, cut path at approach radius and face cube
+        final_yaw_override = None
+        maybe_path, maybe_yaw = self._apply_cube_approach_if_needed(path_idx)
+        if maybe_path is not None and len(maybe_path) > 0:
+            path_idx = maybe_path
+            final_yaw_override = maybe_yaw
+
         # Convert to nav_msgs/Path in map frame
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
@@ -209,8 +217,14 @@ class GlobalPlannerNode(Node):
             ps.pose.orientation.w = 1.0
             path_msg.poses.append(ps)
 
-        # Set final pose orientation to the goal orientation (yaw)
-        if len(path_msg.poses) > 0 and self._goal_msg is not None:
+        # Set final pose orientation
+        if len(path_msg.poses) > 0 and final_yaw_override is not None:
+            q = quaternion_from_euler(0.0, 0.0, final_yaw_override)
+            path_msg.poses[-1].pose.orientation.x = q[0]
+            path_msg.poses[-1].pose.orientation.y = q[1]
+            path_msg.poses[-1].pose.orientation.z = q[2]
+            path_msg.poses[-1].pose.orientation.w = q[3]
+        elif len(path_msg.poses) > 0 and self._goal_msg is not None:
             if self._goal_msg.header.frame_id == self.global_frame or self._goal_msg.header.frame_id == "":
                 path_msg.poses[-1].pose.orientation = self._goal_msg.pose.orientation
             else:
@@ -310,6 +324,52 @@ class GlobalPlannerNode(Node):
             step = math.sqrt(2.0) if (dx == 1 and dy == 1) else 1.0
             total += step + self.cell_penalty(x1, y1, occ, meta)
         return total
+
+    def _apply_cube_approach_if_needed(
+        self, path_idx: List[GridIndex]
+    ) -> Tuple[Optional[List[GridIndex]], Optional[float]]:
+        if self._goal_msg is None or self._meta is None:
+            return (None, None)
+
+        tx = self._goal_msg.pose.position.x
+        ty = self._goal_msg.pose.position.y
+
+        radius = self.get_parameter("cube_approach_radius").get_parameter_value().double_value
+        if radius <= 0.0:
+            return (None, None)
+
+        cut_idx = self._path_index_at_radius(path_idx, tx, ty, radius, self._meta)
+        if cut_idx is None:
+            return (None, None)
+
+        truncated = path_idx[:cut_idx + 1]
+        ax, ay = self.grid_to_world_center(truncated[-1][0], truncated[-1][1], self._meta)
+        yaw = math.atan2(ty - ay, tx - ax)
+        self.get_logger().info(
+            f"Cube approach applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
+        )
+        return (truncated, yaw)
+
+    @staticmethod
+    def _path_index_at_radius(
+        path_idx: List[GridIndex], tx: float, ty: float, radius: float, meta: GridMeta
+    ) -> Optional[int]:
+        if len(path_idx) == 0:
+            return None
+
+        prev_dist = None
+        for i, (gx, gy) in enumerate(path_idx):
+            wx, wy = GlobalPlannerNode.grid_to_world_center(gx, gy, meta)
+            d = math.hypot(wx - tx, wy - ty)
+            if d <= radius:
+                if i == 0:
+                    return 0
+                if prev_dist is None:
+                    return i
+                return i - 1 if prev_dist > radius else i
+            prev_dist = d
+
+        return None
 
     def _publish_empty_path(self, reason: str = "unknown") -> None:
         path_msg = Path()
