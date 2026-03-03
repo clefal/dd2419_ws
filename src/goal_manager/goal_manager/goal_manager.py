@@ -68,13 +68,13 @@ class GoalManager(Node):
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
+        #self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._static_loaded = False
-        self.create_timer(0.5, self.try_load_static_frames_once)
+        #self.create_timer(0.5, self.try_load_static_frames_once)
 
         self._waiting_for_result = False
 
