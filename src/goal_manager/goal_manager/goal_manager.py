@@ -9,7 +9,7 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import PoseStamped, PointStamped, PoseArray
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
 
@@ -21,6 +21,7 @@ class AutoState(Enum):
     APPROACH_OBJECT = 'APPROACH_OBJECT'
     WAIT_PICKUP_RESULT = 'WAIT_PICKUP_RESULT'
     RETURN_HOME = 'RETURN_HOME'
+    BACKUP_AFTER_DROP = 'BACKUP_AFTER_DROP'
     WAIT_DROP_RESULT = 'WAIT_DROP_RESULT'
 
 
@@ -47,6 +48,7 @@ class GoalManager(Node):
         self._home_x = 0.0
         self._home_y = 0.0
         self._home_yaw = 0.0
+        self._box_side_offset = 0.18    #TODO
 
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
@@ -61,9 +63,11 @@ class GoalManager(Node):
 
 
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
+        self._goal_candidates_pub = self.create_publisher(PoseArray, '/nav/goal_candidates', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
         self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
         self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
+        self._backup_pub = self.create_publisher(Float32, '/nav/backup_distance', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
@@ -108,6 +112,13 @@ class GoalManager(Node):
                     self._state = AutoState.WAIT_DROP_RESULT
                 else:
                     self.get_logger().warn('Return-home goal failed. Drop command will not be sent.')
+            elif not self.manual_goal and self._state == AutoState.BACKUP_AFTER_DROP:
+                if msg.data == 'REACHED':
+                    self.get_logger().info('Backup after drop complete.')
+                    self._continue_after_drop()
+                else:
+                    self.get_logger().warn(f'Backup after drop failed with status={msg.data}. Continuing anyway.')
+                    self._continue_after_drop()
 
     # ----------------------------
 
@@ -126,7 +137,7 @@ class GoalManager(Node):
                 self.publish_topics()
 
                 self._state = AutoState.RETURN_HOME
-                self.publish_goal(self._home_x, self._home_y, self._home_yaw)
+                self.publish_box_goal_candidates()
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
             else:
@@ -138,35 +149,8 @@ class GoalManager(Node):
                 self.get_logger().info('Drop succeeded.')
 
                 self._detection_locked = False
-
-                # If we still have cubes, go for the closest one; else go to SEARCH point
-                if len(self._cubes) > 0:
-                    robot_xy = self.get_robot_xy()
-                    if robot_xy is not None:
-                        rx, ry = robot_xy
-                        best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
-                        self._target_ = best
-                        self.publish_topics()
-
-                        tx, ty = best
-                        heading = math.atan2(ty - ry, tx - rx)
-                        dist = math.hypot(tx - rx, ty - ry)
-                        if dist > 1e-6:
-                            if dist <= self._approach_distance:
-                                ax, ay = rx, ry
-                            else:
-                                ax = tx - self._approach_distance * math.cos(heading)
-                                ay = ty - self._approach_distance * math.sin(heading)
-                            ayaw = math.atan2(ty - ay, tx - ax)
-
-                            self._state = AutoState.APPROACH_OBJECT
-                            self.publish_goal(ax, ay, ayaw)
-                            return
-
-                # No cubes known: return to SEARCH
-                self._state = AutoState.SEARCH
-                self.publish_goal(self._search_x, self._search_y, self._search_yaw)
-                self.get_logger().info('State SEARCH: navigating to fixed search point while detection runs.')
+                self._state = AutoState.BACKUP_AFTER_DROP
+                self.publish_backup_distance(0.10)
                 
             elif msg.data == 'DROP_FAIL_NO_OBJECT':
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')
@@ -427,6 +411,42 @@ class GoalManager(Node):
 
         self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
 
+    def publish_box_goal_candidates(self):
+        # Approach box from its two long sides (left/right in box local frame).
+        axis_yaw = self._home_yaw + math.pi / 2.0
+        ux = math.cos(axis_yaw)
+        uy = math.sin(axis_yaw)
+
+        cands = [
+            (self._home_x + self._box_side_offset * ux, self._home_y + self._box_side_offset * uy),
+            (self._home_x - self._box_side_offset * ux, self._home_y - self._box_side_offset * uy),
+        ]
+
+        pa = PoseArray()
+        pa.header.stamp = self.get_clock().now().to_msg()
+        pa.header.frame_id = self._fixed_frame
+
+        for (gx, gy) in cands:
+            pose = PoseStamped().pose
+            pose.position.x = float(gx)
+            pose.position.y = float(gy)
+            pose.position.z = 0.0
+            yaw_to_box = math.atan2(self._home_y - gy, self._home_x - gx)
+            q = quaternion_from_euler(0.0, 0.0, yaw_to_box)
+            pose.orientation.x = q[0]
+            pose.orientation.y = q[1]
+            pose.orientation.z = q[2]
+            pose.orientation.w = q[3]
+            pa.poses.append(pose)
+
+        self._goal_candidates_pub.publish(pa)
+        self._waiting_for_result = True
+        self.get_logger().info(
+            f'Box goal candidates sent: '
+            f'c0=({cands[0][0]:.2f},{cands[0][1]:.2f}), '
+            f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f})'
+        )
+
     # ----------------------------
 
     def publish_arm_status(self, text: str):
@@ -434,6 +454,43 @@ class GoalManager(Node):
         msg.data = text
         self._arm_status_pub.publish(msg)
         self.get_logger().info(f'Arm status command sent: {text}')
+
+    def publish_backup_distance(self, meters: float):
+        msg = Float32()
+        msg.data = float(meters)
+        self._backup_pub.publish(msg)
+        self._waiting_for_result = True
+        self.get_logger().info(f'Backup command sent: {meters:.2f} m')
+
+    def _continue_after_drop(self):
+        # If we still have cubes, go for the closest one; else go to SEARCH point
+        if len(self._cubes) > 0:
+            robot_xy = self.get_robot_xy()
+            if robot_xy is not None:
+                rx, ry = robot_xy
+                best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
+                self._target_ = best
+                self.publish_topics()
+
+                tx, ty = best
+                heading = math.atan2(ty - ry, tx - rx)
+                dist = math.hypot(tx - rx, ty - ry)
+                if dist > 1e-6:
+                    if dist <= self._approach_distance:
+                        ax, ay = rx, ry
+                    else:
+                        ax = tx - self._approach_distance * math.cos(heading)
+                        ay = ty - self._approach_distance * math.sin(heading)
+                    ayaw = math.atan2(ty - ay, tx - ax)
+
+                    self._state = AutoState.APPROACH_OBJECT
+                    self.publish_goal(ax, ay, ayaw)
+                    return
+
+        # No cubes known: return to SEARCH
+        self._state = AutoState.SEARCH
+        self.publish_goal(self._search_x, self._search_y, self._search_yaw)
+        self.get_logger().info('State SEARCH: navigating to fixed search point while detection runs.')
 
     # ----------------------------
 
