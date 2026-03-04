@@ -63,6 +63,7 @@ def generate_launch_description():
             ]
         ),
 
+
         # --- Static TF: base_link -> camera ---
         Node(
             package='tf2_ros',
@@ -77,8 +78,7 @@ def generate_launch_description():
                 '--qz', '0.5',
                 '--qw', '-0.5',
                 '--frame-id', 'base_link',
-                '--child-frame-id', 'realsense_camera_depth_optical_frame'
+                '--child-frame-id', 'realsense_camera_link'
             ]
-        ),
-
+        )
     ])
