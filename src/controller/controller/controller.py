@@ -65,14 +65,14 @@ class Controller(Node):
         self.declare_parameter('max_angular_speed', 0.2)        # duty-equivalent
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.4)
+        self.declare_parameter('steering_gain', 0.5)
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.3)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.1)           # s (0.05=20Hz, 0.1=10Hz)
-        self.declare_parameter('wheel_slew_rate', 1.2)          # duty/s max per-wheel change (except stop)
+        self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
 
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
