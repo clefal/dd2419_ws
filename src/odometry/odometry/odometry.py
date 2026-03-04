@@ -156,7 +156,7 @@ class Odometry(Node):
         self.publish_path(stamp, self._x, self._y, self._yaw)
 
     def broadcast_transform(self, stamp, x, y, yaw):
-        print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
+        #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'
