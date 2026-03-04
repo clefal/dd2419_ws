@@ -116,7 +116,7 @@ class Odometry(Node):
         self._yaw = - wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2] - self._initial_yaw_imu)
 
         # Publish TF at IMU rate for smooth orientation
-        # self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
+        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
 
 
     def encoder_callback(self, msg: Encoders):
