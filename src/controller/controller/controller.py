@@ -217,8 +217,7 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
-    @staticmethod
-    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
+    def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
         Requirement: each wheel is either 0 or |duty| >= min_dc.
 
@@ -226,25 +225,40 @@ class Controller(Node):
         - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
         - Finally: clamp tiny magnitudes to 0.
         """
+        orig_left, orig_right = left, right
+        reasons = []
+
         # Same direction (forward/back): avoid global rescaling (can cause sudden jumps).
         if left * right > 0.0:
             if 0.0 < abs(left) < min_dc:
                 left = math.copysign(min_dc, left)
+                reasons.append('same_dir_left_lifted')
             if 0.0 < abs(right) < min_dc:
                 right = math.copysign(min_dc, right)
+                reasons.append('same_dir_right_lifted')
 
         # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
         if left * right < 0.0:
             if abs(left) > 0.0 and abs(left) < min_dc:
                 left = math.copysign(min_dc, left)
+                reasons.append('turn_left_lifted')
             if abs(right) > 0.0 and abs(right) < min_dc:
                 right = math.copysign(min_dc, right)
+                reasons.append('turn_right_lifted')
 
         # Per-wheel deadzone: tiny magnitudes become 0
         if 0.0 < abs(left) < min_dc:
             left = 0.0
+            reasons.append('left_zeroed')
         if 0.0 < abs(right) < min_dc:
             right = 0.0
+            reasons.append('right_zeroed')
+
+        if (left != orig_left) or (right != orig_right):
+            self.get_logger().info(
+                f"Deadband correction applied: in=({orig_left:.3f},{orig_right:.3f}) "
+                f"out=({left:.3f},{right:.3f}) min_dc={min_dc:.3f} reasons={','.join(reasons)}"
+            )
 
         return left, right
     # ----------------------------
