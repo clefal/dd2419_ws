@@ -46,9 +46,9 @@ class GoalManager(Node):
         self._target_ = None   # (x, y) in fixed frame
 
 
-        self._search_x = 2.0
-        self._search_y = 1.0
-        self._search_yaw = 0.0
+        self._search_x = 1.0
+        self._search_y = 2.0
+        self._search_yaw = 90.0
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
             min_step_m=1.0,
