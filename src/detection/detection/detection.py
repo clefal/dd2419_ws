@@ -275,7 +275,7 @@ class Detection(Node):
                     
                 self.point_buffers['wood'] = [] # after publishing clear the buffer
                         
-
+            # manage box points
             if box_counter > 0: # add points to buffer if we have more than a minimum amount of hits
                 box_points = points_map_box[box_mask]
                 self.point_buffers['box'].append(box_points)
@@ -533,10 +533,10 @@ class Detection(Node):
         self.get_logger().info(f'comp_colors_oklab\n red: {comp_colors_oklab[0,:]} \n green: {comp_colors_oklab[1,:]}\n blue {comp_colors_oklab[2,:]}\n wood{comp_colors_oklab[3,:]}\n box{comp_colors_oklab[4,:]}')
         
         # define tolerances
-        tol_red = 0.02
-        tol_green = 0.01
-        tol_blue = 0.015
-        tol_wood = 0.01
+        tol_red = 0.04
+        tol_green = 0.02
+        tol_blue = 0.025
+        tol_wood = 0.012
         tol_box = 0.02  
 
         # thresh_red_L_low = comp_colors_oklab[0,0] - 0.15
@@ -568,8 +568,8 @@ class Detection(Node):
 
         # thresh_wood_L_low = comp_colors_oklab[3,0] - 0.02
         # thresh_wood_L_high = comp_colors_oklab[3,0] + 0.02
-        thresh_wood_L_low = 0.0
-        thresh_wood_L_high = 1.0
+        thresh_wood_L_low = 0.3
+        thresh_wood_L_high = 0.5
         thresh_wood_a_low = comp_colors_oklab[3,1] - tol_wood
         thresh_wood_a_high = comp_colors_oklab[3,1] + tol_wood
         thresh_wood_b_low = comp_colors_oklab[3,2] - tol_wood
