@@ -13,6 +13,8 @@ from sensor_msgs.msg import Imu
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
 
+from tf_transformations import euler_from_quaternion
+
 
 def wrap_angle(a: float) -> float:
     while a > math.pi:
@@ -66,6 +68,10 @@ class Odometry(Node):
         # To handle startup nicely
         self._have_encoders = False
 
+
+        # Init 
+        self._initial_yaw_imu = None
+
         # -------------------------
         # Complementary filter gains
         # -------------------------
@@ -99,10 +105,15 @@ class Odometry(Node):
         self._last_imu_t = t
 
         # Gyro z (yaw rate)
-        omega_z = - msg.angular_velocity.z
+        # omega_z = - msg.angular_velocity.z
 
         # Predict (integrate gyro)
-        self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+        # self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+
+        if self._initial_yaw_imu is None:
+            self._initial_yaw_imu = wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2])
+        
+        self._yaw = - wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2] - self._initial_yaw_imu)
 
         # Publish TF at IMU rate for smooth orientation
         # self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
@@ -122,6 +133,11 @@ class Odometry(Node):
 
         # ---- Update yaw ----
         self._yaw_enc = wrap_angle(self._yaw_enc + d_theta)
+
+        # ---- Correct fused yaw using encoder yaw ----
+        err = wrap_angle(self._yaw_enc - self._yaw)
+        self._yaw = wrap_angle(self._yaw + self._k * err)
+
         mid_yaw = self._yaw + 0.5 * d_theta
         self._x += d_s * math.cos(mid_yaw)
         self._y += d_s * math.sin(mid_yaw)
@@ -131,10 +147,6 @@ class Odometry(Node):
             self._have_encoders = True
             self._yaw = self._yaw_enc
             self._last_imu_t = stamp_to_sec(msg.header.stamp)
-
-        # ---- Correct fused yaw using encoder yaw ----
-        err = wrap_angle(self._yaw_enc - self._yaw)
-        self._yaw = wrap_angle(self._yaw + self._k * err)
 
         # Publish TF
         stamp = msg.header.stamp
