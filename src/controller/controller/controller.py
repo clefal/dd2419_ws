@@ -225,32 +225,33 @@ class Controller(Node):
         - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
         - Finally: clamp tiny magnitudes to 0.
         """
+        eps = 1e-4
         orig_left, orig_right = left, right
         reasons = []
 
         # Same direction (forward/back): avoid global rescaling (can cause sudden jumps).
         if left * right > 0.0:
-            if 0.0 < abs(left) < min_dc:
+            if 0.0 < abs(left) < (min_dc - eps):
                 left = math.copysign(min_dc, left)
                 reasons.append('same_dir_left_lifted')
-            if 0.0 < abs(right) < min_dc:
+            if 0.0 < abs(right) < (min_dc - eps):
                 right = math.copysign(min_dc, right)
                 reasons.append('same_dir_right_lifted')
 
         # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
         if left * right < 0.0:
-            if abs(left) > 0.0 and abs(left) < min_dc:
+            if abs(left) > 0.0 and abs(left) < (min_dc - eps):
                 left = math.copysign(min_dc, left)
                 reasons.append('turn_left_lifted')
-            if abs(right) > 0.0 and abs(right) < min_dc:
+            if abs(right) > 0.0 and abs(right) < (min_dc - eps):
                 right = math.copysign(min_dc, right)
                 reasons.append('turn_right_lifted')
 
         # Per-wheel deadzone: tiny magnitudes become 0
-        if 0.0 < abs(left) < min_dc:
+        if 0.0 < abs(left) < (min_dc - eps):
             left = 0.0
             reasons.append('left_zeroed')
-        if 0.0 < abs(right) < min_dc:
+        if 0.0 < abs(right) < (min_dc - eps):
             right = 0.0
             reasons.append('right_zeroed')
 
@@ -391,6 +392,12 @@ class Controller(Node):
         # Steering
         w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
+
+        # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
+        # If v is small, cap steering so v-|w| does not fall into deadband.
+        if v > 0.0:
+            w_deadband_limit = max(0.0, v - self._dc_min)
+            w = clamp(w, -w_deadband_limit, w_deadband_limit)
 
         # Convert to wheel duties
         left = v - w
