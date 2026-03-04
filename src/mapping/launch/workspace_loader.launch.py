@@ -81,21 +81,4 @@ def generate_launch_description():
             ]
         ),
 
-        # --- Static TF: base_link -> camera ---
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_camera',
-            arguments=[
-                '--x', '0.08987',
-                '--y', '0.0175',
-                '--z', '0.10456',
-                '--qx', '0.5',
-                '--qy', '-0.5',
-                '--qz', '0.5',
-                '--qw', '-0.5',
-                '--frame-id', 'base_link',
-                '--child-frame-id', 'realsense_camera_link'
-            ]
-        )
     ])
