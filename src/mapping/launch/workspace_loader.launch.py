@@ -73,10 +73,10 @@ def generate_launch_description():
                 '--x', '0.08987',
                 '--y', '0.0175',
                 '--z', '0.10456',
-                '--qx', '0.5',
-                '--qy', '-0.5',
-                '--qz', '0.5',
-                '--qw', '-0.5',
+                '--qx', '0',
+                '--qy', '0',
+                '--qz', '0',
+                '--qw', '1',
                 '--frame-id', 'base_link',
                 '--child-frame-id', 'realsense_camera_link'
             ]
