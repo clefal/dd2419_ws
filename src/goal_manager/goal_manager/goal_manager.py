@@ -362,7 +362,6 @@ class GoalManager(Node):
             return
 
         ox, oy = obj_xy
-        ox, oy = -oy, ox    #hacky quickfix TODO
 
         # Deduplicate by merge radius
         is_new = True
