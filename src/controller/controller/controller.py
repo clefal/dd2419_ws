@@ -65,7 +65,7 @@ class Controller(Node):
         self.declare_parameter('max_angular_speed', 0.4)        # 0.2 duty-equivalent
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.5)
+        self.declare_parameter('steering_gain', 0.3)
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
