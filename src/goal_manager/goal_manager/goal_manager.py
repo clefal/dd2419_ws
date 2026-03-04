@@ -72,7 +72,7 @@ class GoalManager(Node):
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        #self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
+        self.create_subscription(PointStamped, '/detection/objects/green_cube', self.cube_callback, 10)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -199,7 +199,7 @@ class GoalManager(Node):
                 # assume contiguous indices; stop at first missing
                 break
             ox, oy, _ = obj_pose
-            self._cubes.append((ox, oy))
+            # self._cubes.append((ox, oy))
             seeded += 1
 
         if seeded > 0:
@@ -287,7 +287,7 @@ class GoalManager(Node):
             return
 
         # Accept detections in SEARCH, APPROACH_OBJECT, RETURN_HOME
-        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME):
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME, AutoState.INITIALIZATION): #added Initialization as a state in which we detect objects
             return
 
         obj_xy = self.point_to_fixed_xy(msg)

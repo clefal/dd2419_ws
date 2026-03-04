@@ -36,9 +36,11 @@ class Detection(Node):
         self.declare_parameter("min_samples", 10)
         self.declare_parameter("eps", 0.03)
         self.declare_parameter("obj_width", 0.03)
-        self.declare_parameter("tolerance", 0.03)
+        self.declare_parameter("box_min_width", 0.09)
+        self.declare_parameter("box_max_width", 0.28)
+        self.declare_parameter("obj_tolerance", 0.03)
         self.declare_parameter("buffer_size", 3)
-        self.declare_parameter("max_general_counter", 3000)
+        self.declare_parameter("max_general_counter", 6000)
         self.declare_parameter("obstacle_distance_m", 0.15)
         self.declare_parameter("occupancy_threshold", 51) # threshold used for occupancy grid check
 
@@ -49,6 +51,7 @@ class Detection(Node):
         self.declare_parameter("green_cube_topic", "/detection/objects/green_cube")
         self.declare_parameter("blue_cube_topic", "/detection/objects/blue_cube")
         self.declare_parameter("wood_cube_topic", "/detection/objects/wood_cube")
+        self.declare_parameter("box_topic", "/detection/objects/box")
         self.declare_parameter("occupancy_grid_topic", "/map/occupancy_grid")
 
         ### GET PARAMETERS ###
@@ -56,7 +59,9 @@ class Detection(Node):
         self.min_samples = self.get_parameter("min_samples").value
         self.eps = self.get_parameter("eps").value
         self.obj_width = self.get_parameter("obj_width").value
-        self.tolerance = self.get_parameter("tolerance").value
+        self.obj_tolerance = self.get_parameter("obj_tolerance").value
+        self.box_min_width = self.get_parameter("box_min_width").value
+        self.box_max_width = self.get_parameter("box_max_width").value
         self.buffer_size = self.get_parameter("buffer_size").value
         self.max_general_counter = self.get_parameter("max_general_counter").value
 
@@ -67,6 +72,7 @@ class Detection(Node):
         green_cube_topic = self.get_parameter("green_cube_topic").value
         blue_cube_topic = self.get_parameter("blue_cube_topic").value
         wood_cube_topic = self.get_parameter("wood_cube_topic").value
+        box_topic = self.get_parameter("box_topic").value
         occupancy_grid_topic = self.get_parameter("occupancy_grid_topic").value
 
         # ------------------- INTERNAL SETUP ---------------
@@ -74,7 +80,7 @@ class Detection(Node):
         self.thresh = self.get_thresholds()
 
         # initialize point buffering
-        self.point_buffers = {'red': [], 'green':[], 'blue': [], 'wood':[]}
+        self.point_buffers = {'red': [], 'green':[], 'blue': [], 'wood':[], 'box':[]}
 
         # initialize TF and DBSCAN for clustering
         self.tf_buffer = Buffer()
@@ -89,6 +95,7 @@ class Detection(Node):
         self.green_centroid_pub = self.create_publisher(PointStamped, green_cube_topic, 10, callback_group=ReentrantCallbackGroup())
         self.blue_centroid_pub = self.create_publisher(PointStamped, blue_cube_topic, 10, callback_group=ReentrantCallbackGroup())
         self.wood_centroid_pub = self.create_publisher(PointStamped, wood_cube_topic, 10, callback_group=ReentrantCallbackGroup())
+        self.box_centroid_pub = self.create_publisher(PointStamped, box_topic, 10, callback_group=ReentrantCallbackGroup())
 
         # Subscribe to point cloud topic and call callback function on each received message
         self.create_subscription(
@@ -103,7 +110,6 @@ class Detection(Node):
         )
         self.create_subscription(OccupancyGrid, occupancy_grid_topic, self.occupancy_grid_callback, callback_group=ReentrantCallbackGroup(),qos_profile=latched_qos)
         self.occupancy_grid = None 
-
 
     def cloud_callback(self, msg: PointCloud2):
         """
@@ -132,30 +138,41 @@ class Detection(Node):
         points_f = points[geom_mask]
         colors_f = colors[geom_mask]
 
+        max_dist_box = 2
+        max_height_box = 0.00   
+        min_height_box = 0.05
+        geom_mask_for_box =  ((points[:,2] < max_dist_box) & (points[:,1] > max_height_box) & (points[:,1] < min_height_box))
+        points_f_box = points[geom_mask_for_box]
+        colors_f_box = colors[geom_mask_for_box]
+
+
         # transform points to map coordinates
         points_map = self.transform_points_to_map(points_f, msg.header)
+        points_map_box = self.transform_points_to_map(points_f_box, msg.header)
 
         # apply the tresholds to the points and return the filter masks
-        red_mask, green_mask, blue_mask, wood_mask = self.get_masks(colors_f) # returns the color masks based on threshold values
+        red_mask, green_mask, blue_mask, wood_mask, box_mask = self.get_masks(colors_f, colors_f_box) # returns the color masks based on threshold values
 
         # Chek how many red,green,... points we have
         red_counter = np.sum(red_mask)
         green_counter = np.sum(green_mask)
         blue_counter = np.sum(blue_mask)
         wood_counter = np.sum(wood_mask)
+        box_counter = np.sum(box_mask)
 
-        general_counter = red_counter + green_counter + blue_counter + wood_counter
+        general_counter = red_counter + green_counter + blue_counter + wood_counter + box_counter
 
         # end callback if we have no hits in general
         if general_counter == 0: return 
         
         # end callback if we detect too many colorful points (because it is likely that there are a lot of false positives)
         elif general_counter >= self.max_general_counter: 
-            self.get_logger().info(f'many hits by color thresholding, danger of false positives, detection iteration aborted')
+            self.get_logger().info(f'many hits {general_counter} by color thresholding, danger of false positives, detection iteration aborted')
             self.point_buffers['red'] = []
             self.point_buffers['green'] = []
             self.point_buffers['blue'] = []
             self.point_buffers['wood'] = []
+            self.point_buffers['box'] = []
             return
 
         fields = [ # only for visualization in rviz, is actually not relevant
@@ -257,8 +274,29 @@ class Detection(Node):
                     self.publish_detection(centroid, centroid_header, 'wood')
                     
                 self.point_buffers['wood'] = [] # after publishing clear the buffer
-            
+                        
 
+            if box_counter > 0: # add points to buffer if we have more than a minimum amount of hits
+                box_points = points_map_box[box_mask]
+                self.point_buffers['box'].append(box_points)
+
+            if box_counter == 0 and len(self.point_buffers['box'])!= 0 : # clear the buffer if we dont see points in consecutive scans
+                self.point_buffers['box'] = [] 
+
+            if len(self.point_buffers['box'])>=self.buffer_size:
+                all_box_points = np.vstack(self.point_buffers['box'])
+                box_centroids = self.process_clusters(all_box_points, box=True)
+                self.get_logger().info(f'box: {len(all_box_points)}')
+
+                # only for visualization in rviz
+                msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
+                self._pub.publish(msg_box)
+
+                for centroid in box_centroids:     # so that marius can experiment with it i will uncomment this line 
+                    self.publish_detection(centroid, centroid_header, 'box')
+                    
+                self.point_buffers['box'] = [] # after publishing clear the buffer
+            
     def occupancy_grid_callback(self, msg :OccupancyGrid):
         #self.get_logger().info(f'revieved occupancy grid message')
         self.occupancy_grid = msg
@@ -273,7 +311,7 @@ class Detection(Node):
         stamp = header.stamp
         if len(points_np) == 0:
             self.get_logger().warn(f'transform_points_to_map() had an empty point array as input')
-            return np.empty(0,3)
+            return np.empty((0,3))
         
 
         fields = [
@@ -300,12 +338,16 @@ class Detection(Node):
             self.get_logger().warn(f'Transform failed: {e}')
             return np.empty((0,3))
 
-    def get_masks(self, colors):
+    def get_masks(self, colors, colors_box):
         'gets the colors of the points as imput and returns the color masks'
         # conversion of color spaces from rgb to oklab
         colors_rgb = colors.astype(np.float32) / 255
         colors_xyz = co.sRGB_to_XYZ(colors_rgb)
         colors_oklab = co.XYZ_to_Oklab(colors_xyz)
+
+        colors_rgb_box = colors_box.astype(np.float32) / 255
+        colors_xyz_box = co.sRGB_to_XYZ(colors_rgb_box)
+        colors_oklab_box = co.XYZ_to_Oklab(colors_xyz_box)
 
         # assembling of color masks
         red_mask = (
@@ -328,10 +370,15 @@ class Detection(Node):
             (self.thresh[3, 2] < colors_oklab[:, 2]) & (colors_oklab[:, 2] < self.thresh[3, 3]) & 
             (self.thresh[3, 4] < colors_oklab[:, 0]) & (colors_oklab[:, 0] < self.thresh[3, 5])
         )
-
-        return red_mask, green_mask, blue_mask, wood_mask
+        box_mask = (            
+            (self.thresh[4, 0] < colors_oklab_box[:, 1]) & (colors_oklab_box[:, 1] < self.thresh[4, 1]) & 
+            (self.thresh[4, 2] < colors_oklab_box[:, 2]) & (colors_oklab_box[:, 2] < self.thresh[4, 3]) & 
+            (self.thresh[4, 4] < colors_oklab_box[:, 0]) & (colors_oklab_box[:, 0] < self.thresh[4, 5])
+            )
+        
+        return red_mask, green_mask, blue_mask, wood_mask, box_mask
     
-    def process_clusters(self, points_3d):
+    def process_clusters(self, points_3d, box = False):
         """
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
         Output: List of centroids [x, y, z] for valid objects
@@ -364,8 +411,13 @@ class Detection(Node):
             
             # Check 1: Is the size roughly correct?
             # You can get more specific (e.g., check X vs Y vs Z) if rotation is known
-            if not (self.obj_width - self.tolerance < np.max(dims) < self.obj_width + self.tolerance):
-                continue # Skip this cluster, it's too big/small
+            if box == False:
+                if not (self.obj_width - self.obj_tolerance < np.max(dims) < self.obj_width + self.obj_tolerance):
+                    continue # Skip this cluster, it's too big/small
+            if box: 
+                if not (self.box_min_width < np.max(dims)< self.box_max_width):
+                    self.get_logger().info(f'object is not the size of a box')
+                    continue # skip this cluster, its too big/small
                 
             # Check 2: Density Check (Optional but recommended)
             # If it's the right size but has only 15 points, it might be a ghost reflection
@@ -462,6 +514,8 @@ class Detection(Node):
             self.blue_centroid_pub.publish(msg)
         elif color == 'wood':
             self.wood_centroid_pub.publish(msg)
+        elif color =='box':
+            self.box_centroid_pub.publish(msg)
 
     def get_thresholds(self):
 
@@ -469,19 +523,21 @@ class Detection(Node):
             [140, 45, 35], #red
             [0, 70, 57], #green
             [0, 83, 125], # blue
-            [100, 75, 52] #wood
+            [100, 75, 52], #wood
+            [71, 93, 102] # grey box
             ])
                 
         comp_colors_rgb = comp_colors_rgb / 255.0
         comp_colors_xyz = co.sRGB_to_XYZ(comp_colors_rgb)
         comp_colors_oklab = co.XYZ_to_Oklab(comp_colors_xyz)
-        self.get_logger().info(f'comp_colors_oklab\n red: {comp_colors_oklab[0,:]} \n green: {comp_colors_oklab[1,:]}\n blue {comp_colors_oklab[2,:]}\n wood{comp_colors_oklab[3,:]}')
+        self.get_logger().info(f'comp_colors_oklab\n red: {comp_colors_oklab[0,:]} \n green: {comp_colors_oklab[1,:]}\n blue {comp_colors_oklab[2,:]}\n wood{comp_colors_oklab[3,:]}\n box{comp_colors_oklab[4,:]}')
         
         # define tolerances
         tol_red = 0.02
         tol_green = 0.01
         tol_blue = 0.015
         tol_wood = 0.01
+        tol_box = 0.02  
 
         # thresh_red_L_low = comp_colors_oklab[0,0] - 0.15
         # thresh_red_L_high = comp_colors_oklab[0,0] + 0.15
@@ -519,10 +575,20 @@ class Detection(Node):
         thresh_wood_b_low = comp_colors_oklab[3,2] - tol_wood
         thresh_wood_b_high = comp_colors_oklab[3,2] + tol_wood
 
+        thresh_box_L_low = 0.45
+        thresh_box_L_high = 0.52
+        thresh_box_a_low = comp_colors_oklab[4,1] - tol_box
+        thresh_box_a_high = comp_colors_oklab[4,1] + tol_box
+        thresh_box_b_low = comp_colors_oklab[4,2] - tol_box
+        thresh_box_b_high = comp_colors_oklab[4,2] + tol_box
+        
+
         thresh = np.array([[thresh_red_a_low,thresh_red_a_high,thresh_red_b_low, thresh_red_b_high, thresh_red_L_low, thresh_red_L_high],
                          [thresh_green_a_low,thresh_green_a_high,thresh_green_b_low, thresh_green_b_high, thresh_green_L_low, thresh_green_L_high],
                          [thresh_blue_a_low,thresh_blue_a_high,thresh_blue_b_low, thresh_blue_b_high, thresh_blue_L_low, thresh_blue_L_high],
-                         [thresh_wood_a_low,thresh_wood_a_high,thresh_wood_b_low, thresh_wood_b_high, thresh_wood_L_low, thresh_wood_L_high]])
+                         [thresh_wood_a_low,thresh_wood_a_high,thresh_wood_b_low, thresh_wood_b_high, thresh_wood_L_low, thresh_wood_L_high],
+                         [thresh_box_a_low,thresh_box_a_high,thresh_box_b_low, thresh_box_b_high, thresh_box_L_low, thresh_box_L_high]
+                         ])
         
         return thresh
 
