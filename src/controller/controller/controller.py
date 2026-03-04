@@ -131,13 +131,6 @@ class Controller(Node):
     def stop(self):
         self.send_duty(0.0, 0.0)
 
-    def fail_current_goal(self, reason: str):
-        self.stop()
-        self.publish_status('FAILED')
-        self._path_xy = []
-        self._goal_yaw = None
-        self.get_logger().warn(reason)
-
     def get_pose_2d(self):
         try:
             t = self._tf_buffer.lookup_transform(self._fixed_frame, self._base_frame, rclpy.time.Time())
@@ -328,10 +321,12 @@ class Controller(Node):
                     self._path_xy = []
                     return
 
-                self.fail_current_goal(
-                    f'Goal failed: inside position tolerance but final yaw misaligned '
-                    f'(yaw_err={yaw_err:.3f} rad > tol={self._yaw_tol:.3f} rad).'
-                )
+                wmax = float(self.get_parameter('max_angular_speed').value)
+                k_turn = float(self.get_parameter('turn_gain').value)
+                w = clamp(k_turn * yaw_err, -wmax, wmax)
+
+                left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+                self.send_duty(left, right)
                 return
 
             self.stop()
@@ -361,10 +356,12 @@ class Controller(Node):
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
-            self.fail_current_goal(
-                f'Goal failed: path reacquisition would require turn-in-place '
-                f'(yaw_err={yaw_err:.3f} rad, x_r={x_r:.3f} m).'
-            )
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
             return
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
