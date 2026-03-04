@@ -17,7 +17,7 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.05) # m/cell
+        self.declare_parameter("grid_resolution", 0.02) # m/cell
         self.declare_parameter("lidar_topic", "/lidar/scan")
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
