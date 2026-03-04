@@ -72,6 +72,7 @@ class Controller(Node):
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.3)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.1)           # s (0.05=20Hz, 0.1=10Hz)
+        self.declare_parameter('wheel_slew_rate', 1.2)          # duty/s max per-wheel change (except stop)
 
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
@@ -84,7 +85,10 @@ class Controller(Node):
         # Control loop
               
         period = float(self.get_parameter('control_period').value)
+        self._control_period = period
         self._timer = self.create_timer(period, self.control_tick)
+        self._last_left_cmd = 0.0
+        self._last_right_cmd = 0.0
         
         self._backup_active = False
         self._backup_target_m = 0.0
@@ -99,14 +103,29 @@ class Controller(Node):
         self._status_pub.publish(msg)
 
     def send_duty(self, left: float, right: float):
+        target_left = float(clamp(left, -1.0, 1.0))
+        target_right = float(clamp(right, -1.0, 1.0))
+
+        # Keep stops immediate for safety; otherwise limit per-tick duty jumps.
+        if target_left == 0.0 and target_right == 0.0:
+            out_left = 0.0
+            out_right = 0.0
+        else:
+            slew_rate = float(self.get_parameter('wheel_slew_rate').value)
+            max_delta = max(0.0, slew_rate) * self._control_period
+            out_left = clamp(target_left, self._last_left_cmd - max_delta, self._last_left_cmd + max_delta)
+            out_right = clamp(target_right, self._last_right_cmd - max_delta, self._last_right_cmd + max_delta)
+
         m = DutyCycles()
-        m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
-        m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
+        m.duty_cycle_left = out_left
+        m.duty_cycle_right = out_right
         self._cmd_pub.publish(m)
+        self._last_left_cmd = out_left
+        self._last_right_cmd = out_right
 
         # True when turning on the spot (opposite directions)
         turning_msg = Bool()
-        turning_msg.data = (left * right < 0.0)
+        turning_msg.data = (out_left * out_right < 0.0)
         self._turn_pub.publish(turning_msg)
 
     def stop(self):
@@ -203,18 +222,16 @@ class Controller(Node):
         """
         Requirement: each wheel is either 0 or |duty| >= min_dc.
 
-        - If both wheels same direction and one is just under min_dc: scale BOTH up to preserve ratio.
+        - If both wheels same direction and one is just under min_dc: lift that wheel to min_dc.
         - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
         - Finally: clamp tiny magnitudes to 0.
         """
-        # Same direction (forward/back): scale both to keep ratio
+        # Same direction (forward/back): avoid global rescaling (can cause sudden jumps).
         if left * right > 0.0:
-            aL, aR = abs(left), abs(right)
-            m = min(aL, aR)
-            if 0.0 < m < min_dc:
-                scale = min_dc / m
-                left *= scale
-                right *= scale
+            if 0.0 < abs(left) < min_dc:
+                left = math.copysign(min_dc, left)
+            if 0.0 < abs(right) < min_dc:
+                right = math.copysign(min_dc, right)
 
         # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
         if left * right < 0.0:
