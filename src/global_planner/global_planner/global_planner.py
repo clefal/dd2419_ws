@@ -45,6 +45,9 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
         self.declare_parameter("cube_approach_radius", 0.16)
+        self.declare_parameter("robot_radius", 0.05)
+        self.declare_parameter("inflation_margin", 0.01)
+        self.declare_parameter("cube_size", 0.02)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -393,9 +396,9 @@ class GlobalPlannerNode(Node):
         planning.header = raw.header
         planning.info = raw.info
         lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
+        robot_radius = self.get_parameter("robot_radius").get_parameter_value().double_value
+        margin = self.get_parameter("inflation_margin").get_parameter_value().double_value
 
-        robot_radius = 0.05 #0.15
-        margin = 0.01
         r_lethal_cells = int(math.ceil((robot_radius + margin) / meta.resolution))
 
         # soft halo thickness outside the hard core
@@ -412,8 +415,10 @@ class GlobalPlannerNode(Node):
 
 
 
-        cube_radius = 0.015
-        r_cells = int(math.ceil(cube_radius / meta.resolution))
+        cube_size = self.get_parameter("cube_size").get_parameter_value().double_value
+        cube_half_diagonal = 0.5 * cube_size * math.sqrt(2.0)
+        cube_keepout_radius = robot_radius + cube_half_diagonal + margin
+        r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
 
         for (cx, cy) in self._cubes:
             if self._target_cube is not None:
