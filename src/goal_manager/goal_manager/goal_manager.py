@@ -287,7 +287,7 @@ class GoalManager(Node):
             return
 
         # Accept detections in SEARCH, APPROACH_OBJECT, RETURN_HOME
-        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME):
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME, AutoState.INITIALIZATION): #added Initialization as a state in which we detect objects
             return
 
         obj_xy = self.point_to_fixed_xy(msg)
