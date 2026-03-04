@@ -105,7 +105,7 @@ class Odometry(Node):
         self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
 
         # Publish TF at IMU rate for smooth orientation
-        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
+        # self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
 
 
     def encoder_callback(self, msg: Encoders):
