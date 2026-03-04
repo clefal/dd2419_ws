@@ -70,8 +70,7 @@ class Odometry(Node):
         # Complementary filter gains
         # -------------------------
         # Encoder correction gain (0..1). Smaller = trust IMU more.
-        self._k = 0.0
-
+        self._k = 1.0
         # -------------------------
         # Robot model constants
         # -------------------------
