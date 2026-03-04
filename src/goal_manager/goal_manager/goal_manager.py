@@ -72,7 +72,7 @@ class GoalManager(Node):
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
+        self.create_subscription(PointStamped, '/detection/objects/green_cube', self.cube_callback, 10)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
