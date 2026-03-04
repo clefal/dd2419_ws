@@ -199,7 +199,7 @@ class GoalManager(Node):
                 # assume contiguous indices; stop at first missing
                 break
             ox, oy, _ = obj_pose
-            # self._cubes.append((ox, oy))
+            self._cubes.append((ox, oy))
             seeded += 1
 
         if seeded > 0:
