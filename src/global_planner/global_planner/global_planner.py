@@ -48,6 +48,9 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
+        self.declare_parameter("box_frame", "box")
+        self.declare_parameter("box_size", 0.16)
+        self.declare_parameter("box_goal_radius", 0.30)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -187,7 +190,8 @@ class GlobalPlannerNode(Node):
             return
 
         # Run Weighted A*
-        planning_map = self.build_planning_grid(self._map, self._meta)
+        include_box_lethal = not self._is_box_goal(goal_xy)
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
 
         path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
@@ -267,7 +271,11 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
-        planning_map = self.build_planning_grid(self._map, self._meta)
+        include_box_lethal = not any(
+            self._is_box_goal((pose.position.x, pose.position.y))
+            for pose in msg.poses
+        )
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
 
         best_path_idx = None
@@ -390,7 +398,9 @@ class GlobalPlannerNode(Node):
             return None
 
 
-    def build_planning_grid(self, raw: OccupancyGrid, meta: GridMeta) -> OccupancyGrid:
+    def build_planning_grid(
+        self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
+    ) -> OccupancyGrid:
         # Copy raw map
         planning = OccupancyGrid()
         planning.header = raw.header
@@ -432,7 +442,35 @@ class GlobalPlannerNode(Node):
 
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
+        if include_box_lethal:
+            box_xy = self._get_box_xy_in_map()
+            if box_xy is not None:
+                box_size = self.get_parameter("box_size").get_parameter_value().double_value
+                box_half_diagonal = 0.5 * box_size * math.sqrt(2.0)
+                box_keepout_radius = robot_radius + box_half_diagonal + margin
+                box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
+
+                box_idx = self.world_to_grid(box_xy[0], box_xy[1], meta)
+                if box_idx is not None:
+                    self.mark_disk_lethal(planning.data, box_idx[0], box_idx[1], box_r_cells, meta)
+
         return planning
+
+    def _is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
+        box_xy = self._get_box_xy_in_map()
+        if box_xy is None:
+            return False
+
+        box_goal_radius = self.get_parameter("box_goal_radius").get_parameter_value().double_value
+        return math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= box_goal_radius
+
+    def _get_box_xy_in_map(self) -> Optional[Tuple[float, float]]:
+        box_frame = self.get_parameter("box_frame").get_parameter_value().string_value
+        try:
+            tf = self.tf_buffer.lookup_transform(self.global_frame, box_frame, rclpy.time.Time())
+            return (tf.transform.translation.x, tf.transform.translation.y)
+        except Exception:
+            return None
 
 
     def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):
