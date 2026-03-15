@@ -1,5 +1,6 @@
 import rclpy
 import time
+import math
 import numpy as np
 from rclpy.node import Node
 from robp_interfaces.msg import ArmControl
@@ -9,7 +10,30 @@ from cv_bridge import CvBridge
 from std_msgs.msg import Int32MultiArray
 import cv2
 
-#TODO: make it faster??
+#BIG TODO LIST 
+# Correct error handling of get_arm_angles 
+
+# is_box_in_pickup_range()
+
+
+#TODO: have limits that work with rotational movement 
+MAX_RHO = 190 #could prob be larger, like 194
+MIN_RHO = 160 #could prob be smaller, like 154
+Z = 15
+
+#Arm part lengths 
+L1 = 101
+L2 = 94
+
+#Arm time constraints 
+MS_PER_DEGREE = 60
+MIN_TIME = 200
+MAX_TIME = 3000
+
+#define idle position
+IDLE_P2 = 16.6
+IDLE_P3 = 166.4
+IDLE_P4 = 89.8
 
 class Arm_control(Node):
     def __init__(self):
@@ -17,6 +41,7 @@ class Arm_control(Node):
         self.in_idle_position = False
         self.holding_object = False
         self.position = [40, 120, 30, 220, 180, 120]
+        self.new_position = [40, 120, 30, 220, 180, 120]
         self.time = np.full((6), 3000)
 
         self.bridge = CvBridge()
@@ -82,27 +107,97 @@ class Arm_control(Node):
         msg_out.data = [cx, cy]
         self.center_pub.publish(msg_out)
 
-
-    def send_msg_start_position(self):
+    """
+    Publish arm control message with currrent self.new_position and self.time 
+    Sleeps for the duration of longest arm movement to avoid concurrent arm messages 
+    """
+    def publish_arm_control(self):
         msg = ArmControl()
-        self.position[3] = 166.4
-        msg.position = self.position
-        msg.time = self.time
+        msg.position = self.new_position
+        self.set_time()
+        print(self.time)
+        msg.time = self.time 
         self.control.publish(msg)
         time.sleep(max(msg.time)/1000)
+        self.position = self.new_position.copy()
 
-        self.position[2] = 16.6
-        self.position[4] = 89.8
-        msg.position = self.position
-        msg.time = self.time
-        self.control.publish(msg)
-        time.sleep(max(msg.time)/1000)
+    """Update self.time to match angle delta"""
+    def set_time(self):
+        self.time = []
+
+        for i in range(len(self.position)):
+            diff = abs(self.new_position[i] - self.position[i])
+            t = diff * MS_PER_DEGREE
+            t = max(MIN_TIME, min(MAX_TIME, int(t)))
+            self.time.append(t)
+
+    """Robot goes into idle position from start position (only run at inilization)"""
+    def send_msg_initalize_position(self):
+        self.new_position[3] = IDLE_P3
+        self.publish_arm_control()
+
+        self.new_position[2] = IDLE_P2
+        self.new_position[4] = IDLE_P4
+        self.publish_arm_control()
 
         self.in_idle_position = True
 
+    """Moves from idle_postion to inital_pickup position"""
+    def send_msg_idle_to_pickup(self):
+        middle_rho = (MIN_RHO + MAX_RHO) / 2
+        p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
+        self.new_position[2] = p2
+        self.new_position[3] = p3
+        self.new_position[4] = p4
+        self.publish_arm_control()
+
+        self.in_idle_position = False
+
+    
+
+    """
+    solves equation to give arm angles for a given rho and z 
+    (limited to orientation looking straight down)
+    input: rho, z
+    output: position[4], position[3], position[2]
+    """
+    def calc_arm_angles(self, rho, z):
+        orientation = math.radians(-90)
+        if rho > MAX_RHO or rho < MIN_RHO:
+            #TODO: correctly raise error 
+            print("bad rho")
+            return
+
+        r2 = rho*rho + z*z
+        cos_t2 = (r2 - L1**2 - L2**2) / (2 * L1 * L2)
+
+        if abs(cos_t2) > 1:
+            #TODO: correctly raise error 
+            print("position unreachable")
+            return
+        
+        t2 = -math.acos(cos_t2)
+
+        k1 = L1 + L2 * math.cos(t2)
+        k2 = L2 * math.sin(t2)
+
+        t1 = math.atan2(z, rho) - math.atan2(k2, k1)
+
+        t3 = orientation - t1 - t2
+
+        #Convert solution angles to robot arm angles 
+        s1 = 30 + math.degrees(t1)
+        s2 = 120 - math.degrees(t2)
+        s3 = 120 + math.degrees(t3)
+
+        #TODO: error check that s1-3 are okey values
+        print(s1, s2, s3)
+
+        return s1, s2, s3        
+
     def is_box_in_pickup_range(self):
         pass 
-        #something camera something 
+        #TODO something camera something 
 
     #TODO: def send_msg_idle_position(self):
 
@@ -159,10 +254,10 @@ class Arm_control(Node):
     #         self.drop_object()
 
 def main():
-    print("hi")
     rclpy.init()
     node = Arm_control()
-    node.send_msg_start_position()
+    node.send_msg_initalize_position()
+    node.send_msg_idle_to_pickup()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

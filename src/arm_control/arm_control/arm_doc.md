@@ -10,3 +10,7 @@ Messages published by goal manager to arm/status with type string
 ”START”: Go into start position
 ”PICK_UP”: Pick up object
 ”DROP”: Drop object 
+
+POSITIONS:
+idle: position used in between pick ups checks from this position of object is reachable 
+initial_pickup: middle of pick up range and just above ground when arm closes 
