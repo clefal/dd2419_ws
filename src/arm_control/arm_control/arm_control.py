@@ -153,7 +153,13 @@ class Arm_control(Node):
 
         self.in_idle_position = False
 
-    
+    """Adjust pick-up position based on camera feedback"""
+    def send_msg_adjust_pickup(self):
+        
+        
+        
+        pass 
+        #TODO
 
     """
     solves equation to give arm angles for a given rho and z 
@@ -166,7 +172,7 @@ class Arm_control(Node):
         if rho > MAX_RHO or rho < MIN_RHO:
             #TODO: correctly raise error 
             print("bad rho")
-            return
+            return "error"
 
         r2 = rho*rho + z*z
         cos_t2 = (r2 - L1**2 - L2**2) / (2 * L1 * L2)
@@ -174,7 +180,7 @@ class Arm_control(Node):
         if abs(cos_t2) > 1:
             #TODO: correctly raise error 
             print("position unreachable")
-            return
+            return "error"
         
         t2 = -math.acos(cos_t2)
 
@@ -191,8 +197,12 @@ class Arm_control(Node):
         s3 = 120 + math.degrees(t3)
 
         #TODO: error check that s1-3 are okey values
+        if s1 < 30 and s1 > 120 and s2 < 100 and s2 > 210 and s3 < 17  and s3 > 140:
+            #TODO: correctly raise error 
+            print("bad angles:", s1, s2, s3)
+            return "error"
+        
         print(s1, s2, s3)
-
         return s1, s2, s3        
 
     def is_box_in_pickup_range(self):
