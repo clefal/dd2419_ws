@@ -121,11 +121,14 @@ class Arm_control(Node):
         self.last_detections.append(cy)
 
         if len(self.last_detections) > REQUIRED_DETECTIONS:
+            print("HI QUEEN")
             self.last_detections.pop(0)
 
         if len(self.last_detections) == REQUIRED_DETECTIONS:
+            print("LOVE U")
             if max(self.last_detections) - min(self.last_detections) < DETECTION_TOLERANCE:
-                stable_y = int(sum(self.last_detections) / self.required_detections)
+                print("LOVE U MORE")
+                stable_y = int(sum(self.last_detections) / REQUIRED_DETECTIONS)
 
                 self.cube_y = stable_y
                 self.send_msg_adjust_pickup()
