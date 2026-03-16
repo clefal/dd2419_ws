@@ -39,6 +39,9 @@ MIN_CUBE_Y = 408
 MAX_CUBE_Y = 438
 PIXEL_TO_MM = 0.217
 
+REQUIRED_DETECTIONS = 3
+DETECTION_TOLERANCE = 3
+
 class Arm_control(Node):
     def __init__(self):
         super().__init__('arm_control')
@@ -50,6 +53,7 @@ class Arm_control(Node):
         self.time = np.full((6), 3000)
         self.rho = 0
         self.cube_y = 0
+        self.last_detections = []
 
         self.bridge = CvBridge()
         self.center_pub = self.create_publisher(Int32MultiArray, '/green_cube_center', 10)
@@ -112,9 +116,20 @@ class Arm_control(Node):
         cx = int(M['m10'] / M['m00'])
         cy = int(M['m01'] / M['m00'])
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
-        self.cube_y = cy
-        #self.send_msg_adjust_pickup()
-        #self.pickup_ready = False
+
+
+        self.last_detections.append(cy)
+
+        if len(self.last_detections) > REQUIRED_DETECTIONS:
+            self.last_detections.pop(0)
+
+        if len(self.last_detections) == REQUIRED_DETECTIONS:
+            if max(self.last_detections) - min(self.last_detections) < DETECTION_TOLERANCE:
+                stable_y = int(sum(self.last_detections) / self.required_detections)
+
+                self.cube_y = stable_y
+                self.send_msg_adjust_pickup()
+                self.pickup_ready = False
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
