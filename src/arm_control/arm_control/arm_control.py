@@ -281,6 +281,7 @@ def main():
     node = Arm_control()
     node.send_msg_initalize_position()
     node.send_msg_idle_to_pickup()
+    node.send_msg_adjust_pickup()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
