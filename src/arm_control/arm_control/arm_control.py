@@ -121,13 +121,10 @@ class Arm_control(Node):
         self.last_detections.append(cy)
 
         if len(self.last_detections) > REQUIRED_DETECTIONS:
-            print("HI QUEEN")
             self.last_detections.pop(0)
 
         if len(self.last_detections) == REQUIRED_DETECTIONS:
-            print("LOVE U")
             if max(self.last_detections) - min(self.last_detections) < DETECTION_TOLERANCE:
-                print("LOVE U MORE")
                 stable_y = int(sum(self.last_detections) / REQUIRED_DETECTIONS)
 
                 self.cube_y = stable_y
@@ -195,8 +192,8 @@ class Arm_control(Node):
         print(new_rho) 
         p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
         self.new_position[2:5] = [p2, p3, p4]
-        #self.publish_arm_control()
-        #self.rho = new_rho    
+        self.publish_arm_control()
+        self.rho = new_rho    
 
             
 
