@@ -172,12 +172,14 @@ class Arm_control(Node):
         cube_diff =  cube_middle - self.cube_y
         new_rho = self.rho + cube_diff * PIXEL_TO_MM
 
+        print("cube_y: ", self.cube_y)
+        print("cube_diff: ", cube_diff )
+        print(new_rho) 
         p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
         self.new_position[2:5] = [p2, p3, p4]
         #self.publish_arm_control()
         #self.rho = new_rho    
 
-        print(new_rho) 
             
 
 
