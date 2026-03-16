@@ -35,6 +35,10 @@ IDLE_P2 = 16.6
 IDLE_P3 = 166.4
 IDLE_P4 = 89.8
 
+MIN_CUBE_Y = 408
+MAX_CUBE_Y = 438
+PIXEL_TO_MM = 0.217
+
 class Arm_control(Node):
     def __init__(self):
         super().__init__('arm_control')
@@ -43,6 +47,8 @@ class Arm_control(Node):
         self.position = [40, 120, 30, 220, 180, 120]
         self.new_position = [40, 120, 30, 220, 180, 120]
         self.time = np.full((6), 3000)
+        self.rho = 0
+        self.cube_y = 0
 
         self.bridge = CvBridge()
         self.center_pub = self.create_publisher(Int32MultiArray, '/green_cube_center', 10)
@@ -102,6 +108,7 @@ class Arm_control(Node):
         cx = int(M['m10'] / M['m00'])
         cy = int(M['m01'] / M['m00'])
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
+        self.cube_y = cy
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
@@ -146,20 +153,26 @@ class Arm_control(Node):
     def send_msg_idle_to_pickup(self):
         middle_rho = (MIN_RHO + MAX_RHO) / 2
         p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
-        self.new_position[2] = p2
-        self.new_position[3] = p3
-        self.new_position[4] = p4
+        self.new_position[2:5] = [p2, p3, p4]
         self.publish_arm_control()
 
         self.in_idle_position = False
+        self.rho = middle_rho
 
     """Adjust pick-up position based on camera feedback"""
     def send_msg_adjust_pickup(self):
-        
-        
-        
-        pass 
-        #TODO
+        cube_middle = (MIN_CUBE_Y + MAX_CUBE_Y) / 2
+        cube_diff =  cube_middle - self.cube_y
+        new_rho = self.rho + cube_diff * PIXEL_TO_MM
+
+        p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
+        self.new_position[2:5] = [p2, p3, p4]
+        #self.publish_arm_control()
+        #self.rho = new_rho    
+
+        print(new_rho) 
+            
+
 
     """
     solves equation to give arm angles for a given rho and z 
