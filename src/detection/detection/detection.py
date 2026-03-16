@@ -20,9 +20,6 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 import math
 
-import ctypes
-import struct
-
 
 class Detection(Node):
 
@@ -140,7 +137,6 @@ class Detection(Node):
         geom_mask_for_box =  ((points[:,2] < max_dist_box) & (points[:,1] > max_height_box) & (points[:,1] < min_height_box))
         points_f_box = points[geom_mask_for_box]
         colors_f_box = colors[geom_mask_for_box]
-
 
         # transform points to map coordinates
         points_map = self.transform_points_to_map(points_f, msg.header)
@@ -309,14 +305,6 @@ class Detection(Node):
             self.get_logger().warn(f'transform_points_to_map() had an empty point array as input')
             return np.empty((0,3))
         
-
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            ]
-            
-        
         try: 
             timeout = rclpy.duration.Duration(seconds=0.3)
             transform = self.tf_buffer.lookup_transform(target_frame, source_frame, stamp,timeout)
@@ -479,7 +467,6 @@ class Detection(Node):
                         # Calculate the 1D index for the flat data array
                         # Index = row * width + col
                         index = check_row * width + check_col
-                        
                         cell_value = self.occupancy_grid.data[index]
 
                         # Check against the tunable threshold
@@ -531,42 +518,40 @@ class Detection(Node):
         self.get_logger().info(f'comp_colors_oklab\n red: {comp_colors_oklab[0,:]} \n green: {comp_colors_oklab[1,:]}\n blue {comp_colors_oklab[2,:]}\n wood{comp_colors_oklab[3,:]}\n box{comp_colors_oklab[4,:]}')
         
         # define tolerances
-        tol_red = 0.04
-        tol_green = 0.02
-        tol_blue = 0.025
-        tol_wood = 0.012
+        # loose thresholds tol_red = 0.04    tol_green = 0.02 tol_blue = 0.025 tol_wood = 0.012 tol_box = 0.02    
+  
+        # medium trehsholds
+        tol_red = 0.03   
+        tol_green = 0.015
+        tol_blue = 0.02
+        tol_wood = 0.011
         tol_box = 0.02  
 
-        # thresh_red_L_low = comp_colors_oklab[0,0] - 0.15
-        # thresh_red_L_high = comp_colors_oklab[0,0] + 0.15
-        thresh_red_L_low = 0.0
-        thresh_red_L_high = 1.0
+        # strict thresholds
+        # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
+
+        thresh_red_L_low = 0.3 # these L thresholds are very very loose
+        thresh_red_L_high = 0.55
         thresh_red_a_low = comp_colors_oklab[0,1] - tol_red
         thresh_red_a_high = comp_colors_oklab[0,1] + tol_red
         thresh_red_b_low = comp_colors_oklab[0,2] - tol_red
         thresh_red_b_high = comp_colors_oklab[0,2] + tol_red
 
-        # thresh_green_L_low = comp_colors_oklab[1,0] - 0.25
-        # thresh_green_L_high = comp_colors_oklab[1,0] + 0.25
-        thresh_green_L_low = 0.0
-        thresh_green_L_high = 1.0
+        thresh_green_L_low = 0.25 # these L thresholds are very very loose
+        thresh_green_L_high = 0.45
         thresh_green_a_low = comp_colors_oklab[1,1] - tol_green
         thresh_green_a_high = comp_colors_oklab[1,1] + tol_green
         thresh_green_b_low = comp_colors_oklab[1,2] - tol_green
         thresh_green_b_high = comp_colors_oklab[1,2] + tol_green
 
-        # thresh_blue_L_low = comp_colors_oklab[2,0] - 0.15
-        # thresh_blue_L_high = comp_colors_oklab[2,0] + 0.15
-        thresh_blue_L_low = 0.0
-        thresh_blue_L_high = 1.0
+        thresh_blue_L_low = 0.3 # these L thresholds are very very loose
+        thresh_blue_L_high = 0.55
         thresh_blue_a_low = comp_colors_oklab[2,1] - tol_blue
         thresh_blue_a_high = comp_colors_oklab[2,1] + tol_blue
         thresh_blue_b_low = comp_colors_oklab[2,2] - tol_blue
         thresh_blue_b_high = comp_colors_oklab[2,2] + tol_blue
 
-        # thresh_wood_L_low = comp_colors_oklab[3,0] - 0.02
-        # thresh_wood_L_high = comp_colors_oklab[3,0] + 0.02
-        thresh_wood_L_low = 0.3
+        thresh_wood_L_low = 0.3 # these L thresholds are very very loose
         thresh_wood_L_high = 0.5
         thresh_wood_a_low = comp_colors_oklab[3,1] - tol_wood
         thresh_wood_a_high = comp_colors_oklab[3,1] + tol_wood
