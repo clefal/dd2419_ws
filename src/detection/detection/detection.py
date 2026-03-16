@@ -20,8 +20,6 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 import math
 
-
-
 import ctypes
 import struct
 
@@ -85,7 +83,6 @@ class Detection(Node):
         # initialize TF and DBSCAN for clustering
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
 
         # Initialize the publisher
         self._pub = self.create_publisher(
@@ -128,12 +125,11 @@ class Detection(Node):
         colors[:, 2] = rgb_uint32 & 255
 
         # geometrical filter
+        # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
         max_dist = 2
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
-        # the cleanest solution is to filter the points in the odom/map frame this should be implemented in the future
-        # also it should be checked if the 
 
         points_f = points[geom_mask]
         colors_f = colors[geom_mask]
@@ -198,7 +194,7 @@ class Detection(Node):
             if len(self.point_buffers['red'])>=self.buffer_size:
                 all_red_points = np.vstack(self.point_buffers['red'])
                 red_centroids = self.process_clusters(all_red_points)
-                self.get_logger().info(f'red: {len(all_red_points)}')
+                # self.get_logger().info(f'red: {len(all_red_points)}')
 
                 # only for visualization in rviz
                 msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
@@ -207,7 +203,7 @@ class Detection(Node):
                 for centroid in red_centroids: 
                     self.publish_detection(centroid, centroid_header, 'red')
 
-                self.point_buffers['red'] = [] # after publishing clear the buffer
+                del self.point_buffers['red'][0] # after publishing clear the buffer
             
             # manage green_points
             if green_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -220,7 +216,7 @@ class Detection(Node):
             if len(self.point_buffers['green'])>=self.buffer_size:
                 all_green_points = np.vstack(self.point_buffers['green'])
                 green_centroids = self.process_clusters(all_green_points)
-                self.get_logger().info(f'green: {len(all_green_points)}')
+                # self.get_logger().info(f'green: {len(all_green_points)}')
 
                 # only for visualization in rviz
                 msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
@@ -229,7 +225,7 @@ class Detection(Node):
                 for centroid in green_centroids: 
                     self.publish_detection(centroid, centroid_header, 'green')
                     
-                self.point_buffers['green'] = [] # after publishing clear the buffer
+                del self.point_buffers['green'][0] # after publishing clear the buffer
 
             # manage blue_points
             if blue_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -242,7 +238,7 @@ class Detection(Node):
             if len(self.point_buffers['blue'])>=self.buffer_size:
                 all_blue_points = np.vstack(self.point_buffers['blue'])
                 blue_centroids = self.process_clusters(all_blue_points)
-                self.get_logger().info(f'blue: {len(all_blue_points)}')
+                # self.get_logger().info(f'blue: {len(all_blue_points)}')
 
                 # only for visualization in rviz
                 msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
@@ -251,7 +247,7 @@ class Detection(Node):
                 for centroid in blue_centroids: 
                     self.publish_detection(centroid, centroid_header, 'blue')
                     
-                self.point_buffers['blue'] = [] # after publishing clear the buffer
+                del self.point_buffers['blue'][0] # after publishing clear the buffer
 
             # manage wood_points
             if wood_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -264,7 +260,7 @@ class Detection(Node):
             if len(self.point_buffers['wood'])>=self.buffer_size:
                 all_wood_points = np.vstack(self.point_buffers['wood'])
                 wood_centroids = self.process_clusters(all_wood_points)
-                self.get_logger().info(f'wood: {len(all_wood_points)}')
+                # self.get_logger().info(f'wood: {len(all_wood_points)}')
 
                 # only for visualization in rviz
                 msg_wood = pc2.create_cloud(centroid_header, fields, all_wood_points)
@@ -273,7 +269,7 @@ class Detection(Node):
                 for centroid in wood_centroids:     # so that marius can experiment with it i will uncomment this line 
                     self.publish_detection(centroid, centroid_header, 'wood')
                     
-                self.point_buffers['wood'] = [] # after publishing clear the buffer
+                del self.point_buffers['wood'][0] # after publishing clear the buffer
                         
             # manage box points
             if box_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -286,7 +282,7 @@ class Detection(Node):
             if len(self.point_buffers['box'])>=self.buffer_size:
                 all_box_points = np.vstack(self.point_buffers['box'])
                 box_centroids = self.process_clusters(all_box_points, box=True)
-                self.get_logger().info(f'box: {len(all_box_points)}')
+                # self.get_logger().info(f'box: {len(all_box_points)}')
 
                 # only for visualization in rviz
                 msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
@@ -295,7 +291,7 @@ class Detection(Node):
                 for centroid in box_centroids:     # so that marius can experiment with it i will uncomment this line 
                     self.publish_detection(centroid, centroid_header, 'box')
                     
-                self.point_buffers['box'] = [] # after publishing clear the buffer
+                del self.point_buffers['box'][0] # after publishing clear the buffer
             
     def occupancy_grid_callback(self, msg :OccupancyGrid):
         #self.get_logger().info(f'revieved occupancy grid message')
@@ -383,12 +379,14 @@ class Detection(Node):
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
         Output: List of centroids [x, y, z] for valid objects
         """
+        dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+
         if len(points_3d) < self.min_samples:  #TODO use thsi parameter as tuning and define it in the __init__
             return []
 
         # 1. Run Clustering (Very fast on <2000 points)
         # Returns labels like [0, 0, 1, -1, 0, 1...] (-1 is noise)
-        labels = self.dbscan.fit_predict(points_3d)
+        labels = dbscan.fit_predict(points_3d)
         
         valid_centroids = []
         
@@ -416,7 +414,7 @@ class Detection(Node):
                     continue # Skip this cluster, it's too big/small
             if box: 
                 if not (self.box_min_width < np.max(dims)< self.box_max_width):
-                    self.get_logger().info(f'object is not the size of a box')
+                    # self.get_logger().info(f'object is not the size of a box')
                     continue # skip this cluster, its too big/small
                 
             # Check 2: Density Check (Optional but recommended)
@@ -502,8 +500,8 @@ class Detection(Node):
         if self.is_close_to_obstacle(centroid[0],centroid[1]):
             self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
             return
-        else:
-            self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
+        # else:
+            # self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
 
 
         if color == 'red':
