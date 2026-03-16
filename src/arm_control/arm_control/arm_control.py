@@ -40,7 +40,7 @@ MAX_CUBE_Y = 438
 PIXEL_TO_MM = 0.217
 
 REQUIRED_DETECTIONS = 3
-DETECTION_TOLERANCE = 3
+DETECTION_TOLERANCE = 1
 
 class Arm_control(Node):
     def __init__(self):
