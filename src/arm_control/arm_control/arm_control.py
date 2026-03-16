@@ -109,6 +109,7 @@ class Arm_control(Node):
         cy = int(M['m01'] / M['m00'])
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
         self.cube_y = cy
+        self.send_msg_adjust_pickup()
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
@@ -281,7 +282,6 @@ def main():
     node = Arm_control()
     node.send_msg_initalize_position()
     node.send_msg_idle_to_pickup()
-    node.send_msg_adjust_pickup()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
