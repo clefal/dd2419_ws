@@ -95,7 +95,7 @@ class Detection(Node):
         self.create_subscription(
             PointCloud2, input_cloud_topic, self.cloud_callback, 10, callback_group=ReentrantCallbackGroup())
         
-        # 1. Define the Latched QoS Profile
+        # Define the Latched QoS Profile for the Occupancy Grid Subscription
         latched_qos = QoSProfile(
             depth=1,                                            # Keep only the last message
             history=QoSHistoryPolicy.KEEP_LAST,                 # Standard history policy for latching
@@ -111,8 +111,7 @@ class Detection(Node):
         This function is called for every message that is published on the '/camera/depth/color/points' topic.
         """
 
-        # TODO for the future, if it becomes a bottleneck: merge the messages into onemessage that is published
-        # this is for sure cleaner since we currently have to handle multiple messages at the same time if we detect multiple things at the same time
+        # convert pointcloud to numpy arrays
         gen = pc2.read_points_numpy(msg, skip_nans=True)
         points = gen[:, :3]
         rgb_uint32 = gen[:, 3].view(np.uint32)
@@ -121,13 +120,14 @@ class Detection(Node):
         colors[:, 1] = (rgb_uint32 >> 8) & 255
         colors[:, 2] = rgb_uint32 & 255
 
+
+
         # geometrical filter
         # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
         max_dist = 2
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
-
         points_f = points[geom_mask]
         colors_f = colors[geom_mask]
 
@@ -138,14 +138,17 @@ class Detection(Node):
         points_f_box = points[geom_mask_for_box]
         colors_f_box = colors[geom_mask_for_box]
 
+
+
         # transform points to map coordinates
         points_map = self.transform_points_to_map(points_f, msg.header)
         points_map_box = self.transform_points_to_map(points_f_box, msg.header)
 
-        # apply the tresholds to the points and return the filter masks
+
+
+        # get masks and check how many hits we have in general 
         red_mask, green_mask, blue_mask, wood_mask, box_mask = self.get_masks(colors_f, colors_f_box) # returns the color masks based on threshold values
 
-        # Chek how many red,green,... points we have
         red_counter = np.sum(red_mask)
         green_counter = np.sum(green_mask)
         blue_counter = np.sum(blue_mask)
@@ -153,6 +156,8 @@ class Detection(Node):
         box_counter = np.sum(box_mask)
 
         general_counter = red_counter + green_counter + blue_counter + wood_counter + box_counter
+
+
 
         # end callback if we have no hits in general
         if general_counter == 0: return 
@@ -167,16 +172,20 @@ class Detection(Node):
             self.point_buffers['box'] = []
             return
 
-        fields = [ # only for visualization in rviz, is actually not relevant
+
+        # needed to publish te pointcloud for rviz
+        fields = [
             PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
             ]
-        
         centroid_header = Header()
         centroid_header.stamp = msg.header.stamp  #this is a bit sus, since we are buffering the points
         centroid_header.frame_id = 'map'
 
+
+        # If points are converted successfully then add them to buffer, if the buffer is full then run clustering and remove the oldest points in the buffer
+        # repeat tht for every color
         if points_map.shape == points_f.shape:  # this is only the case if the transform_points_to_map actually succeeds
             
             # manage red_points
@@ -199,8 +208,9 @@ class Detection(Node):
                 for centroid in red_centroids: 
                     self.publish_detection(centroid, centroid_header, 'red')
 
-                del self.point_buffers['red'][0] # after publishing clear the buffer
+                del self.point_buffers['red'][0] # after publishing clear oldes points of the buffer
             
+
             # manage green_points
             if green_counter > 0: # add points to buffer if we have more than a minimum amount of hits
                 green_points = points_map[green_mask]
@@ -221,7 +231,8 @@ class Detection(Node):
                 for centroid in green_centroids: 
                     self.publish_detection(centroid, centroid_header, 'green')
                     
-                del self.point_buffers['green'][0] # after publishing clear the buffer
+                del self.point_buffers['green'][0] # after publishing clear oldes points of the buffer
+
 
             # manage blue_points
             if blue_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -243,7 +254,8 @@ class Detection(Node):
                 for centroid in blue_centroids: 
                     self.publish_detection(centroid, centroid_header, 'blue')
                     
-                del self.point_buffers['blue'][0] # after publishing clear the buffer
+                del self.point_buffers['blue'][0] # after publishing clear oldes points of the buffer
+
 
             # manage wood_points
             if wood_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -262,11 +274,12 @@ class Detection(Node):
                 msg_wood = pc2.create_cloud(centroid_header, fields, all_wood_points)
                 self._pub.publish(msg_wood)
 
-                for centroid in wood_centroids:     # so that marius can experiment with it i will uncomment this line 
+                for centroid in wood_centroids:    
                     self.publish_detection(centroid, centroid_header, 'wood')
                     
-                del self.point_buffers['wood'][0] # after publishing clear the buffer
+                del self.point_buffers['wood'][0] # after publishing clear oldes points of the buffer
                         
+
             # manage box points
             if box_counter > 0: # add points to buffer if we have more than a minimum amount of hits
                 box_points = points_map_box[box_mask]
@@ -284,10 +297,10 @@ class Detection(Node):
                 msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
                 self._pub.publish(msg_box)
 
-                for centroid in box_centroids:     # so that marius can experiment with it i will uncomment this line 
+                for centroid in box_centroids:
                     self.publish_detection(centroid, centroid_header, 'box')
                     
-                del self.point_buffers['box'][0] # after publishing clear the buffer
+                del self.point_buffers['box'][0] # after publishing clear oldes points of the buffer
             
     def occupancy_grid_callback(self, msg :OccupancyGrid):
         #self.get_logger().info(f'revieved occupancy grid message')
