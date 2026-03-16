@@ -113,8 +113,8 @@ class Arm_control(Node):
         cy = int(M['m01'] / M['m00'])
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
         self.cube_y = cy
-        self.send_msg_adjust_pickup()
-        self.pickup_ready = False
+        #self.send_msg_adjust_pickup()
+        #self.pickup_ready = False
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
