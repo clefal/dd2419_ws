@@ -42,6 +42,7 @@ PIXEL_TO_MM = 0.217
 class Arm_control(Node):
     def __init__(self):
         super().__init__('arm_control')
+        self.pickup_ready = False
         self.in_idle_position = False
         self.holding_object = False
         self.position = [40, 120, 30, 220, 180, 120]
@@ -74,6 +75,9 @@ class Arm_control(Node):
         # )
 
     def image_callback(self, msg: Image):
+        if not self.pickup_ready:
+            return
+
         if msg.encoding == 'bgr8':
             frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         elif msg.encoding == 'yuv422_yuy2':
@@ -110,6 +114,7 @@ class Arm_control(Node):
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
         self.cube_y = cy
         self.send_msg_adjust_pickup()
+        self.pickup_ready = False
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
@@ -159,6 +164,7 @@ class Arm_control(Node):
 
         self.in_idle_position = False
         self.rho = middle_rho
+        self.pickup_ready = True
 
     """Adjust pick-up position based on camera feedback"""
     def send_msg_adjust_pickup(self):
