@@ -41,7 +41,7 @@ class Odometry(Node):
         self.declare_parameter('ticks_per_rev', 48 * 64)
         self.declare_parameter('wheel_radius', 0.04921)
         self.declare_parameter('base', 0.308)
-        self.declare_parameter('fix_tilt', False)
+        self.declare_parameter('fix_tilt', True)
         self.declare_parameter('gyro_bias_duration', 10.0)
 
         # -------------------------
