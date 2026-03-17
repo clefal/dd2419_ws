@@ -2,8 +2,8 @@
 import numpy as np
 import colour as co
 import rclpy
-import time
 from rclpy.node import Node
+import rclpy.duration
 
 from sklearn.cluster import DBSCAN
 
@@ -77,7 +77,7 @@ class Detection(Node):
         # initialize point buffering
         self.point_buffers = {'red': [], 'green':[], 'blue': [], 'wood':[], 'box':[]}
 
-        # initialize TF and DBSCAN for clustering
+        # initialize TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
