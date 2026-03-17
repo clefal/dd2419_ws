@@ -57,6 +57,9 @@ __Buffering and Clustering:__
     - afterwards we check the width of the objects. If it is within the tolerance, we will accept the object and calculate the centroid of it
     - then we return the centroid and publish it
     - we do that for all objects, so we do the same thing for every cube
+    - after the clustering is completed we delete the "oldest" points that are in the buffer to make room for the new points that will arrive in the next iteration
+        - so the buffer acts like a queue that accumulates points and drops the oldest points after usage
+
 
 
 __Occupancy Check:__
@@ -86,7 +89,24 @@ __What's next?__
 
 - Test Test Test
     - thresholds are probably a bit light dependent so performance can vary with sun/light in the room
+        -> color thresholds should by fine by now
+    - It might be handy to check the clustering once again, it seems to work well, but i used the first thing i tried so there might be potential for Improvement 
     - Observe how the "center" vs actual center problem makes tasks more difficult
+
+- **Write a Detection Manager** that is the interface between the detection and the "Brain" of the Robot:
+    - Keep track of the objects that were published by the detection
+        - manage these objects
+            - different options might be suitable
+                - check if detections are close to each other, if so calculate the mean of all detections
+                - check if detectons are close to each other, if so then keep the last detection (so we can accoutn for drift in the best way)
+    - Implement a Service that gives the Goal Manager Information about the detections
+        - one could think about functions like, get_all_detection, get_latest_detections, ...
+        - this way the goal Manager could e.g. 
+            - use the initial detections of objects and boxes to e.g. select which obbject to go to first
+            - after deciding for the object to go to the proximity to that object
+            - then request the latest detection of that point and then replan to that point
+            - this would make everything a lot more robust as we can account for drift and we have some kind of a "detection validation" because we look at an object twice
+    - Finally the Detection Manager should also put in place Transforms of all detected obejects, this could possibly replace the function "get_all_detections" as it 
 
 
 __Random Information__
