@@ -12,6 +12,7 @@ from robp_interfaces.msg import Encoders
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
+from tf_transformations import quaternion_matrix
 
 from tf_transformations import euler_from_quaternion
 
@@ -32,6 +33,31 @@ class Odometry(Node):
 
     def __init__(self):
         super().__init__('odometry')
+
+        # -------------------------
+        # Parameters
+        # -------------------------
+        self.declare_parameter('k', 0.0)
+        self.declare_parameter('ticks_per_rev', 48 * 64)
+        self.declare_parameter('wheel_radius', 0.04921)
+        self.declare_parameter('base', 0.308)
+        self.declare_parameter('fix_tilt', True)
+        self.declare_parameter('gyro_bias_duration', 3.0)
+
+        # -------------------------
+        # Robot model constants
+        # -------------------------
+        self._ticks_per_rev = self.get_parameter('ticks_per_rev').value # measured: 3200, not 3074
+        self._wheel_radius = self.get_parameter('wheel_radius').value
+        self._base = self.get_parameter('base').value
+        # -------------------------
+        # Complementary params
+        # -------------------------
+        # Encoder correction gain (0..1). Smaller = trust IMU more.
+        self._k = self.get_parameter('k').value
+        self._fix_tilt = self.get_parameter('fix_tilt').value
+        self._gyro_bias_duration = self.get_parameter('gyro_bias_duration').value
+
 
         # TF broadcaster
         self._tf_broadcaster = TransformBroadcaster(self)
@@ -63,7 +89,12 @@ class Odometry(Node):
         # Gyro integration bookkeeping
         self._last_imu_t = None
         # TODO: Run imu data collection for some seconds to calculate bias
+        self._gyro_bias_initialized = False
+        self._gyro_bias_init_time = None
+        self._gyro_bias_count = 0
         self._gyro_bias = 0.0
+        if self._fix_tilt:
+            self._gyro_bias_duration = 0.0
 
         # To handle startup nicely
         self._have_encoders = False
@@ -72,21 +103,32 @@ class Odometry(Node):
         # Init 
         self._initial_yaw_imu = None
 
-        # -------------------------
-        # Complementary filter gains
-        # -------------------------
-        # Encoder correction gain (0..1). Smaller = trust IMU more.
-        self._k = 0.0
-        # -------------------------
-        # Robot model constants
-        # -------------------------
-        self._ticks_per_rev = 48 * 64   # measured: 3200, not 3074
-        self._wheel_radius = 0.04921
-        self._base = 0.3075
-
     def imu_callback(self, msg: Imu):
+
         t = stamp_to_sec(msg.header.stamp)
 
+
+        # Calculate gyro bias        
+        if not self._gyro_bias_initialized:
+            if self._gyro_bias_duration == 0.0:
+                self._gyro_bias = 0.0
+                self._gyro_bias_initialized = True
+            elif self._gyro_bias_init_time is None:
+                self._gyro_bias_init_time = t
+                return
+            elif t - self._gyro_bias_init_time < self._gyro_bias_duration:
+                self._gyro_bias += msg.angular_velocity.z
+                self._gyro_bias_count += 1
+                return
+            else:
+                self._gyro_bias = self._gyro_bias / self._gyro_bias_count
+                self._gyro_bias_initialized = True
+                self.get_logger().info('--------------------------------')
+                self.get_logger().info('IMU gyro bias calculated: %f with %d samples' % (self._gyro_bias, self._gyro_bias_count))
+                self.get_logger().info('--------------------------------')
+        
+
+        
         # Wait until we have encoder yaw to initialize nicely
         if not self._have_encoders:
             self._last_imu_t = t
@@ -104,16 +146,38 @@ class Odometry(Node):
 
         self._last_imu_t = t
 
-        # Gyro z (yaw rate)
-        # omega_z = - msg.angular_velocity.z
 
-        # Predict (integrate gyro)
-        # self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+        if self._fix_tilt:
+            # Yaw from IMU transforming the angular velocity with the orientation of the robot
+            q = [msg.orientation.x,
+                msg.orientation.y,
+                msg.orientation.z,
+                msg.orientation.w]
 
-        if self._initial_yaw_imu is None:
-            self._initial_yaw_imu = wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2])
+            R = quaternion_matrix(q)[:3, :3]
+
+            # Angular velocity in body frame
+            omega_body = [msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z]
+
+            # Rotate gyro vector to world frame and use -Z as planar yaw rate
+            omega_z = -(R @ omega_body)[2]
+        else:
+            # Yaw from IMU angular velocity
+            # Gyro z (yaw rate)
+            omega_z = - msg.angular_velocity.z
         
-        self._yaw = - wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2] - self._initial_yaw_imu)
+        # Predict (integrate gyro)
+        self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+
+
+
+
+        # # ---- Yaw from IMU orientation ----
+        # if self._initial_yaw_imu is None:
+        #     self._initial_yaw_imu = wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2])
+        
+        # self._yaw = - wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2] - self._initial_yaw_imu)
+        # # ----------------------------------
 
         # Publish TF at IMU rate for smooth orientation
         self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
@@ -145,7 +209,6 @@ class Odometry(Node):
         # ---- Initialize fused yaw ----
         if not self._have_encoders:
             self._have_encoders = True
-            self._yaw = self._yaw_enc
             self._last_imu_t = stamp_to_sec(msg.header.stamp)
 
         # Publish TF
