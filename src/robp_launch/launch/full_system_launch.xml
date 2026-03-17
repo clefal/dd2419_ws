@@ -13,7 +13,7 @@
   <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
 
   <!-- Nodes -->
-  <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
+  <!-- <node pkg="odometry" exec="odometry" name="odometry" output="log"/> -->
   <node pkg="mapping" exec="mapping_prob" name="mapping" output="log"/>
 
   <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
