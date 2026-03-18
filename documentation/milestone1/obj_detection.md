@@ -3,11 +3,12 @@
 __For playing back the rosbag run the following nodes /launch files:__
 ```bash
 pixi run rviz2
-pixi run ros2 run odometry odometry --ros-args -p use_sim_time:=true 
-pixi run ros2 launch robp_launch frames_launch.xml
-pixi run ros2 bag play --read-ahead-queue-size 100 -l -r 1.0 --clock 100 --start-paused ~/dd2419_ws/rosbags/obj_det_odom_opti_rosbag
-pixi run ros2 run detection detection --ros-args -p use_sim_time:=true
+pixi run ros2 launch mapping workspace_loader.launch.py
+pixi run ros2 run odometry odometry
 pixi run mapping
+pixi run ros2 bag play --read-ahead-queue-size 100 -l -r 1.0 --clock 100 --start-paused ~/dd2419_ws/rosbags/obj_det_odom_opti_rosbag
+pixi run ros2 run detection detection
+pixi run ros2 run detection detection_manager
 ```
 
 __ssh into the Robot in Clemens Hotspot:__
@@ -85,6 +86,20 @@ __Box Detection:__
     - the distance between the published "center" and the actual middle point of the box is also not constant but dependent on in what angle we look at the box
     - We probably have to deal with this problem in the future somehow
 
+
+__Detection Manager:__
+- the detection manager listens to all the incoming detections and handles them
+    - it checks for similarity with an existing object, if there is one that is similar then it updates the latest_x, latest_y of that object
+    - if it is not similar the object will get a new and unique object id and will be added to the object_list
+- the object list can now be used for all kinds of things
+    - currently we use it to simply broadcast the the transforms for the objects
+    - in the future this list can be used to be published on a topic
+    - it can also be used for answering service calls from other nodes in the future
+    - we can also add other features, e.g. detection counters to have something like a "trust_score" for an object
+    - 
+
+
+
 __What's next?__
 
 - Test Test Test
@@ -107,6 +122,8 @@ __What's next?__
             - then request the latest detection of that point and then replan to that point
             - this would make everything a lot more robust as we can account for drift and we have some kind of a "detection validation" because we look at an object twice
     - Finally the Detection Manager should also put in place Transforms of all detected obejects, this could possibly replace the function "get_all_detections" as it 
+
+- before merging one should delete the transform i put into the workspace_loader.launch.py it is not needed when runnin gthe robot and it might even destroy som things...
 
 
 __Random Information__

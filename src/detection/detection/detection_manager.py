@@ -5,7 +5,7 @@ import numpy as np
 from rclpy.node import Node
 from geometry_msgs.msg import PointStamped, TransformStamped
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
-from tf2_ros import Buffer, TransformListener, TransformBroadcaster
+from tf2_ros import Buffer, TransformListener, TransformBroadcaster, StaticTransformBroadcaster
 
 class Obj: 
     def __init__(self, id, x, y,  yaw=0 ,status = 'available', type='cube'):
@@ -35,7 +35,9 @@ class DetectionManager(Node):
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
-        self._tf_broadcaster = TransformBroadcaster(self)
+        self._static_tf_broadcaster = StaticTransformBroadcaster(self)
+
+        # subscribers
 
         self.sub_red_cube = self.create_subscription(PointStamped,'/detection/objects/red_cube', self.red_callback, 10)
         self.sub_green_cube = self.create_subscription(PointStamped,'/detection/objects/green_cube', self.green_callback, 10)
@@ -96,7 +98,6 @@ class DetectionManager(Node):
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         self.object_list[idx] = updated_obj
-                        self.get_logger().info(f'object at position {obj.first_x,obj.first_y}, is similar to object {o.id}, update was performed')
 
                         similarity_counter += 1
             
@@ -123,7 +124,12 @@ class DetectionManager(Node):
             t.transform.rotation.z = 0.0
             t.transform.rotation.w = 1.0
 
-            self._tf_broadcaster.sendTransform(t)           
+            self._static_tf_broadcaster.sendTransform(t)
+            # this now always broadcasts a static transform of the first detection of the point, the static transform somehow does not update itself
+            # since we are not planning on using these tfs anyways but it was just a requirement from the ms2 i think it is okay
+            # we could switch to dynamic broadcasts though, but i fear that if we wanted to use these transforms we could get some interpolation into the future errors since we
+            # need to know the transform after we detected the object and not inbetween 2 detections
+             
 
 # ---------------------------------
 
@@ -174,7 +180,6 @@ class DetectionManager(Node):
 # -------------------------
 
     def process_object(self,x , y, yaw, obj_type):
-        self.get_logger().info(f'Processing object at {x,y} with type {obj_type}')
         idx = self.get_new_obj_idx()
         status = 'available'
         obj = Obj(idx, x, y, yaw, status=status, type=obj_type)
@@ -212,8 +217,7 @@ class DetectionManager(Node):
         yaw = 0
         obj_type = 'box'
         self.process_object(msg.point.x, msg.point.y, yaw, obj_type)
-        self.publish_objects()
-        
+        self.publish_objects()        
 
 # ------------------------
 
@@ -225,7 +229,6 @@ def main():
     except KeyboardInterrupt:
         pass
     rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
