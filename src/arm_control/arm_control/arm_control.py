@@ -10,11 +10,6 @@ from cv_bridge import CvBridge
 from std_msgs.msg import Int32MultiArray
 import cv2
 
-#BIG TODO LIST 
-# Correct error handling of get_arm_angles 
-
-# is_box_in_pickup_range()
-
 
 #TODO: have limits that work with rotational movement 
 MAX_RHO = 190 #could prob be larger, like 194
@@ -25,9 +20,9 @@ Z = 15
 L1 = 101
 L2 = 94
 
-#Arm time constraints 
-MS_PER_DEGREE = 60
-MIN_TIME = 200
+#Arm time constants  
+MS_PER_DEGREE = 60 #TODO adjust: could prob be smaller (aka faster/smoother)
+MIN_TIME = 200 #TODO smaller?? 
 MAX_TIME = 3000
 
 #define idle position
@@ -35,21 +30,29 @@ IDLE_P2 = 16.6
 IDLE_P3 = 166.4
 IDLE_P4 = 89.8
 
+#more standard positions 
+START_POSITION = [40, 120, 30, 220, 180, 120]
+CLOSED_GRIPPER_ANGLE = 100
+OPEN_GRIPPER_ANGLE = 40
+
+#Cube constants 
 MIN_CUBE_Y = 408
 MAX_CUBE_Y = 438
 PIXEL_TO_MM = 0.217
 
+#Detection constants 
 REQUIRED_DETECTIONS = 3
 DETECTION_TOLERANCE = 1
 
 class Arm_control(Node):
     def __init__(self):
         super().__init__('arm_control')
+        self.state = "start"
         self.pickup_ready = False
         self.in_idle_position = False
         self.holding_object = False
-        self.position = [40, 120, 30, 220, 180, 120]
-        self.new_position = [40, 120, 30, 220, 180, 120]
+        self.position = START_POSITION
+        self.new_position = START_POSITION
         self.time = np.full((6), 3000)
         self.rho = 0
         self.cube_y = 0
@@ -58,28 +61,29 @@ class Arm_control(Node):
         self.bridge = CvBridge()
         self.center_pub = self.create_publisher(Int32MultiArray, '/green_cube_center', 10)
 
+        #To visialize the cube detection 
         self.mask_pub = self.create_publisher(Image, '/green_mask', 10)
 
         self.control = self.create_publisher(ArmControl, '/arm/control', 10)
 
-        self.subscription = self.create_subscription(
+        self.image_subscription = self.create_subscription(
             Image,
             '/arm/camera/image_raw',
             self.image_callback,
             10
         )
 
-        # self.res = self.create_publisher(String, '/arm/result', 10)
+        self.res = self.create_publisher(String, '/arm/result', 10)
 
-        # self.subscription = self.create_subscription(
-        #     String,
-        #     '/arm/action',       
-        #     self.change_position,   
-        #     10                    
-        # )
+        self.action_subscription = self.create_subscription(
+            String,
+            '/arm/action',       
+            self.action,   
+            10                    
+        )
 
     def image_callback(self, msg: Image):
-        if not self.pickup_ready:
+        if self.state not in ["detect"]:
             return
 
         if msg.encoding == 'bgr8':
@@ -117,6 +121,9 @@ class Arm_control(Node):
         cy = int(M['m01'] / M['m00'])
         self.get_logger().info(f"Green cube center at: x={cx}, y={cy}")
 
+        #TODO add error handling so arm does not get stuck in pick up 
+        # ( should use funciton self.send_msg_failed_pickup_to_idle() )
+        # Maybe just a timeout is fine? 
 
         self.last_detections.append(cy)
 
@@ -124,79 +131,25 @@ class Arm_control(Node):
             self.last_detections.pop(0)
 
         if len(self.last_detections) == REQUIRED_DETECTIONS:
+            #if detection is stable 
             if max(self.last_detections) - min(self.last_detections) < DETECTION_TOLERANCE:
                 stable_y = int(sum(self.last_detections) / REQUIRED_DETECTIONS)
-
                 self.cube_y = stable_y
-                self.send_msg_adjust_pickup()
-                self.pickup_ready = False
+
+                # Cube is within range to pick up 
+                if self.cube_y > MIN_CUBE_Y and self.cube_y < MAX_CUBE_Y:
+                    self.state = "pickup"
+                    self.pick_up_object()
+                else:
+                # Adjust arm to center cube 
+                    self.send_msg_adjust_pickup()
+                    self.state = "detect"
+
+                self.last_detections.clear()
 
         msg_out = Int32MultiArray()
         msg_out.data = [cx, cy]
         self.center_pub.publish(msg_out)
-
-    """
-    Publish arm control message with currrent self.new_position and self.time 
-    Sleeps for the duration of longest arm movement to avoid concurrent arm messages 
-    """
-    def publish_arm_control(self):
-        msg = ArmControl()
-        msg.position = self.new_position
-        self.set_time()
-        print(self.time)
-        msg.time = self.time 
-        self.control.publish(msg)
-        time.sleep(max(msg.time)/1000)
-        self.position = self.new_position.copy()
-
-    """Update self.time to match angle delta"""
-    def set_time(self):
-        self.time = []
-
-        for i in range(len(self.position)):
-            diff = abs(self.new_position[i] - self.position[i])
-            t = diff * MS_PER_DEGREE
-            t = max(MIN_TIME, min(MAX_TIME, int(t)))
-            self.time.append(t)
-
-    """Robot goes into idle position from start position (only run at inilization)"""
-    def send_msg_initalize_position(self):
-        self.new_position[3] = IDLE_P3
-        self.publish_arm_control()
-
-        self.new_position[2] = IDLE_P2
-        self.new_position[4] = IDLE_P4
-        self.publish_arm_control()
-
-        self.in_idle_position = True
-
-    """Moves from idle_postion to inital_pickup position"""
-    def send_msg_idle_to_pickup(self):
-        middle_rho = (MIN_RHO + MAX_RHO) / 2
-        p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
-        self.new_position[2:5] = [p2, p3, p4]
-        self.publish_arm_control()
-
-        self.in_idle_position = False
-        self.rho = middle_rho
-        self.pickup_ready = True
-
-    """Adjust pick-up position based on camera feedback"""
-    def send_msg_adjust_pickup(self):
-        cube_middle = (MIN_CUBE_Y + MAX_CUBE_Y) / 2
-        cube_diff =  cube_middle - self.cube_y
-        new_rho = self.rho + cube_diff * PIXEL_TO_MM
-
-        print("cube_y: ", self.cube_y)
-        print("cube_diff: ", cube_diff )
-        print(new_rho) 
-        p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
-        self.new_position[2:5] = [p2, p3, p4]
-        self.publish_arm_control()
-        self.rho = new_rho    
-
-            
-
 
     """
     solves equation to give arm angles for a given rho and z 
@@ -233,78 +186,179 @@ class Arm_control(Node):
         s2 = 120 - math.degrees(t2)
         s3 = 120 + math.degrees(t3)
 
-        #TODO: error check that s1-3 are okey values
-        if s1 < 30 and s1 > 120 and s2 < 100 and s2 > 210 and s3 < 17  and s3 > 140:
+        if s1 < 30 or s1 > 120 or s2 < 100 or s2 > 210 or s3 < 17 or s3 > 140:
             #TODO: correctly raise error 
             print("bad angles:", s1, s2, s3)
             return "error"
         
         print(s1, s2, s3)
-        return s1, s2, s3        
+        return s1, s2, s3 
 
+    """Update self.time to match angle delta"""
+    def set_time(self):
+        self.time = []
+
+        for i in range(len(self.position)):
+            diff = abs(self.new_position[i] - self.position[i])
+            t = diff * MS_PER_DEGREE
+            t = max(MIN_TIME, min(MAX_TIME, int(t)))
+            self.time.append(t)
+    
+    """
+    Publish arm control message with currrent self.new_position and self.time 
+    Sleeps for the duration of longest arm movement to avoid concurrent arm messages 
+    """
+    def publish_arm_control(self):
+        msg = ArmControl()
+        msg.position = self.new_position
+        self.set_time()
+        print(self.time)
+        msg.time = self.time 
+        self.control.publish(msg)
+        time.sleep(max(msg.time)/1000)
+        self.position = self.new_position.copy()
+
+    """Publish result message to /arm/result"""
+    def publish_res(self, data):
+        msg = String()
+        msg.data = data
+        self.res.publish(msg)
+
+    """return true if object is in arm else return false"""
+    def is_holding_object(self):
+        #TODO prob use a like pickup_check state or something in the camera callback but idk
+        return True
+    
+    """
+    use arm camera in idle position to determine if there (1) is a cube and (2) if cube is within range 
+    if not (1) return no cube detection error 
+    if not (2) return cube outside of range error 
+    else return true
+    """
     def is_box_in_pickup_range(self):
-        pass 
-        #TODO something camera something 
+        #TODO
+        #May also need a new state but idk
+        return True
 
-    #TODO: def send_msg_idle_position(self):
+    """Robot goes into idle position from start position (only run at inilization)"""
+    def send_msg_initalize_position(self):
+        self.new_position[3] = IDLE_P3
+        self.publish_arm_control()
 
-    # def publish_res(self, data):
-    #     msg = String()
-    #     msg.data = data
-    #     self.res.publish(msg)
+        self.new_position[2] = IDLE_P2
+        self.new_position[4] = IDLE_P4
+        self.publish_arm_control()
 
-    # def start_position(self):
-    #     self.send_msg_start_position()
-    #     self.publish_res("START_SUCCESS")
+    """Moves from idle_postion to inital_pickup position to detect obejct"""
+    def send_msg_idle_to_detect(self):
+        middle_rho = (MIN_RHO + MAX_RHO) / 2
+        p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
+        self.new_position[2:5] = [p2, p3, p4]
+        self.publish_arm_control()
 
-    # def pick_up_object(self):
-    #     if (self.in_start_position):
-    #         self.send_msg_raise_camera()
-    #         time.sleep(3.0)
+        self.rho = middle_rho
 
-    #         self.send_msg_lower_arm()
-    #         time.sleep(3.0)
+    """A return to idle postion from pickup position"""
+    def send_msg_pickup_to_idle(self):
+        #Go to middle pickup
+        middle_rho = (MIN_RHO + MAX_RHO) / 2
+        p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
+        self.new_position[2:5] = [p2, p3, p4]
+        self.publish_arm_control()
 
-    #         self.send_msg_close_grip()
-    #         time.sleep(3.0)
+        #Go to idle 
+        self.new_position[2] = IDLE_P2
+        self.new_position[3] = IDLE_P3
+        self.new_position[4] = IDLE_P4
+        self.publish_arm_control()
 
-    #         self.send_msg_raise_arm()
-    #         time.sleep(3.0)
+    """Move from idle position to drop of position"""
+    def send_msg_idle_to_drop(self):
+        pass
+        #TODO
+        #Go into a drop off position 
+        #later TODO include box detection?? 
 
-    #         self.in_start_position = False
-    #         self.holding_object = True #TODO: check that an object is actually in arm
-    #         self.publish_res("PICK_UP_SUCCESS")
-    #         if (not self.holding_object):
-    #             self.publish_res("PICK_UP_FAIL_NO_OBJECT")
-    #             self.get_logger().error(f'Failed to pick up object: Object not in arm')
+    """Move from drop position to idle position"""
+    def send_msg_drop_to_idle(self):
+        pass
+        #TODO
+        #Change postion to idle 
+        
+    """Adjust pick-up position based on camera feedback"""
+    def send_msg_adjust_pickup(self):
+        cube_middle = (MIN_CUBE_Y + MAX_CUBE_Y) / 2
+        cube_diff =  cube_middle - self.cube_y
+        new_rho = self.rho + cube_diff * PIXEL_TO_MM
 
-    #     else:
-    #         self.publish_res("PICK_UP_FAIL_NO_START")
-    #         self.get_logger().error(f'Can not initilize pick up: Arm not in start position')
+        p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
+        self.new_position[2:5] = [p2, p3, p4]
+        self.publish_arm_control()
+        self.rho = new_rho
 
-    # def drop_object(self):
-    #     if (self.holding_object):
-    #         self.send_msg_open_grip()
-    #         self.holding_object = False
-    #         self.send_msg_start_position()
-    #         self.publish_res("DROP_SUCCESS")
-    #     else:
-    #         self.publish_res("DROP_FAIL_NO_OBJECT")
-    #         self.get_logger().error(f'Can not drop object: Not holdning an object')
+    def send_msg_close_gripper(self):
+        self.new_position[0] = CLOSED_GRIPPER_ANGLE
+        self.publish_arm_control()
 
-    # def change_position(self, msg):    
-    #     if msg.data == "START":
-    #         self.start_position()
-    #     elif msg.data == "PICK_UP":
-    #         self.pick_up_object()
-    #     elif msg.data == "DROP":
-    #         self.drop_object()
+    def send_msg_open_gripper(self):
+        self.new_position[0] = OPEN_GRIPPER_ANGLE
+        self.publish_arm_control()
+
+    def pick_up_object(self):
+        self.send_msg_close_gripper()
+        self.send_msg_pickup_to_idle()
+        if self.is_holding_object():
+            self.state = "holding"
+            self.publish_res("PICK_UP_SUCCESS")
+        else:
+            self.publish_res("PICK_UP_FAIL_NO_OBJECT")
+            self.state = "idle"
+            #TODO handle error 
+
+    def initialize(self):
+        if self.state == "start":
+            self.send_msg_initalize_position()
+            self.publish_res("START_SUCCESS")
+            self.state = "idle"
+        else:
+            self.publish_res("START_FAIL")
+
+
+    def initialize_pickup_process(self):
+        if self.state == "idle":
+            if self.is_box_in_pickup_range():
+                self.send_msg_idle_to_detect()
+                self.state = "detect"
+            else:
+                self.publish_res("PICK_UP_FAIL_RANGE") #TODO maybe different error for cube not in range or can't see cube at all
+        else: 
+            self.publish_res("PICK_UP_FAIL_NO_IDLE")
+
+    def drop_object(self):
+        if self.state == "holding":
+            self.state = "drop"
+            self.send_msg_idle_to_drop()
+            self.send_msg_open_gripper()
+            self.send_msg_drop_to_idle()
+            self.state = "idle"
+            self.publish_res("DROP_SUCCESS")
+        else: 
+            self.publish_res("DROP_FAIL_NO_OBJECT")
+
+    """Perform actions based on goal manager"""
+    def action(self, msg):
+        if msg.data == "START":
+            self.initialize()
+        elif msg.data == "PICK_UP":
+            self.initialize_pickup_process()
+        elif msg.data == "DROP":
+            self.drop_object()
 
 def main():
     rclpy.init()
     node = Arm_control()
     node.send_msg_initalize_position()
-    node.send_msg_idle_to_pickup()
+    node.send_msg_idle_to_detect()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -313,63 +367,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-# def send_msg_raise_camera(self):
-#     msg = ArmControl()
-#     msg.position[0] = 10
-#     msg.position[2] = 150
-#     msg.position[3] = 190
-#     msg.position[4] = 120
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
-
-# def send_msg_lower_camera(self):
-#     msg = ArmControl()
-#     msg.position[0] = 10
-#     msg.position[2] = 50
-#     msg.position[3] = 210
-#     msg.position[4] = 120
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
-
-# def send_msg_close_grip(self):
-#     msg = ArmControl()
-#     msg.position[0] = 100
-#     msg.position[2] = 150
-#     msg.position[3] = 190
-#     msg.position[4] = 40
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
-
-# def send_msg_open_grip(self):
-#     msg = ArmControl()
-#     msg.position[0] = 10
-#     msg.position[2] = 150
-#     msg.position[3] = 190
-#     msg.position[4] = 120
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
-
-# def send_msg_lower_arm(self):
-#     msg = ArmControl()
-#     msg.position[0] = 10
-#     msg.position[2] = 150
-#     msg.position[3] = 190
-#     msg.position[4] = 40
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
-
-# def send_msg_raise_arm(self):
-#     msg = ArmControl()
-#     msg.position[0] = 100
-#     msg.position[2] = 150
-#     msg.position[3] = 190
-#     msg.position[4] = 120
-
-#     self.pub.publish(msg)
-#     time.sleep(3.0)
