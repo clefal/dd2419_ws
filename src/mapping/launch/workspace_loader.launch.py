@@ -1,26 +1,51 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 import os
+
+
+def _prefer_src_config(filename: str, pkg_share: str) -> str:
+    # During development, prefer files in the workspace source tree.
+    src_path = os.path.join(os.getcwd(), 'src', 'mapping', 'config', filename)
+    if os.path.exists(src_path):
+        return src_path
+    return os.path.join(pkg_share, 'config', filename)
 
 
 def generate_launch_description():
 
     pkg_share = get_package_share_directory('mapping')
 
-    workspace_file = os.path.join(pkg_share, 'config', 'workspace_1.csv')
-    map_file = os.path.join(pkg_share, 'config', 'map_1_1.csv')
+    workspace_file = _prefer_src_config('workspace_1.csv', pkg_share)
+    map_file = _prefer_src_config('map_1_1.csv', pkg_share)
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'workspace_csv',
+            default_value=workspace_file,
+            description='Path to workspace polygon CSV',
+        ),
+        DeclareLaunchArgument(
+            'map_csv',
+            default_value=map_file,
+            description='Path to map objects CSV',
+        ),
+        DeclareLaunchArgument(
+            'input_units',
+            default_value='cm',
+            description='Units used in CSV files: m, cm, or mm',
+        ),
 
         # --- Mapping node ---
         Node(
             package='mapping',
             executable='workspace_loader',
             parameters=[{
-                'workspace_csv': workspace_file,
-                'map_csv': map_file,
-                'input_units': 'cm'
+                'workspace_csv': LaunchConfiguration('workspace_csv'),
+                'map_csv': LaunchConfiguration('map_csv'),
+                'input_units': LaunchConfiguration('input_units')
             }]
         ),
 
@@ -38,23 +63,6 @@ def generate_launch_description():
             ]
         ),
 
-        # --- Static TF: base_link -> camera ---
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_camera',
-            arguments=[
-                '--x', '0.08987',
-                '--y', '0.0175',
-                '--z', '0.10456',
-                '--qx', '0.5',
-                '--qy', '-0.5',
-                '--qz', '0.5',
-                '--qw', '-0.5',
-                '--frame-id', 'base_link',
-                '--child-frame-id', 'realsense_camera_depth_optical_frame'
-            ]
-        ),
 
         # --- Static TF: base_link -> camera ---
         Node(
@@ -65,10 +73,10 @@ def generate_launch_description():
                 '--x', '0.08987',
                 '--y', '0.0175',
                 '--z', '0.10456',
-                '--qx', '0.5',
-                '--qy', '-0.5',
-                '--qz', '0.5',
-                '--qw', '-0.5',
+                '--qx', '0',
+                '--qy', '0',
+                '--qz', '0',
+                '--qw', '1',
                 '--frame-id', 'base_link',
                 '--child-frame-id', 'realsense_camera_link'
             ]

@@ -10,7 +10,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray
 from tf2_ros import Buffer, TransformListener
-from tf_transformations import euler_from_quaternion
+from tf_transformations import euler_from_quaternion, quaternion_from_euler
 
 
 GridIndex = Tuple[int, int]  # (gx, gy)
@@ -44,6 +44,13 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
+        self.declare_parameter("cube_approach_radius", 0.16)
+        self.declare_parameter("robot_radius", 0.05)
+        self.declare_parameter("inflation_margin", 0.01)
+        self.declare_parameter("cube_size", 0.02)
+        self.declare_parameter("box_frame", "box")
+        self.declare_parameter("box_size", 0.16)
+        self.declare_parameter("box_goal_radius", 0.30)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -183,7 +190,8 @@ class GlobalPlannerNode(Node):
             return
 
         # Run Weighted A*
-        planning_map = self.build_planning_grid(self._map, self._meta)
+        include_box_lethal = not self._is_box_goal(goal_xy)
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
 
         path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
@@ -193,6 +201,13 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn(f"Planning failed ({reason}). No path found.")
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
+
+        # For cube goals, cut path at approach radius and face cube
+        final_yaw_override = None
+        maybe_path, maybe_yaw = self._apply_cube_approach_if_needed(path_idx)
+        if maybe_path is not None and len(maybe_path) > 0:
+            path_idx = maybe_path
+            final_yaw_override = maybe_yaw
 
         # Convert to nav_msgs/Path in map frame
         path_msg = Path()
@@ -209,8 +224,14 @@ class GlobalPlannerNode(Node):
             ps.pose.orientation.w = 1.0
             path_msg.poses.append(ps)
 
-        # Set final pose orientation to the goal orientation (yaw)
-        if len(path_msg.poses) > 0 and self._goal_msg is not None:
+        # Set final pose orientation
+        if len(path_msg.poses) > 0 and final_yaw_override is not None:
+            q = quaternion_from_euler(0.0, 0.0, final_yaw_override)
+            path_msg.poses[-1].pose.orientation.x = q[0]
+            path_msg.poses[-1].pose.orientation.y = q[1]
+            path_msg.poses[-1].pose.orientation.z = q[2]
+            path_msg.poses[-1].pose.orientation.w = q[3]
+        elif len(path_msg.poses) > 0 and self._goal_msg is not None:
             if self._goal_msg.header.frame_id == self.global_frame or self._goal_msg.header.frame_id == "":
                 path_msg.poses[-1].pose.orientation = self._goal_msg.pose.orientation
             else:
@@ -250,7 +271,11 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
-        planning_map = self.build_planning_grid(self._map, self._meta)
+        include_box_lethal = not any(
+            self._is_box_goal((pose.position.x, pose.position.y))
+            for pose in msg.poses
+        )
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
 
         best_path_idx = None
@@ -311,6 +336,52 @@ class GlobalPlannerNode(Node):
             total += step + self.cell_penalty(x1, y1, occ, meta)
         return total
 
+    def _apply_cube_approach_if_needed(
+        self, path_idx: List[GridIndex]
+    ) -> Tuple[Optional[List[GridIndex]], Optional[float]]:
+        if self._goal_msg is None or self._meta is None:
+            return (None, None)
+
+        tx = self._goal_msg.pose.position.x
+        ty = self._goal_msg.pose.position.y
+
+        radius = self.get_parameter("cube_approach_radius").get_parameter_value().double_value
+        if radius <= 0.0:
+            return (None, None)
+
+        cut_idx = self._path_index_at_radius(path_idx, tx, ty, radius, self._meta)
+        if cut_idx is None:
+            return (None, None)
+
+        truncated = path_idx[:cut_idx + 1]
+        ax, ay = self.grid_to_world_center(truncated[-1][0], truncated[-1][1], self._meta)
+        yaw = math.atan2(ty - ay, tx - ax)
+        self.get_logger().info(
+            f"Cube approach applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
+        )
+        return (truncated, yaw)
+
+    @staticmethod
+    def _path_index_at_radius(
+        path_idx: List[GridIndex], tx: float, ty: float, radius: float, meta: GridMeta
+    ) -> Optional[int]:
+        if len(path_idx) == 0:
+            return None
+
+        prev_dist = None
+        for i, (gx, gy) in enumerate(path_idx):
+            wx, wy = GlobalPlannerNode.grid_to_world_center(gx, gy, meta)
+            d = math.hypot(wx - tx, wy - ty)
+            if d <= radius:
+                if i == 0:
+                    return 0
+                if prev_dist is None:
+                    return i
+                return i - 1 if prev_dist > radius else i
+            prev_dist = d
+
+        return None
+
     def _publish_empty_path(self, reason: str = "unknown") -> None:
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
@@ -327,15 +398,17 @@ class GlobalPlannerNode(Node):
             return None
 
 
-    def build_planning_grid(self, raw: OccupancyGrid, meta: GridMeta) -> OccupancyGrid:
+    def build_planning_grid(
+        self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
+    ) -> OccupancyGrid:
         # Copy raw map
         planning = OccupancyGrid()
         planning.header = raw.header
         planning.info = raw.info
         lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
+        robot_radius = self.get_parameter("robot_radius").get_parameter_value().double_value
+        margin = self.get_parameter("inflation_margin").get_parameter_value().double_value
 
-        robot_radius = 0.05 #0.15
-        margin = 0.01
         r_lethal_cells = int(math.ceil((robot_radius + margin) / meta.resolution))
 
         # soft halo thickness outside the hard core
@@ -352,8 +425,10 @@ class GlobalPlannerNode(Node):
 
 
 
-        cube_radius = 0.015
-        r_cells = int(math.ceil(cube_radius / meta.resolution))
+        cube_size = self.get_parameter("cube_size").get_parameter_value().double_value
+        cube_half_diagonal = 0.5 * cube_size * math.sqrt(2.0)
+        cube_keepout_radius = robot_radius + cube_half_diagonal + margin
+        r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
 
         for (cx, cy) in self._cubes:
             if self._target_cube is not None:
@@ -367,7 +442,35 @@ class GlobalPlannerNode(Node):
 
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
+        if include_box_lethal:
+            box_xy = self._get_box_xy_in_map()
+            if box_xy is not None:
+                box_size = self.get_parameter("box_size").get_parameter_value().double_value
+                box_half_diagonal = 0.5 * box_size * math.sqrt(2.0)
+                box_keepout_radius = robot_radius + box_half_diagonal + margin
+                box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
+
+                box_idx = self.world_to_grid(box_xy[0], box_xy[1], meta)
+                if box_idx is not None:
+                    self.mark_disk_lethal(planning.data, box_idx[0], box_idx[1], box_r_cells, meta)
+
         return planning
+
+    def _is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
+        box_xy = self._get_box_xy_in_map()
+        if box_xy is None:
+            return False
+
+        box_goal_radius = self.get_parameter("box_goal_radius").get_parameter_value().double_value
+        return math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= box_goal_radius
+
+    def _get_box_xy_in_map(self) -> Optional[Tuple[float, float]]:
+        box_frame = self.get_parameter("box_frame").get_parameter_value().string_value
+        try:
+            tf = self.tf_buffer.lookup_transform(self.global_frame, box_frame, rclpy.time.Time())
+            return (tf.transform.translation.x, tf.transform.translation.y)
+        except Exception:
+            return None
 
 
     def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):

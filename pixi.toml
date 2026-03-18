@@ -31,7 +31,7 @@ global_planner = { cmd = "ros2 run global_planner global_planner" }
 callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
 localization =  { cmd = "ros2 run localization localization" }
 static_transforms = { cmd = "ros2 launch robp_launch frames_launch.xml" }
-workspace = { cmd = "ros2 launch mapping workspace_loader.launch.py" }
+workspace = { cmd = "ros2 launch src/mapping/launch/workspace_loader.launch.py workspace_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/workspace_1.csv map_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/map_1_1.csv" }
 mapping = { cmd = "ros2 run mapping mapping_prob" }
 full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
 detection = { cmd = "ros2 run detection detection" }

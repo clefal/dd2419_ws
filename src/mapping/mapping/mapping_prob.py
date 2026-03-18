@@ -17,7 +17,7 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.05) # m/cell
+        self.declare_parameter("grid_resolution", 0.02) # m/cell
         self.declare_parameter("lidar_topic", "/lidar/scan")
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
@@ -34,7 +34,8 @@ class Mapping(Node):
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
         self.range_min = 0.1
-        self.range_max = 10.0
+        self.range_max = 5.0
+        self.range_max_free_update = 3.0
 
         # Filter params
         self.median_filter_kernel_size = 5
@@ -135,18 +136,17 @@ class Mapping(Node):
         #self.get_logger().info(f"X: {x_robot}, Y: {y_robot}")
 
         filtered_ranges = self.median_filter_scan(msg.ranges, kernel_size=self.median_filter_kernel_size)
+        last_cell_occupied = True
 
         for i in range(len(filtered_ranges)):
             r = filtered_ranges[i]
+            last_cell_occupied = True
 
-            if not math.isfinite(r) or r < self.range_min or r > self.range_max:
+            if not math.isfinite(r) or r < self.range_min:
                 continue
-
-
-
-            r = msg.ranges[i]
-            if not math.isfinite(r) or r < msg.range_min or r > msg.range_max:
-                continue
+            if r > self.range_max:
+                r = self.range_max_free_update
+                last_cell_occupied = False
             ang = msg.angle_min + i * msg.angle_increment
             x_scan = r * math.cos(ang)
             y_scan = r * math.sin(ang)
@@ -156,7 +156,7 @@ class Mapping(Node):
             if np.isnan(x) or np.isnan(y):
                 continue
             # self.grid.update(x, y, occupied=True)
-            self.grid.update_ray(x_robot, y_robot, x, y)
+            self.grid.update_ray(x_robot, y_robot, x, y, last_cell_occupied)
 
         occupancy_grid_msg = OccupancyGrid()
         occupancy_grid_msg.header.stamp = msg.header.stamp
@@ -292,7 +292,7 @@ class OcupancyGridData:
         cells.append((x1, y1))
         return cells
     
-    def update_ray(self, x_robot, y_robot, x_hit, y_hit):
+    def update_ray(self, x_robot, y_robot, x_hit, y_hit, last_occupied=True):
         x0, y0 = self.world_to_grid(x_robot, y_robot)
         x1, y1 = self.world_to_grid(x_hit, y_hit)
 
@@ -302,9 +302,12 @@ class OcupancyGridData:
             if x < 0 or x >= self.width or y < 0 or y >= self.height:
                 continue
 
-            # Last cell → occupied
-            if i == len(cells) - 1:
-                self.log_odds[y, x] += self.l_occ
+            if last_occupied:
+                # First cell → occupied
+                if i == len(cells) - 1:
+                    self.log_odds[y, x] += self.l_occ
+                else:
+                    self.log_odds[y, x] += self.l_free
             else:
                 self.log_odds[y, x] += self.l_free
 

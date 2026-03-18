@@ -61,21 +61,35 @@ class Controller(Node):
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.3)        # m
-        self.declare_parameter('nominal_linear_speed', 0.18)     # duty-equivalent
-        self.declare_parameter('max_angular_speed', 0.22)        # duty-equivalent
-        self.declare_parameter('goal_tolerance', 0.10)           # m
+        self.declare_parameter('nominal_linear_speed', 0.5)     # 0.35 duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.3)        # 0.2 duty-equivalent
+        self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.55)
+        self.declare_parameter('steering_gain', 0.3)
+
+
+        self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
+        self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
+        self.declare_parameter('turn_gain', 0.3)                 # duty-per-rad for in-place turning
+        self.declare_parameter('control_period', 0.1)           # s (0.05=20Hz, 0.1=10Hz)
+        self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
+
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
 
         # When to turn in place to reacquire path direction
-        self._turn_in_place_yaw_thresh = 0.60  # rad
+        self._turn_in_place_yaw_thresh = 0.75  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
-        self._timer = self.create_timer(0.1, self.control_tick)  # 10 Hz
+              
+        period = float(self.get_parameter('control_period').value)
+        self._control_period = period
+        self._timer = self.create_timer(period, self.control_tick)
+        self._last_left_cmd = 0.0
+        self._last_right_cmd = 0.0
+        
         self._backup_active = False
         self._backup_target_m = 0.0
         self._backup_start_xy = None
@@ -89,14 +103,29 @@ class Controller(Node):
         self._status_pub.publish(msg)
 
     def send_duty(self, left: float, right: float):
+        target_left = float(clamp(left, -1.0, 1.0))
+        target_right = float(clamp(right, -1.0, 1.0))
+
+        # Keep stops immediate for safety; otherwise limit per-tick duty jumps.
+        if target_left == 0.0 and target_right == 0.0:
+            out_left = 0.0
+            out_right = 0.0
+        else:
+            slew_rate = float(self.get_parameter('wheel_slew_rate').value)
+            max_delta = max(0.0, slew_rate) * self._control_period
+            out_left = clamp(target_left, self._last_left_cmd - max_delta, self._last_left_cmd + max_delta)
+            out_right = clamp(target_right, self._last_right_cmd - max_delta, self._last_right_cmd + max_delta)
+
         m = DutyCycles()
-        m.duty_cycle_left = float(clamp(left, -1.0, 1.0))
-        m.duty_cycle_right = float(clamp(right, -1.0, 1.0))
+        m.duty_cycle_left = out_left
+        m.duty_cycle_right = out_right
         self._cmd_pub.publish(m)
+        self._last_left_cmd = out_left
+        self._last_right_cmd = out_right
 
         # True when turning on the spot (opposite directions)
         turning_msg = Bool()
-        turning_msg.data = (left * right < 0.0)
+        turning_msg.data = (out_left * out_right < 0.0)
         self._turn_pub.publish(turning_msg)
 
     def stop(self):
@@ -188,38 +217,24 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
-    @staticmethod
-    def enforce_motor_deadzone_pair(left: float, right: float, min_dc: float) -> Tuple[float, float]:
+    def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
-        Requirement: each wheel is either 0 or |duty| >= min_dc.
-
-        - If both wheels same direction and one is just under min_dc: scale BOTH up to preserve ratio.
-        - If wheels opposite direction (turn-in-place): force each nonzero wheel to at least min_dc.
-        - Finally: clamp tiny magnitudes to 0.
+        Affine deadzone remap:
+        each non-zero wheel command in [0..1] is remapped to [min_dc..1].
+        This keeps command output continuous and avoids repeated near-threshold lifting.
         """
-        # Same direction (forward/back): scale both to keep ratio
-        if left * right > 0.0:
-            aL, aR = abs(left), abs(right)
-            m = min(aL, aR)
-            if 0.0 < m < min_dc:
-                scale = min_dc / m
-                left *= scale
-                right *= scale
+        eps = 1e-4
 
-        # Opposite direction (turn in place): enforce minimum magnitude per wheel if nonzero
-        if left * right < 0.0:
-            if abs(left) > 0.0 and abs(left) < min_dc:
-                left = math.copysign(min_dc, left)
-            if abs(right) > 0.0 and abs(right) < min_dc:
-                right = math.copysign(min_dc, right)
+        def remap(dc: float) -> float:
+            a = abs(dc)
+            if a <= eps:
+                return 0.0
+            a = clamp(a, 0.0, 1.0)
+            # 0% input -> min_dc, 100% input -> 1.0
+            a = min_dc + (1.0 - min_dc) * a
+            return math.copysign(a, dc)
 
-        # Per-wheel deadzone: tiny magnitudes become 0
-        if 0.0 < abs(left) < min_dc:
-            left = 0.0
-        if 0.0 < abs(right) < min_dc:
-            right = 0.0
-
-        return left, right
+        return remap(left), remap(right)
     # ----------------------------
 
     def control_tick(self):
@@ -280,8 +295,9 @@ class Controller(Node):
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
-                # Simple proportional-in-duty turning in place
-                w = clamp(yaw_err, -1.0, 1.0) * wmax
+                k_turn = float(self.get_parameter('turn_gain').value)
+                w = clamp(k_turn * yaw_err, -wmax, wmax)
+
                 left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
                 self.send_duty(left, right)
                 return
@@ -314,7 +330,9 @@ class Controller(Node):
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
             wmax = float(self.get_parameter('max_angular_speed').value)
-            w = clamp(yaw_err, -1.0, 1.0) * wmax
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+
             left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
             self.send_duty(left, right)
             return
@@ -326,13 +344,33 @@ class Controller(Node):
         wmax = float(self.get_parameter('max_angular_speed').value)
         k_steer = float(self.get_parameter('steering_gain').value)
 
+
         # Slow down in curves (simple, stable indoors)
-        v = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = clamp(v_curve, 0.0, v_nom)
+
+        # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
+        slow_radius = float(self.get_parameter('goal_slow_radius').value)
+        v_min = float(self.get_parameter('min_linear_speed').value)
+
+        slow_radius = max(0.05, slow_radius)
+        v_min = max(self._dc_min + 0.02, min(v_min, v_nom))  # keep above deadzone margin
+
+        approach = clamp(dist_to_goal / slow_radius, 0.0, 1.0)
+        v_goal = v_min + (v_nom - v_min) * approach
+
+        v = min(v_curve, v_goal)
         v = clamp(v, 0.0, v_nom)
 
         # Steering
         w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
+
+        # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
+        # If v is small, cap steering so v-|w| does not fall into deadband.
+        if v > 0.0:
+            w_deadband_limit = max(0.0, v - self._dc_min)
+            w = clamp(w, -w_deadband_limit, w_deadband_limit)
 
         # Convert to wheel duties
         left = v - w

@@ -6,10 +6,11 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /Map1
-        - /Path3
+        - /TF1
+        - /TF1/Frames1
         - /Pose1
         - /PoseArray1
+        - /PointStamped6
       Splitter Ratio: 0.5
     Tree Height: 1156
   - Class: rviz_common/Selection
@@ -79,34 +80,6 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /nav/global_path
       Value: true
-    - Alpha: 1
-      Buffer Length: 1
-      Class: rviz_default_plugins/Path
-      Color: 25; 255; 0
-      Enabled: false
-      Head Diameter: 0.30000001192092896
-      Head Length: 0.20000000298023224
-      Length: 0.30000001192092896
-      Line Style: Lines
-      Line Width: 0.029999999329447746
-      Name: Path
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0
-      Pose Color: 255; 85; 255
-      Pose Style: None
-      Radius: 0.029999999329447746
-      Shaft Diameter: 0.10000000149011612
-      Shaft Length: 0.10000000149011612
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /nav/global_path
-      Value: false
     - Alpha: 0.699999988079071
       Binary representation: false
       Binary threshold: 100
@@ -173,10 +146,6 @@ Visualization Manager:
           Value: true
         map:
           Value: true
-        object0:
-          Value: true
-        object1:
-          Value: true
         odom:
           Value: true
         realsense_camera_color_frame:
@@ -197,10 +166,6 @@ Visualization Manager:
       Tree:
         map:
           box:
-            {}
-          object0:
-            {}
-          object1:
             {}
           odom:
             base_link:
@@ -256,6 +221,96 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /nav/goal_candidates
       Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 37; 90; 204
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.05000000074505806
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/blue_cube
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 6; 204; 29
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.05000000074505806
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/green_cube
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 204; 11; 14
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.05000000074505806
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/red_cube
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 204; 89; 23
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.05000000074505806
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/wood_cube
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 0; 170; 0
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.30000001192092896
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/green_cube
+      Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/PointStamped
+      Color: 145; 140; 157
+      Enabled: true
+      History Length: 1
+      Name: PointStamped
+      Radius: 0.20000000298023224
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /detection/objects/box
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -302,25 +357,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 14.361913681030273
+      Distance: 4.9200520515441895
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0
-        Y: 0
-        Z: 0
+        X: 0.7143535614013672
+        Y: 0.30939993262290955
+        Z: 0.8241735100746155
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.785398006439209
+      Pitch: 1.3847965002059937
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 0.785398006439209
+      Yaw: 2.9135639667510986
     Saved: ~
 Window Geometry:
   Displays:

@@ -3,15 +3,19 @@
 import math
 import sys
 import threading
+import time
 from enum import Enum
 
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped, PointStamped, PoseArray
+from geometry_msgs.msg import PoseStamped, PointStamped, PoseArray, PolygonStamped
+from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String, Float32
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
+
+from .exploration import RandomWaypointExplorer
 
 
 class AutoState(Enum):
@@ -35,16 +39,24 @@ class GoalManager(Node):
         self._state = AutoState.IDLE
         self._latest_cube = None
         self._detection_locked = False
-        self._approach_distance = 0.18
+        self._approach_distance = 0.17
 
         self._merge_radius = 0.10  # m, deduplicate detections
         self._cubes = []      # list of (x, y) in fixed frame
         self._target_ = None   # (x, y) in fixed frame
 
 
-        self._search_x = 2.0
-        self._search_y = 1.0
-        self._search_yaw = 0.0
+        self._search_x = 1.0
+        self._search_y = 2.0
+        self._search_yaw = 3.1415/2
+        self._active_search_goal = None
+        self._explorer = RandomWaypointExplorer(
+            min_step_m=1.0,
+            max_step_m=2.0,
+            min_revisit_dist_m=0.8,
+            failed_blacklist_radius_m=0.6,
+            occ_lethal=90,
+        )
         self._home_x = 0.0
         self._home_y = 0.0
         self._home_yaw = 0.0
@@ -72,15 +84,21 @@ class GoalManager(Node):
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
+        #self.create_subscription(PointStamped, '/detection/objects/green_cube', self.cube_callback, 10)
+        self.create_subscription(PointStamped, '/detection/objects/red_cube', self.cube_callback, 10)
         #self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
+        self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
+        self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._static_loaded = False
+        self._initial_goal_dispatched = False
         self.create_timer(0.5, self.try_load_static_frames_once)
 
         self._waiting_for_result = False
+        self._first_goal_delay_done = False
 
         if self.manual_goal:
             thread = threading.Thread(target=self.manual_input_loop, daemon=True)
@@ -98,6 +116,10 @@ class GoalManager(Node):
             self._waiting_for_result = False
             if not self.manual_goal and self._state == AutoState.SEARCH:
                 self.get_logger().info(f'Search goal finished with status={msg.data}')
+                if self._active_search_goal is not None:
+                    self._explorer.note_waypoint_result(self._active_search_goal, msg.data)
+                    self._active_search_goal = None
+                self.publish_next_search_goal()
             elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Approach goal reached. Triggering arm pickup.')
@@ -150,7 +172,7 @@ class GoalManager(Node):
 
                 self._detection_locked = False
                 self._state = AutoState.BACKUP_AFTER_DROP
-                self.publish_backup_distance(0.10)
+                self.publish_backup_distance(0.15)
                 
             elif msg.data == 'DROP_FAIL_NO_OBJECT':
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')
@@ -199,15 +221,31 @@ class GoalManager(Node):
                 # assume contiguous indices; stop at first missing
                 break
             ox, oy, _ = obj_pose
-            self._cubes.append((ox, oy))
+            # Seed known objects from static TF (deduplicated by merge radius).
+            already_known = any(
+                math.hypot(ox - cx, oy - cy) <= self._merge_radius for (cx, cy) in self._cubes
+            )
+            if not already_known:
+                self._cubes.append((ox, oy))
             seeded += 1
 
         if seeded > 0:
             self.get_logger().info(f'Seeded {seeded} cubes from static TF frames ({self._object_frame_prefix}0..).')
             self.publish_topics()
         
-        if (not self.manual_goal) and (self._state in (AutoState.IDLE, AutoState.INITIALIZATION, AutoState.SEARCH)) and len(self._cubes) > 0:
-            # Kick off by selecting closest cube as target (same logic as cube_callback)
+        self._static_loaded = True
+
+        # Startup gate: do not dispatch first nav goal until static workspace/map frames are loaded.
+        if (not self.manual_goal) and (not self._initial_goal_dispatched):
+            self.dispatch_initial_goal_after_loading()
+    # ----------------------------
+
+    def dispatch_initial_goal_after_loading(self):
+        if self._initial_goal_dispatched:
+            return
+
+        # If cubes are known, start with closest cube approach.
+        if len(self._cubes) > 0:
             robot_xy = self.get_robot_xy()
             if robot_xy is not None:
                 rx, ry = robot_xy
@@ -215,20 +253,20 @@ class GoalManager(Node):
                 self._target_ = best
                 self.publish_topics()
                 tx, ty = best
-                heading = math.atan2(ty - ry, tx - rx)
-                dist = math.hypot(tx - rx, ty - ry)
-                if dist > 1e-6:
-                    if dist <= self._approach_distance:
-                        ax, ay = rx, ry
-                    else:
-                        ax = tx - self._approach_distance * math.cos(heading)
-                        ay = ty - self._approach_distance * math.sin(heading)
-                    ayaw = math.atan2(ty - ay, tx - ax)
-                    self._state = AutoState.APPROACH_OBJECT
-                    self.publish_goal(ax, ay, ayaw)
+                self._state = AutoState.APPROACH_OBJECT
+                self.get_logger().info(
+                    f'Initial target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                )
+                self.publish_goal(tx, ty, 0.0)
+                self._initial_goal_dispatched = True
+                return
+            self.get_logger().warn('Cubes known at startup, but robot pose unavailable. Falling back to search.')
 
-        self._static_loaded = True
-    # ----------------------------
+        # No cubes known: begin exploration search.
+        self._state = AutoState.SEARCH
+        self.publish_next_search_goal()
+        self.get_logger().info('State SEARCH: starting random exploratory search after workspace load.')
+        self._initial_goal_dispatched = True
 
 
 
@@ -257,6 +295,28 @@ class GoalManager(Node):
         x = tx + (x_local * math.cos(yaw) - y_local * math.sin(yaw))
         y = ty + (x_local * math.sin(yaw) + y_local * math.cos(yaw))
         return (x, y)
+
+    def workspace_callback(self, msg: PolygonStamped):
+        if msg.header.frame_id and msg.header.frame_id != self._fixed_frame:
+            self.get_logger().warn(
+                f'Workspace polygon in frame "{msg.header.frame_id}", expected "{self._fixed_frame}". Ignoring.'
+            )
+            return
+
+        pts = [(float(p.x), float(p.y)) for p in msg.polygon.points]
+        if len(pts) < 3:
+            self.get_logger().warn('Workspace polygon has fewer than 3 points. Ignoring.')
+            return
+
+        self._explorer.set_workspace_polygon(pts)
+        self.get_logger().info(f'Workspace polygon loaded ({len(pts)} points).')
+
+        # If we are currently searching without motion, kick patrol immediately.
+        if self._state == AutoState.SEARCH and not self._waiting_for_result:
+            self.publish_next_search_goal()
+
+    def planning_grid_callback(self, msg: OccupancyGrid):
+        self._explorer.set_planning_grid(msg)
 
 
     def publish_topics(self):
@@ -293,7 +353,7 @@ class GoalManager(Node):
             return
 
         # Accept detections in SEARCH, APPROACH_OBJECT, RETURN_HOME
-        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME):
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME, AutoState.INITIALIZATION): #added Initialization as a state in which we detect objects
             return
 
         obj_xy = self.point_to_fixed_xy(msg)
@@ -353,30 +413,13 @@ class GoalManager(Node):
         self.publish_topics()  # publish updated target immediately
 
         tx, ty = best
-        dx = tx - rx
-        dy = ty - ry
-        dist = math.hypot(dx, dy)
-        if dist < 1e-6:
-            return
-
-        heading_to_object = math.atan2(dy, dx)
-
-        # Approach point with standoff distance
-        if dist <= self._approach_distance:
-            ax, ay = rx, ry
-        else:
-            ax = tx - self._approach_distance * math.cos(heading_to_object)
-            ay = ty - self._approach_distance * math.sin(heading_to_object)
-
-        ayaw = math.atan2(ty - ay, tx - ax)
-
-        # Enter/keep approach state; trigger replanning via new goal
+        # Enter/keep approach state; trigger replanning via cube-center goal
+        self._active_search_goal = None
         self._state = AutoState.APPROACH_OBJECT
         self.get_logger().info(
-            f'Target  cube at x={tx:.2f}, y={ty:.2f}. '
-            f'Publishing approach goal x={ax:.2f}, y={ay:.2f}, yaw={ayaw:.2f}.'
+            f'Target cube at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
         )
-        self.publish_goal(ax, ay, ayaw)
+        self.publish_goal(tx, ty, 0.0)
 
 
     # ----------------------------
@@ -389,9 +432,39 @@ class GoalManager(Node):
             return None
         return t.transform.translation.x, t.transform.translation.y
 
+    def publish_next_search_goal(self):
+        if self._state != AutoState.SEARCH:
+            return
+
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn('Robot pose unavailable. Cannot pick exploratory waypoint.')
+            return
+
+        wx = self._explorer.next_waypoint(robot_xy)
+        if wx is None:
+            gx, gy, gyaw = self._search_x, self._search_y, self._search_yaw
+            self._active_search_goal = (gx, gy)
+            self.get_logger().warn(
+                'Explorer could not sample valid waypoint. Falling back to fixed search point.'
+            )
+        else:
+            gx, gy = wx
+            rx, ry = robot_xy
+            gyaw = math.atan2(gy - ry, gx - rx)
+            self._active_search_goal = (gx, gy)
+            self._explorer.note_waypoint_dispatched((gx, gy))
+
+        self.publish_goal(gx, gy, gyaw)
+
     # ----------------------------
 
     def publish_goal(self, gx, gy, gyaw=0.0):
+        if not self._first_goal_delay_done:
+            self.get_logger().info('Waiting 3.0s before sending first goal.')
+            time.sleep(3.0)
+            self._first_goal_delay_done = True
+
         goal = PoseStamped()
         goal.header.stamp = self.get_clock().now().to_msg()
         goal.header.frame_id = self._fixed_frame
@@ -473,34 +546,24 @@ class GoalManager(Node):
                 self.publish_topics()
 
                 tx, ty = best
-                heading = math.atan2(ty - ry, tx - rx)
-                dist = math.hypot(tx - rx, ty - ry)
-                if dist > 1e-6:
-                    if dist <= self._approach_distance:
-                        ax, ay = rx, ry
-                    else:
-                        ax = tx - self._approach_distance * math.cos(heading)
-                        ay = ty - self._approach_distance * math.sin(heading)
-                    ayaw = math.atan2(ty - ay, tx - ax)
-
-                    self._state = AutoState.APPROACH_OBJECT
-                    self.publish_goal(ax, ay, ayaw)
-                    return
+                self._state = AutoState.APPROACH_OBJECT
+                self.get_logger().info(
+                    f'Target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                )
+                self.publish_goal(tx, ty, 0.0)
+                return
 
         # No cubes known: return to SEARCH
         self._state = AutoState.SEARCH
-        self.publish_goal(self._search_x, self._search_y, self._search_yaw)
-        self.get_logger().info('State SEARCH: navigating to fixed search point while detection runs.')
+        self.publish_next_search_goal()
+        self.get_logger().info('State SEARCH: continuing exploratory patrol while detection runs.')
 
     # ----------------------------
 
     def start_autonomous_sequence(self):
         self._state = AutoState.INITIALIZATION
         self.publish_arm_status('START')
-
-        self._state = AutoState.SEARCH
-        self.publish_goal(self._search_x, self._search_y, self._search_yaw)
-        self.get_logger().info('State SEARCH: navigating to fixed search point while detection runs.')
+        self.get_logger().info('State INITIALIZATION: waiting for workspace/static frames before first goal.')
 
     # ----------------------------
 
