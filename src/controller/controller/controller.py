@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+import json
 import math
-from typing import Tuple
+import time
+from typing import Dict, Optional, Tuple
 import rclpy
 from rclpy.node import Node
 
@@ -13,6 +15,8 @@ from robp_interfaces.msg import DutyCycles
 
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion
+
+from .final_approach_controller import FinalApproachController
 
 
 def wrap_angle(a: float) -> float:
@@ -46,6 +50,9 @@ class Controller(Node):
         )
         self.create_subscription(Path, '/nav/global_path', self.path_callback, path_qos)
         self.create_subscription(Float32, '/nav/backup_distance', self.backup_callback, 10)
+        self.create_subscription(Bool, '/nav/final_approach/enable', self.final_approach_enable_callback, 10)
+        self.create_subscription(String, '/nav/final_approach/target_id', self.final_approach_target_id_callback, 10)
+        self.create_subscription(String, 'detection/detection_manager/live_list', self.live_list_callback, 10)
 
     
         # TF: map -> base_link
@@ -58,6 +65,11 @@ class Controller(Node):
         # Latest path (map frame)
         self._path_xy = []
         self._goal_yaw = None
+
+        self._final_approach_enabled = False
+        self._final_target_id = None
+        self._tracked_objects: Dict[str, Tuple[float, float]] = {}
+        self._final_target_last_seen_wall: Optional[float] = None
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.3)        # m
@@ -73,6 +85,13 @@ class Controller(Node):
         self.declare_parameter('turn_gain', 0.3)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.1)           # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
+
+        self.declare_parameter('final_nominal_speed', 0.16)                # duty-equivalent for close approach
+        self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
+        self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
+        self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
+        self.declare_parameter('final_stop_distance', 0.17)                # m
+        self.declare_parameter('final_target_timeout', 1.5)                # s
 
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
@@ -94,6 +113,15 @@ class Controller(Node):
         self._backup_target_m = 0.0
         self._backup_start_xy = None
         self._backup_duty = 0.12
+
+        self._final_controller = FinalApproachController(
+            nominal_speed=float(self.get_parameter('final_nominal_speed').value),
+            turn_gain=float(self.get_parameter('final_turn_gain').value),
+            max_angular_speed=float(self.get_parameter('final_max_angular_speed').value),
+            turn_in_place_yaw_thresh=float(self.get_parameter('final_turn_in_place_yaw_thresh').value),
+            stop_distance=float(self.get_parameter('final_stop_distance').value),
+            min_wheel_duty=self._dc_min,
+        )
 
     # ----------------------------
 
@@ -168,6 +196,7 @@ class Controller(Node):
         q = msg.poses[-1].pose.orientation
         self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
 
+        self._final_approach_enabled = False
         self.publish_status('RUNNING')
 
         sx, sy = self._path_xy[0]
@@ -186,8 +215,76 @@ class Controller(Node):
         self._backup_start_xy = None
         self._path_xy = []
         self._goal_yaw = None
+        self._final_approach_enabled = False
         self.publish_status('RUNNING')
         self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
+
+    def final_approach_enable_callback(self, msg: Bool):
+        self._final_approach_enabled = bool(msg.data)
+        if self._final_approach_enabled:
+            self._path_xy = []
+            self._goal_yaw = None
+            self.publish_status('RUNNING')
+            self.get_logger().info('Final approach enabled.')
+        else:
+            self.stop()
+            self.get_logger().info('Final approach disabled.')
+
+    def final_approach_target_id_callback(self, msg: String):
+        target_id = msg.data.strip()
+        self._final_target_id = target_id or None
+        self.get_logger().info(f'Final approach target id set to: {self._final_target_id}')
+
+    def live_list_callback(self, msg: String):
+        # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
+        tracked = self._parse_live_list(msg.data)
+        if tracked is None:
+            return
+
+        self._tracked_objects = tracked
+        if self._final_target_id is not None and self._final_target_id in self._tracked_objects:
+            self._final_target_last_seen_wall = time.time()
+
+    def _parse_live_list(self, payload: str) -> Optional[Dict[str, Tuple[float, float]]]:
+        if not payload.strip():
+            return {}
+
+        try:
+            data = json.loads(payload)
+        except Exception:
+            self.get_logger().warn('Failed to parse detection_manager live_list payload. Keeping previous tracked objects.')
+            return None
+
+        tracked: Dict[str, Tuple[float, float]] = {}
+
+        if isinstance(data, dict) and 'objects' in data and isinstance(data['objects'], list):
+            iterable = data['objects']
+        elif isinstance(data, list):
+            iterable = data
+        elif isinstance(data, dict):
+            iterable = []
+            for object_id, item in data.items():
+                if isinstance(item, dict):
+                    entry = dict(item)
+                    entry['id'] = object_id
+                    iterable.append(entry)
+        else:
+            iterable = []
+
+        for item in iterable:
+            if not isinstance(item, dict):
+                continue
+            object_id = str(item.get('id', '')).strip()
+            if object_id == '':
+                continue
+            try:
+                x = float(item['x'])
+                y = float(item['y'])
+            except Exception:
+                continue
+            tracked[object_id] = (x, y)
+
+        return tracked
 
     # ----------------------------
 
@@ -263,6 +360,52 @@ class Controller(Node):
                 return
 
             left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            self.send_duty(left, right)
+            return
+
+        if self._final_approach_enabled:
+            pose = self.get_pose_2d()
+            if pose is None:
+                self.stop()
+                self.publish_status('FAILED')
+                self._final_approach_enabled = False
+                self.get_logger().warn('Final approach failed: no TF pose available (map->base_link).')
+                return
+
+            if self._final_target_id is None:
+                self.stop()
+                return
+
+            target_xy = self._tracked_objects.get(self._final_target_id)
+            if target_xy is not None:
+                self._final_target_last_seen_wall = time.time()
+            else:
+                timeout_s = float(self.get_parameter('final_target_timeout').value)
+                last_seen = self._final_target_last_seen_wall
+                if last_seen is None or (time.time() - last_seen) > timeout_s:
+                    self.stop()
+                    self.publish_status('FAILED')
+                    self._final_approach_enabled = False
+                    self.get_logger().warn(f'Final approach failed: target {self._final_target_id} timed out.')
+                    return
+                self.stop()
+                return
+
+            self._final_controller.update_gains(
+                nominal_speed=float(self.get_parameter('final_nominal_speed').value),
+                turn_gain=float(self.get_parameter('final_turn_gain').value),
+                max_angular_speed=float(self.get_parameter('final_max_angular_speed').value),
+                turn_in_place_yaw_thresh=float(self.get_parameter('final_turn_in_place_yaw_thresh').value),
+                stop_distance=float(self.get_parameter('final_stop_distance').value),
+            )
+            command = self._final_controller.compute_command(pose, target_xy)
+            if command.reached:
+                self.stop()
+                self.publish_status('REACHED')
+                self._final_approach_enabled = False
+                return
+
+            left, right = self.enforce_motor_deadzone_pair(command.left, command.right, self._dc_min)
             self.send_duty(left, right)
             return
 

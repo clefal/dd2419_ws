@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import math
 import sys
 import threading
@@ -11,7 +12,7 @@ from rclpy.node import Node
 
 from geometry_msgs.msg import PoseStamped, PointStamped, PoseArray, PolygonStamped
 from nav_msgs.msg import OccupancyGrid
-from std_msgs.msg import String, Float32
+from std_msgs.msg import String, Float32, Bool
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
 
@@ -22,7 +23,8 @@ class AutoState(Enum):
     IDLE = 'IDLE'
     INITIALIZATION = 'INITIALIZATION'
     SEARCH = 'SEARCH'
-    APPROACH_OBJECT = 'APPROACH_OBJECT'
+    APPROACH_OBJECT_COARSE = 'APPROACH_OBJECT_COARSE'
+    APPROACH_OBJECT_FINAL = 'APPROACH_OBJECT_FINAL'
     WAIT_PICKUP_RESULT = 'WAIT_PICKUP_RESULT'
     RETURN_HOME = 'RETURN_HOME'
     BACKUP_AFTER_DROP = 'BACKUP_AFTER_DROP'
@@ -44,6 +46,9 @@ class GoalManager(Node):
         self._merge_radius = 0.10  # m, deduplicate detections
         self._cubes = []      # list of (x, y) in fixed frame
         self._target_ = None   # (x, y) in fixed frame
+        self._target_id = None
+        self._live_objects = {}  # object_id -> (x, y) in fixed frame
+        self._consumed_object_ids = set()  # locally ignore consumed objects until detection_manager reflects removal
 
 
         self._search_x = 1.0
@@ -80,13 +85,17 @@ class GoalManager(Node):
         self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
         self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
         self._backup_pub = self.create_publisher(Float32, '/nav/backup_distance', 10)
+        self._final_approach_enable_pub = self.create_publisher(Bool, '/nav/final_approach/enable', 10)
+        self._final_approach_target_id_pub = self.create_publisher(String, '/nav/final_approach/target_id', 10)
+        self._object_consumed_pub = self.create_publisher(String, '/nav/object_consumed', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
         #self.create_subscription(PointStamped, '/detection/objects/green_cube', self.cube_callback, 10)
-        self.create_subscription(PointStamped, '/detection/objects/red_cube', self.cube_callback, 10)
+        #self.create_subscription(PointStamped, '/detection/objects/red_cube', self.cube_callback, 10)
         #self.create_subscription(PointStamped, '/detection/objects/blue_cube', self.cube_callback, 10)
+        self.create_subscription(String, 'detection/detection_manager/live_list', self.live_list_callback, 10)
         self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
         self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
 
@@ -120,13 +129,26 @@ class GoalManager(Node):
                     self._explorer.note_waypoint_result(self._active_search_goal, msg.data)
                     self._active_search_goal = None
                 self.publish_next_search_goal()
-            elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT:
+            elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT_COARSE:
                 if msg.data == 'REACHED':
-                    self.get_logger().info('Approach goal reached. Triggering arm pickup.')
+                    self.get_logger().info('Coarse object approach reached. Starting final approach.')
+                    self.start_final_approach()
+                else:
+                    self.get_logger().warn('Coarse object approach failed. Returning to search.')
+                    self.stop_final_approach()
+                    self._state = AutoState.SEARCH
+                    self.publish_next_search_goal()
+            elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT_FINAL:
+                if msg.data == 'REACHED':
+                    self.get_logger().info('Final object approach reached. Triggering arm pickup.')
+                    self.stop_final_approach()
                     self.publish_arm_status('PICK_UP')
                     self._state = AutoState.WAIT_PICKUP_RESULT
                 else:
-                    self.get_logger().warn('Approach goal failed. Pickup command will not be sent.')
+                    self.get_logger().warn('Final object approach failed. Returning to search.')
+                    self.stop_final_approach()
+                    self._state = AutoState.SEARCH
+                    self.publish_next_search_goal()
             elif not self.manual_goal and self._state == AutoState.RETURN_HOME:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Home reached. Triggering arm drop.')
@@ -149,13 +171,18 @@ class GoalManager(Node):
             return
 
         if self._state == AutoState.WAIT_PICKUP_RESULT:
-            if msg.data == 'PICK_UP_SUCCESS':
+            if msg.data == 'PICK_UP_SUCCESS':   #TODO this should be verified with arm camera later -> publish consumed objects
                 self.get_logger().info('Arm pickup succeeded. Returning home.')
-                # Remove picked cube from list (best-effort) and clear current target
+                # detection_manager owns the authoritative live object list.
+                # We only notify it and locally ignore the consumed target until its next update reflects removal.
+                if self._target_id is not None:
+                    self.publish_object_consumed(self._target_id)
+                    self._consumed_object_ids.add(self._target_id)
                 if self._target_ is not None:
                     tx, ty = self._target_
                     self._cubes = [(x, y) for (x, y) in self._cubes if math.hypot(x - tx, y - ty) > self._merge_radius]
                 self._target_ = None
+                self._target_id = None
                 self.publish_topics()
 
                 self._state = AutoState.RETURN_HOME
@@ -179,6 +206,93 @@ class GoalManager(Node):
             else:
                 self.get_logger().info(f'Arm result received while waiting for drop: {msg.data}')
 
+    def live_list_callback(self, msg: String):
+        # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
+        live_objects = self._parse_live_list(msg.data)
+        if live_objects is None:
+            return
+
+        self._live_objects = dict(live_objects)
+        self._consumed_object_ids.intersection_update(self._live_objects.keys())
+        self._sync_cubes_from_live_objects()
+        self._refresh_target_from_live_objects()
+        self.publish_topics()
+
+        if self.manual_goal:
+            return
+
+        if self._state in (AutoState.RETURN_HOME, AutoState.WAIT_PICKUP_RESULT, AutoState.APPROACH_OBJECT_FINAL):
+            return
+
+        if not self._static_loaded or self._waiting_for_result:
+            return
+
+        if self._state not in (AutoState.SEARCH, AutoState.INITIALIZATION):
+            return
+
+        best_id = self.select_closest_object_id()
+        if best_id is None:
+            return
+
+        if self._target_id == best_id and self._target_ is not None:
+            return
+
+        self._target_id = best_id
+        self._refresh_target_from_live_objects()
+        if self._target_ is None:
+            return
+
+        self.publish_topics()  # publish updated target immediately
+
+        tx, ty = self._target_
+        # Enter coarse approach state; final approach starts after the 1 m standoff is reached.
+        self._active_search_goal = None
+        self._state = AutoState.APPROACH_OBJECT_COARSE
+        self.get_logger().info(
+            f'Target object {self._target_id} at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
+        )
+        self.publish_goal(tx, ty, 0.0)
+
+    def _parse_live_list(self, payload: str):
+        if not payload.strip():
+            return {}
+
+        try:
+            data = json.loads(payload)
+        except Exception:
+            self.get_logger().warn('Failed to parse detection_manager live_list payload. Keeping previous objects.')
+            return None
+
+        tracked = {}
+
+        if isinstance(data, dict) and 'objects' in data and isinstance(data['objects'], list):
+            iterable = data['objects']
+        elif isinstance(data, list):
+            iterable = data
+        elif isinstance(data, dict):
+            iterable = []
+            for object_id, item in data.items():
+                if isinstance(item, dict):
+                    entry = dict(item)
+                    entry['id'] = object_id
+                    iterable.append(entry)
+        else:
+            iterable = []
+
+        for item in iterable:
+            if not isinstance(item, dict):
+                continue
+            object_id = str(item.get('id', '')).strip()
+            if object_id == '':
+                continue
+            try:
+                x = float(item['x'])
+                y = float(item['y'])
+            except Exception:
+                continue
+            tracked[object_id] = (x, y)
+
+        return tracked
 
     def lookup_xy_yaw(self, parent_frame: str, child_frame: str):
         try:
@@ -227,6 +341,7 @@ class GoalManager(Node):
             )
             if not already_known:
                 self._cubes.append((ox, oy))
+                self._live_objects[f'object_{i}'] = (ox, oy)
             seeded += 1
 
         if seeded > 0:
@@ -246,16 +361,17 @@ class GoalManager(Node):
 
         # If cubes are known, start with closest cube approach.
         if len(self._cubes) > 0:
+            best_id = self.select_closest_object_id()
+            if best_id is not None:
+                self._target_id = best_id
+                self._refresh_target_from_live_objects()
             robot_xy = self.get_robot_xy()
-            if robot_xy is not None:
-                rx, ry = robot_xy
-                best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
-                self._target_ = best
+            if robot_xy is not None and self._target_ is not None:
                 self.publish_topics()
-                tx, ty = best
-                self._state = AutoState.APPROACH_OBJECT
+                tx, ty = self._target_
+                self._state = AutoState.APPROACH_OBJECT_COARSE
                 self.get_logger().info(
-                    f'Initial target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                    f'Initial target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
                 )
                 self.publish_goal(tx, ty, 0.0)
                 self._initial_goal_dispatched = True
@@ -349,11 +465,12 @@ class GoalManager(Node):
 
 
     def cube_callback(self, msg: PointStamped):
+        # TODO: remove this fallback when detection_manager/live_list fully replaces point detections.
         if self.manual_goal:
             return
 
-        # Accept detections in SEARCH, APPROACH_OBJECT, RETURN_HOME
-        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT, AutoState.RETURN_HOME, AutoState.INITIALIZATION): #added Initialization as a state in which we detect objects
+        # Accept detections in SEARCH, coarse approach, RETURN_HOME
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT_COARSE, AutoState.RETURN_HOME, AutoState.INITIALIZATION): #added Initialization as a state in which we detect objects
             return
 
         obj_xy = self.point_to_fixed_xy(msg)
@@ -374,53 +491,12 @@ class GoalManager(Node):
 
         if is_new:
             self._cubes.append((ox, oy))
+            object_id = f'object_{len(self._live_objects)}'
+            self._live_objects[object_id] = (ox, oy)
             self.get_logger().info(f'New cube added at x={ox:.2f}, y={oy:.2f} (total={len(self._cubes)})')
 
         # Always publish cube topics so planner can avoid them (even during RETURN_HOME)
         self.publish_topics()
-
-        # During RETURN_HOME: do NOT switch goal (we're carrying)
-        if self._state == AutoState.RETURN_HOME:
-            return
-
-        # Need robot pose to select closest target
-        robot_xy = self.get_robot_xy()
-        if robot_xy is None:
-            self.get_logger().warn('Cube detected, but robot pose is unavailable. Ignoring goal update.')
-            return
-        rx, ry = robot_xy
-
-        # Select closest cube as target (for now: always switch on new cube; thrashing prevention later)
-        best = None
-        best_d = float('inf')
-        for (cx, cy) in self._cubes:
-            d = math.hypot(cx - rx, cy - ry)
-            if d < best_d:
-                best_d = d
-                best = (cx, cy)
-
-        if best is None:
-            return
-
-        # If target unchanged (within merge radius), keep it
-        if self._target_ is not None:
-            if math.hypot(best[0] - self._target_[0], best[1] - self._target_[1]) <= self._merge_radius:
-                # Still same target; no need to spam goals
-                return
-
-        # Switch target
-        self._target_ = best
-        self.publish_topics()  # publish updated target immediately
-
-        tx, ty = best
-        # Enter/keep approach state; trigger replanning via cube-center goal
-        self._active_search_goal = None
-        self._state = AutoState.APPROACH_OBJECT
-        self.get_logger().info(
-            f'Target cube at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
-        )
-        self.publish_goal(tx, ty, 0.0)
-
 
     # ----------------------------
 
@@ -431,6 +507,54 @@ class GoalManager(Node):
         except Exception:
             return None
         return t.transform.translation.x, t.transform.translation.y
+
+    def select_closest_object_id(self):
+        object_candidates = [
+            (object_id, xy) for object_id, xy in self._live_objects.items()
+            if object_id.startswith('object_') and object_id not in self._consumed_object_ids
+        ]
+        if len(object_candidates) == 0:
+            return None
+
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            return object_candidates[0][0]
+
+        rx, ry = robot_xy
+        best_id, _ = min(
+            object_candidates,
+            key=lambda item: math.hypot(item[1][0] - rx, item[1][1] - ry),
+        )
+        return best_id
+
+    def _refresh_target_from_live_objects(self):
+        if self._target_id is None:
+            self._target_ = None
+            return
+
+        self._target_ = self._live_objects.get(self._target_id)
+
+    def _sync_cubes_from_live_objects(self):
+        self._cubes = [
+            xy for object_id, xy in self._live_objects.items()
+            if object_id.startswith('object_')
+        ]
+
+    def start_final_approach(self):
+        self._refresh_target_from_live_objects()
+        if self._target_id is None or self._target_ is None:
+            self.get_logger().warn('Cannot start final approach because no live target is available.')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
+
+        self._state = AutoState.APPROACH_OBJECT_FINAL
+        self.publish_final_approach_target_id(self._target_id)
+        self.publish_final_approach_enable(True)
+        self._waiting_for_result = True
+
+    def stop_final_approach(self):
+        self.publish_final_approach_enable(False)
 
     def publish_next_search_goal(self):
         if self._state != AutoState.SEARCH:
@@ -535,20 +659,37 @@ class GoalManager(Node):
         self._waiting_for_result = True
         self.get_logger().info(f'Backup command sent: {meters:.2f} m')
 
+    def publish_final_approach_enable(self, enabled: bool):
+        msg = Bool()
+        msg.data = bool(enabled)
+        self._final_approach_enable_pub.publish(msg)
+        self.get_logger().info(f'Final approach enable sent: {enabled}')
+
+    def publish_final_approach_target_id(self, object_id: str):
+        msg = String()
+        msg.data = object_id
+        self._final_approach_target_id_pub.publish(msg)
+        self.get_logger().info(f'Final approach target id sent: {object_id}')
+
+    def publish_object_consumed(self, object_id: str):
+        msg = String()
+        msg.data = object_id
+        self._object_consumed_pub.publish(msg)
+        self.get_logger().info(f'Object consumed feedback sent: {object_id}')
+
     def _continue_after_drop(self):
         # If we still have cubes, go for the closest one; else go to SEARCH point
-        if len(self._cubes) > 0:
-            robot_xy = self.get_robot_xy()
-            if robot_xy is not None:
-                rx, ry = robot_xy
-                best = min(self._cubes, key=lambda c: math.hypot(c[0] - rx, c[1] - ry))
-                self._target_ = best
+        best_id = self.select_closest_object_id()
+        if best_id is not None:
+            self._target_id = best_id
+            self._refresh_target_from_live_objects()
+            if self._target_ is not None:
                 self.publish_topics()
 
-                tx, ty = best
-                self._state = AutoState.APPROACH_OBJECT
+                tx, ty = self._target_
+                self._state = AutoState.APPROACH_OBJECT_COARSE
                 self.get_logger().info(
-                    f'Target cube selected at x={tx:.2f}, y={ty:.2f}. Publishing cube-center goal.'
+                    f'Target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
                 )
                 self.publish_goal(tx, ty, 0.0)
                 return

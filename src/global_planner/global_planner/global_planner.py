@@ -40,11 +40,9 @@ class GlobalPlannerNode(Node):
         # Planning knobs
         self.declare_parameter("w_heuristic", 1.8)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
         self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
-        self.declare_parameter("unknown_is_lethal", False)   # OccupancyGrid unknown is -1
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
-        self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
-        self.declare_parameter("cube_approach_radius", 0.16)
+        self.declare_parameter("coarse_object_standoff", 1.0)
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
@@ -120,7 +118,7 @@ class GlobalPlannerNode(Node):
         self._meta: Optional[GridMeta] = None
         self._goal_msg: Optional[PoseStamped] = None
         self._cubes: List[Tuple[float, float]] = []   # in map frame
-        self._target_cube: Optional[Tuple[float, float]] = None
+        self._target_object: Optional[Tuple[float, float]] = None
 
 
         self.get_logger().info(
@@ -154,7 +152,7 @@ class GlobalPlannerNode(Node):
         ]
 
     def on_target_cube(self, msg: PoseStamped) -> None:
-        self._target_cube = (
+        self._target_object = (
             msg.pose.position.x,
             msg.pose.position.y,
         )
@@ -189,57 +187,33 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_or_goal_outside_grid")
             return
 
-        # Run Weighted A*
-        include_box_lethal = not self._is_box_goal(goal_xy)
-        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
-        self.pub_planning_grid.publish(planning_map)
-
-        path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
-
-
+        path_idx = self._compute_path(start_idx, goal_idx, include_box_lethal=not self._is_box_goal(goal_xy))
         if path_idx is None or len(path_idx) == 0:
             self.get_logger().warn(f"Planning failed ({reason}). No path found.")
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
-        # For cube goals, cut path at approach radius and face cube
         final_yaw_override = None
-        maybe_path, maybe_yaw = self._apply_cube_approach_if_needed(path_idx)
+        maybe_path, maybe_yaw = self._apply_coarse_object_standoff(path_idx)
         if maybe_path is not None and len(maybe_path) > 0:
             path_idx = maybe_path
             final_yaw_override = maybe_yaw
 
-        # Convert to nav_msgs/Path in map frame
-        path_msg = Path()
-        path_msg.header.stamp = self.get_clock().now().to_msg()
-        path_msg.header.frame_id = self.global_frame
-
-        for (gx, gy) in path_idx:
-            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
-            ps = PoseStamped()
-            ps.header = path_msg.header
-            ps.pose.position.x = wx
-            ps.pose.position.y = wy
-            ps.pose.position.z = 0.0
-            ps.pose.orientation.w = 1.0
-            path_msg.poses.append(ps)
-
-        # Set final pose orientation
-        if len(path_msg.poses) > 0 and final_yaw_override is not None:
-            q = quaternion_from_euler(0.0, 0.0, final_yaw_override)
-            path_msg.poses[-1].pose.orientation.x = q[0]
-            path_msg.poses[-1].pose.orientation.y = q[1]
-            path_msg.poses[-1].pose.orientation.z = q[2]
-            path_msg.poses[-1].pose.orientation.w = q[3]
-        elif len(path_msg.poses) > 0 and self._goal_msg is not None:
+        goal_orientation = None
+        if final_yaw_override is None and self._goal_msg is not None:
             if self._goal_msg.header.frame_id == self.global_frame or self._goal_msg.header.frame_id == "":
-                path_msg.poses[-1].pose.orientation = self._goal_msg.pose.orientation
+                goal_orientation = self._goal_msg.pose.orientation
             else:
                 self.get_logger().warn(
                     f"Goal frame '{self._goal_msg.header.frame_id}' != global_frame '{self.global_frame}'. "
                     "Leaving path end orientation as identity."
                 )
 
+        path_msg = self._build_path_message(
+            path_idx,
+            final_yaw=final_yaw_override,
+            final_orientation=goal_orientation,
+        )
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
@@ -271,16 +245,15 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
+        best_path_idx = None
+        best_pose = None
+        best_cost = None
         include_box_lethal = not any(
             self._is_box_goal((pose.position.x, pose.position.y))
             for pose in msg.poses
         )
         planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
-
-        best_path_idx = None
-        best_pose = None
-        best_cost = None
 
         for pose in msg.poses:
             goal_idx = self.world_to_grid(pose.position.x, pose.position.y, self._meta)
@@ -302,21 +275,7 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
-        path_msg = Path()
-        path_msg.header.stamp = self.get_clock().now().to_msg()
-        path_msg.header.frame_id = self.global_frame
-
-        for (gx, gy) in best_path_idx:
-            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
-            ps = PoseStamped()
-            ps.header = path_msg.header
-            ps.pose.position.x = wx
-            ps.pose.position.y = wy
-            ps.pose.position.z = 0.0
-            ps.pose.orientation.w = 1.0
-            path_msg.poses.append(ps)
-
-        path_msg.poses[-1].pose.orientation = best_pose.orientation
+        path_msg = self._build_path_message(best_path_idx, final_orientation=best_pose.orientation)
         self.pub_path.publish(path_msg)
         self.get_logger().info(
             f"Published candidate path with {len(path_msg.poses)} poses (reason={reason}, candidates={len(msg.poses)}, cost={best_cost:.2f})."
@@ -336,7 +295,51 @@ class GlobalPlannerNode(Node):
             total += step + self.cell_penalty(x1, y1, occ, meta)
         return total
 
-    def _apply_cube_approach_if_needed(
+    def _compute_path(
+        self,
+        start_idx: GridIndex,
+        goal_idx: GridIndex,
+        include_box_lethal: bool,
+    ) -> Optional[List[GridIndex]]:
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
+        self.pub_planning_grid.publish(planning_map)
+        return self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
+
+    def _build_path_message(
+        self,
+        path_idx: List[GridIndex],
+        final_yaw: Optional[float] = None,
+        final_orientation=None,
+    ) -> Path:
+        path_msg = Path()
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = self.global_frame
+
+        for (gx, gy) in path_idx:
+            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
+            ps = PoseStamped()
+            ps.header = path_msg.header
+            ps.pose.position.x = wx
+            ps.pose.position.y = wy
+            ps.pose.position.z = 0.0
+            ps.pose.orientation.w = 1.0
+            path_msg.poses.append(ps)
+
+        if len(path_msg.poses) == 0:
+            return path_msg
+
+        if final_yaw is not None:
+            q = quaternion_from_euler(0.0, 0.0, final_yaw)
+            path_msg.poses[-1].pose.orientation.x = q[0]
+            path_msg.poses[-1].pose.orientation.y = q[1]
+            path_msg.poses[-1].pose.orientation.z = q[2]
+            path_msg.poses[-1].pose.orientation.w = q[3]
+        elif final_orientation is not None:
+            path_msg.poses[-1].pose.orientation = final_orientation
+
+        return path_msg
+
+    def _apply_coarse_object_standoff(
         self, path_idx: List[GridIndex]
     ) -> Tuple[Optional[List[GridIndex]], Optional[float]]:
         if self._goal_msg is None or self._meta is None:
@@ -345,7 +348,7 @@ class GlobalPlannerNode(Node):
         tx = self._goal_msg.pose.position.x
         ty = self._goal_msg.pose.position.y
 
-        radius = self.get_parameter("cube_approach_radius").get_parameter_value().double_value
+        radius = self.get_parameter("coarse_object_standoff").get_parameter_value().double_value
         if radius <= 0.0:
             return (None, None)
 
@@ -357,7 +360,7 @@ class GlobalPlannerNode(Node):
         ax, ay = self.grid_to_world_center(truncated[-1][0], truncated[-1][1], self._meta)
         yaw = math.atan2(ty - ay, tx - ax)
         self.get_logger().info(
-            f"Cube approach applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
+            f"Coarse object standoff applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
         )
         return (truncated, yaw)
 
@@ -431,10 +434,10 @@ class GlobalPlannerNode(Node):
         r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
 
         for (cx, cy) in self._cubes:
-            if self._target_cube is not None:
-                tx, ty = self._target_cube
+            if self._target_object is not None:
+                tx, ty = self._target_object
                 if math.hypot(cx - tx, cy - ty) < 0.10:
-                    continue  # exclude target cube
+                    continue
 
             idx = self.world_to_grid(cx, cy, meta)
             if idx is None:
@@ -571,11 +574,10 @@ class GlobalPlannerNode(Node):
 
     def cell_is_traversable(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> bool:
         lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
-        unknown_is_lethal = self.get_parameter("unknown_is_lethal").get_parameter_value().bool_value
 
         v = occ.data[self.idx_to_flat(gx, gy, meta)]  # -1 unknown, 0..100
         if v < 0:
-            return not unknown_is_lethal
+            return True
         return v < lethal
 
     def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
@@ -602,7 +604,6 @@ class GlobalPlannerNode(Node):
         meta: GridMeta
     ) -> Optional[List[GridIndex]]:
         w = self.get_parameter("w_heuristic").get_parameter_value().double_value
-        allow_diag = self.get_parameter("allow_diagonal").get_parameter_value().bool_value
         max_ms = self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value
 
         if not self.cell_is_traversable(start[0], start[1], occ, meta):
@@ -614,18 +615,13 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn(f"Goal cell is not traversable: idx={goal}, occ={v}")
             return None
 
-        # Neighbor moves: (dx, dy, base_cost)
         moves_4 = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0)]
         moves_8 = moves_4 + [(1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)), (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2))]
-        moves = moves_8 if allow_diag else moves_4
 
         def heuristic(a: GridIndex, b: GridIndex) -> float:
-            # Octile distance works well for 8-connected grids
             dx = abs(a[0] - b[0])
             dy = abs(a[1] - b[1])
-            if allow_diag:
-                return (max(dx, dy) + (math.sqrt(2) - 1.0) * min(dx, dy))
-            return float(dx + dy)
+            return max(dx, dy) + (math.sqrt(2) - 1.0) * min(dx, dy)
 
         # Priority queue: (f, g, node)
         open_heap: List[Tuple[float, float, GridIndex]] = []
@@ -655,7 +651,7 @@ class GlobalPlannerNode(Node):
                 continue
 
             cx, cy = current
-            for dx, dy, step_cost in moves:
+            for dx, dy, step_cost in moves_8:
                 nx, ny = cx + dx, cy + dy
 
                 if nx < 0 or ny < 0 or nx >= meta.width or ny >= meta.height:
@@ -663,8 +659,7 @@ class GlobalPlannerNode(Node):
                 if not self.cell_is_traversable(nx, ny, occ, meta):
                     continue
 
-                # Optional: prevent diagonal "corner cutting"
-                if allow_diag and dx != 0 and dy != 0:
+                if dx != 0 and dy != 0:
                     if not (self.cell_is_traversable(cx + dx, cy, occ, meta) and self.cell_is_traversable(cx, cy + dy, occ, meta)):
                         continue
 
