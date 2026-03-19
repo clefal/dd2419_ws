@@ -42,12 +42,12 @@ class IcpScanToScan(Node):
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("map_frame", "map")
 
-        self.declare_parameter("downsample_step", 2)
-        self.declare_parameter("scans_to_skip", 10)
-        self.declare_parameter("range_min", 0.12)
-        self.declare_parameter("range_max", 4.0)
+        self.declare_parameter("downsample_step", 1)
+        self.declare_parameter("scans_to_skip", 1)
+        self.declare_parameter("range_min", 0.1)
+        self.declare_parameter("range_max", 50.0)
 
-        self.declare_parameter("icp_max_iter", 25)
+        self.declare_parameter("icp_max_iter", 50)
         self.declare_parameter("icp_max_corr_dist", 0.35)
         self.declare_parameter("icp_min_inliers", 60)
         self.declare_parameter("icp_rmse_thresh", 0.20)
@@ -69,7 +69,7 @@ class IcpScanToScan(Node):
         self.create_subscription(LaserScan, self.scan_topic, self.cb_scan, 10)
 
         is_turning_topic = self.get_parameter("is_turning_topic").value
-        self.is_turning_subscription = self.create_subscription(
+        self.create_subscription(
             Bool,
             is_turning_topic,
             self.is_turning_callback,
@@ -80,12 +80,30 @@ class IcpScanToScan(Node):
         # State
         self.prev_pts = None
         self.prev_stamp = None
-        self.MTB = np.eye(3, dtype=np.float64)  # our internal "map pose" estimate
+        # self.MTB = np.eye(3, dtype=np.float64)  # our internal "map pose" estimate
+        self.try_initialize_mtb()
 
         self.get_logger().info("ICP scan-to-scan node started")
 
     def is_turning_callback(self, msg: Bool):
         self.is_turning = msg.data
+
+    def try_initialize_mtb(self):
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                "start",
+                rclpy.time.Time(seconds=0),
+                timeout=rclpy.time.Duration(seconds=1),
+            )
+            self.MTB = tf_to_T2(tf)
+            self.get_logger().info("Initialized MTB from TF: map -> start")
+        except TransformException as ex:
+            self.MTB = np.eye(3, dtype=np.float64)
+            self.get_logger().warn(
+                f"Could not initialize from map->base_link TF, using identity: {ex}"
+            )
+            return False
 
     def scan_to_points(self, msg: LaserScan) -> np.ndarray:
         step = int(self.get_parameter("downsample_step").value)
@@ -94,6 +112,7 @@ class IcpScanToScan(Node):
 
         pts = []
         ang = msg.angle_min
+        self.get_logger().info(f"Scan has {len(msg.ranges)} ranges")
         for i, r in enumerate(msg.ranges):
             if i % step != 0:
                 ang += msg.angle_increment
@@ -108,7 +127,7 @@ class IcpScanToScan(Node):
             return np.zeros((0, 2), dtype=np.float64)
         return np.asarray(pts, dtype=np.float64)
 
-    def lookup_OTB(self, stamp, timeout_sec=0.05) -> np.ndarray:
+    def lookup_OTB(self, stamp, timeout_sec=1) -> np.ndarray:
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.odom_frame, self.base_frame, stamp
@@ -142,9 +161,12 @@ class IcpScanToScan(Node):
             self.skipped_scans += 1
             return
 
+        self.get_logger().info("New scan to process")
         self.skipped_scans = 0
         pts = self.scan_to_points(msg)
+        self.get_logger().info(f"Valid scan has {pts.shape[0]} points")
         if pts.shape[0] < 60:
+            self.get_logger().info("Valid scan too small")
             return
 
         if self.prev_pts is None:
@@ -161,17 +183,15 @@ class IcpScanToScan(Node):
             return
 
         # Relative motion in odom: prev->cur is inv(OTB_prev)*OTB_cur
-        T_prev_to_cur = invert_T(OTB_prev) @ OTB_cur
+        T_cur_to_prev_guess = invert_T(OTB_prev) @ OTB_cur
 
         # For scan matching we want src(current) -> dst(prev):
-        # That is approximately inv(prev->cur)
-        T_guess = invert_T(T_prev_to_cur)
 
         # ICP: current scan (src) to previous scan (dst)
         T_icp, info = icp_2d_point_to_point(
             src_pts=pts,
             dst_pts=self.prev_pts,
-            init_T=T_guess,
+            init_T=T_cur_to_prev_guess,
             max_iter=int(self.get_parameter("icp_max_iter").value),
             max_corr_dist=float(self.get_parameter("icp_max_corr_dist").value),
             min_inliers=int(self.get_parameter("icp_min_inliers").value),
@@ -185,13 +205,8 @@ class IcpScanToScan(Node):
             self.prev_stamp = msg.header.stamp
             return
 
-        # Extract the implied motion prev->cur:
-        # ICP gives cur->prev (src->dst). So invert it.
-        T_cur_to_prev = T_icp
-        T_prev_to_cur_icp = invert_T(T_cur_to_prev)
-
         # Reject huge steps
-        dx, dy, dth = T_to_pose(T_prev_to_cur_icp)
+        dx, dy, dth = T_to_pose(T_icp)
         max_trans = float(self.get_parameter("max_step_trans").value)
         max_rot = math.radians(float(self.get_parameter("max_step_rot_deg").value))
         if math.hypot(dx, dy) > max_trans or abs(wrap_angle(dth)) > max_rot:
@@ -201,7 +216,7 @@ class IcpScanToScan(Node):
             return
 
         # Integrate into our internal map pose estimate
-        self.MTB = self.MTB @ T_prev_to_cur_icp
+        self.MTB = self.MTB @ T_icp
 
         # Publish map->odom
         # MTO = MTB * inv(OTB_cur)
