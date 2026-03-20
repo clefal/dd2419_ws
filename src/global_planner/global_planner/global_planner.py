@@ -46,7 +46,6 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
-        self.declare_parameter("box_frame", "box")
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
 
@@ -81,6 +80,12 @@ class GlobalPlannerNode(Node):
             PoseStamped,
             "/nav/target/cube",
             self.on_target_cube,
+            10,
+        )
+        self.sub_box = self.create_subscription(
+            PoseStamped,
+            "/nav/box",
+            self.on_box,
             10,
         )
 
@@ -119,6 +124,7 @@ class GlobalPlannerNode(Node):
         self._goal_msg: Optional[PoseStamped] = None
         self._cubes: List[Tuple[float, float]] = []   # in map frame
         self._target_object: Optional[Tuple[float, float]] = None
+        self._box_xy: Optional[Tuple[float, float]] = None
 
 
         self.get_logger().info(
@@ -153,6 +159,12 @@ class GlobalPlannerNode(Node):
 
     def on_target_cube(self, msg: PoseStamped) -> None:
         self._target_object = (
+            msg.pose.position.x,
+            msg.pose.position.y,
+        )
+
+    def on_box(self, msg: PoseStamped) -> None:
+        self._box_xy = (
             msg.pose.position.x,
             msg.pose.position.y,
         )
@@ -468,12 +480,7 @@ class GlobalPlannerNode(Node):
         return math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= box_goal_radius
 
     def _get_box_xy_in_map(self) -> Optional[Tuple[float, float]]:
-        box_frame = self.get_parameter("box_frame").get_parameter_value().string_value
-        try:
-            tf = self.tf_buffer.lookup_transform(self.global_frame, box_frame, rclpy.time.Time())
-            return (tf.transform.translation.x, tf.transform.translation.y)
-        except Exception:
-            return None
+        return self._box_xy
 
 
     def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):
