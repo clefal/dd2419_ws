@@ -28,6 +28,7 @@ class Obj:
 
         # things that could be changed in the future: 
         # add the stamp of the latest measurement
+        # add detection counter for each object
         
 
 class ObjectManager(Node):
