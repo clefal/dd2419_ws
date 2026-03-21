@@ -6,7 +6,10 @@ from rclpy.node import Node
 from geometry_msgs.msg import PointStamped, TransformStamped
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster, StaticTransformBroadcaster
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube
 
+
+## RENAME THIS NODE TO OBJECT MANAGER!!###
 class Obj: 
     def __init__(self, id, x, y,  yaw=0 ,status = 'available', type='cube'):
         self.id = id
@@ -27,10 +30,10 @@ class Obj:
         # add the stamp of the latest measurement
         
 
-class DetectionManager(Node):
+class ObjectManager(Node):
 
     def __init__(self):
-        super().__init__('detection_manager')
+        super().__init__('object_manager')
         self.get_logger().info('Detection Manager node started.')
 
         self._tf_buffer = Buffer()
@@ -46,6 +49,10 @@ class DetectionManager(Node):
         self.sub_box = self.create_subscription(PointStamped,'/detection/objects/box', self.box_callback, 10)
 
         self.object_list = list()
+
+        # services 
+        self.srv_goals_available = self.create_service(GoalsAvailable,'object_manager/goals_available', self.goals_available_callback)
+        self.srv_get_closest_cube = self.create_service(GetClosestCube,'object_manager/get_closest_cube', self.get_closest_cube_callback)
         
         # load objects from the workspace file into the list
         self._fixed_frame = 'map'
@@ -90,7 +97,8 @@ class DetectionManager(Node):
         # maybe this can be done quicker with pandas or something like that, so if it becomes a problem then i can look into that again
         if len(self.object_list)>0:
             for idx, o in enumerate(self.object_list):
-                if o.type == obj.type:
+                if o.type == obj.type or o.type == 'map_cube':
+                    # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
                         # if the object is similar (=close to another object and of same type)
                         updated_obj = o.copy()
@@ -145,7 +153,7 @@ class DetectionManager(Node):
         bx, by, byaw = box_pose
 
         static_box_idx = self.get_new_obj_idx()
-        static_box_obj = Obj(static_box_idx, bx, by, byaw, 'box')
+        static_box_obj = Obj(static_box_idx, bx, by, byaw, status='available', type ='box')
 
         if self.check_similarity(static_box_obj) == 0: # that means that 0 objects are similar to the static_box_object
             self.object_list.append(static_box_obj)
@@ -162,7 +170,7 @@ class DetectionManager(Node):
             ox, oy, _ = obj_pose
 
             static_cube_idx = self.get_new_obj_idx()
-            static_cube_obj = Obj(static_cube_idx, ox, oy, 0, 'cube')
+            static_cube_obj = Obj(static_cube_idx, ox, oy, yaw = 0, status='available', type = 'map_cube')
 
             if self.check_similarity(static_cube_obj) == 0: 
                 self.object_list.append(static_cube_obj)
@@ -189,6 +197,9 @@ class DetectionManager(Node):
         
 # -------------------------
         
+############ Object-Topic- Callbacks #############
+
+# -------------------------
     def red_callback(self, msg  : PointStamped):
         yaw = 0
         obj_type = 'red_cube'
@@ -221,9 +232,46 @@ class DetectionManager(Node):
 
 # ------------------------
 
+############ Service Callbacks #############
+
+# -----------------------
+    def goals_available_callback(self, req, res):
+        
+        res.goals_available = False
+
+        for obj in self.object_list:
+            if obj.status == 'available' and obj.type != 'box':
+                res.goals_available = True # the variable name in the res object has to match the one defined in the goals_available.srv (see robp_interfaces)
+                return res
+            
+        return res
+        
+        
+# -----------------------
+    def get_closest_cube_callback(self,req, res):
+
+        closest_obj_id = None
+        for obj in self.object_list:
+            if obj.status == 'available' and obj.type != 'box':
+                if closest_obj_id == None:
+                    closest_obj_id = obj.id
+                    closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
+                if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
+                    closest_obj_id = obj.id
+                    closest_obj_x = obj.last_x
+                    closest_obj_y = obj.last_y
+
+        res.obj_id = closest_obj_id
+        res.obj_x = closest_obj_x
+        res.obj_y = closest_obj_y
+        
+        return res
+    
+# ------------------------
+
 def main():
     rclpy.init()
-    node = DetectionManager()
+    node = ObjectManager()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
