@@ -8,7 +8,7 @@ pixi run ros2 run odometry odometry
 pixi run mapping
 pixi run ros2 bag play --read-ahead-queue-size 100 -l -r 1.0 --clock 100 --start-paused ~/dd2419_ws/rosbags/obj_det_odom_opti_rosbag
 pixi run ros2 run detection detection
-pixi run ros2 run detection detection_manager
+pixi run ros2 run detection object_manager
 ```
 
 __ssh into the Robot in Clemens Hotspot:__
@@ -97,7 +97,6 @@ __Detection Manager:__
     - it can also be used for answering service calls from other nodes in the future
     - we can also add other features, e.g. detection counters to have something like a "trust_score" for an object
     - 
-
 
 
 __What's next?__

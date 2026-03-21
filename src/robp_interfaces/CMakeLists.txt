@@ -19,12 +19,14 @@ set(msg_files
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
+  "srvs/GetClosestCube.srv"
+  "srvs/GoalsAvailable.srv"
   DEPENDENCIES std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
 
-if(BUILD_TESTING)
+if(BUILD_TESTING)2. The physical folders are still named srvs and msgs
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files

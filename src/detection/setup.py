@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'detection = detection.detection:main',
-            'detection_manager = detection.detection_manager:main'
+            'object_manager = detection.object_manager:main',
+            'object_manager_test = detection.object_manager_test:main'
 
         ],
     },

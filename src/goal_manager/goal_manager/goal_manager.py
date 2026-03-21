@@ -193,6 +193,7 @@ class GoalManager(Node):
     
 
     def try_load_static_frames_once(self):
+        # this should not be needed when the object_manager is working
         if self._static_loaded:
             return
 
@@ -244,6 +245,9 @@ class GoalManager(Node):
         if self._initial_goal_dispatched:
             return
 
+        # this should be done by a service call in the object_manager
+        # service: get_closest_cube
+        ##############
         # If cubes are known, start with closest cube approach.
         if len(self._cubes) > 0:
             robot_xy = self.get_robot_xy()
@@ -261,6 +265,8 @@ class GoalManager(Node):
                 self._initial_goal_dispatched = True
                 return
             self.get_logger().warn('Cubes known at startup, but robot pose unavailable. Falling back to search.')
+        ###############
+
 
         # No cubes known: begin exploration search.
         self._state = AutoState.SEARCH
@@ -349,6 +355,7 @@ class GoalManager(Node):
 
 
     def cube_callback(self, msg: PointStamped):
+        # all of this should not be needed once teh obejct manager is working
         if self.manual_goal:
             return
 
@@ -537,6 +544,10 @@ class GoalManager(Node):
 
     def _continue_after_drop(self):
         # If we still have cubes, go for the closest one; else go to SEARCH point
+
+        # exchange this check by a service call for the object_manager
+        # more_cubes_available? service
+        #############
         if len(self._cubes) > 0:
             robot_xy = self.get_robot_xy()
             if robot_xy is not None:
@@ -552,6 +563,7 @@ class GoalManager(Node):
                 )
                 self.publish_goal(tx, ty, 0.0)
                 return
+        ##############
 
         # No cubes known: return to SEARCH
         self._state = AutoState.SEARCH
