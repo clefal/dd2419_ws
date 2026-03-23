@@ -179,6 +179,8 @@ class GlobalPlannerNode(Node):
         if start_xy is None:
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan.")
             return
+        
+
 
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
 
@@ -452,7 +454,7 @@ class GlobalPlannerNode(Node):
 
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
-        if include_box_lethal:
+        if include_box_lethal:  #TODO: expand to work with several boxes
             box_xy = self._get_box_xy_in_map()
             if box_xy is not None:
                 box_size = self.get_parameter("box_size").get_parameter_value().double_value
