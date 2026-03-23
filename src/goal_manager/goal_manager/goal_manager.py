@@ -42,16 +42,12 @@ class GoalManager(Node):
         self.manual_goal = False
         
         self._state = AutoState.IDLE
-        self._latest_cube = None
-        self._detection_locked = False
-        self._approach_distance = 0.17
 
-        self._merge_radius = 0.10  # m, deduplicate detections
-        self._cubes = []      # list of (x, y) in fixed frame
+        self._static_loaded = False
+
+    
         self._target_ = None   # (x, y) in fixed frame
         self._target_id = None
-        self._live_objects = {}  # object_id -> (x, y) in fixed frame
-        self._live_boxes = {}  # box_id -> (x, y, yaw) in fixed frame
         self._box_id = None
         self._box_pose = None  # (x, y, yaw) in fixed frame
 
@@ -98,8 +94,8 @@ class GoalManager(Node):
             self.get_logger().info('get_closest_cube service not available, waiting again...')
 
         self.cli_set_status = self.create_client(SetStatus, 'object_manager/set_status')
-        while not self.cli_get_closest_cube.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('get_closest_cube service not available, waiting again...')
+        while not self.cli_set_status.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('set_status service not available, waiting again...')
 
         self.cli_get_closest_box = self.create_client(GetClosestBox, 'object_manager/get_closest_box')
         while not self.cli_get_closest_box.wait_for_service(timeout_sec=1.0):
@@ -114,7 +110,7 @@ class GoalManager(Node):
 
         self._waiting_for_result = False
         self._first_goal_delay_done = False
-        self.create_timer(0.2, self.check_pending_consumed_object)
+    
 
         if self.manual_goal:
             thread = threading.Thread(target=self.manual_input_loop, daemon=True)
@@ -139,7 +135,6 @@ class GoalManager(Node):
             elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT_COARSE:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Coarse object approach reached. Starting final approach.')
-                    self._refresh_target_from_live_objects()
                     if not self.start_final_approach(self._target_id, AutoState.APPROACH_OBJECT_FINAL):
                         self._state = AutoState.SEARCH
                         self.publish_next_search_goal()
@@ -201,7 +196,7 @@ class GoalManager(Node):
                 self._target_ = None
      
 
-                self._state = AutoState.RETURN_HOME
+                self._state = AutoState.RETURN_BOX_COARSE
                 self.publish_box_goal_candidates()
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
@@ -213,7 +208,7 @@ class GoalManager(Node):
             if msg.data == 'DROP_SUCCESS':
                 self.get_logger().info('Drop succeeded.')
 
-                self._detection_locked = False
+       
                 self._state = AutoState.BACKUP_AFTER_DROP
                 self.publish_backup_distance(0.15)
                 
@@ -281,6 +276,21 @@ class GoalManager(Node):
         except Exception as e:
             self.get_logger().error(f'get_closest_cube Service call failed: {e}')
 
+
+
+
+
+    def lookup_xy_yaw(self, parent_frame: str, child_frame: str):
+        try:
+            t = self._tf_buffer.lookup_transform(parent_frame, child_frame, rclpy.time.Time())
+        except Exception:
+            return None
+        x = t.transform.translation.x
+        y = t.transform.translation.y
+        q = t.transform.rotation
+        yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        return (x, y, yaw)
+    
 
     def load_robot_inital_pose(self):
         if self._static_loaded:
