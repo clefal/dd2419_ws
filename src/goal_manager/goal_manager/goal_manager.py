@@ -50,9 +50,15 @@ class GoalManager(Node):
         self._target_id = None
         self._box_id = None
         self._box_pose = None  # (x, y, yaw) in fixed frame
+        self._start_x = 0.0
+        self._start_y = 0.0
+        self._start_yaw = 0.0
 
 
         self._goals_available = False
+        self._pending_target_reason = None
+        self._pending_box_reason = None
+        self._pending_startup_check = False
 
 
 
@@ -106,6 +112,7 @@ class GoalManager(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._initial_goal_dispatched = False
+        self._startup_timer = self.create_timer(0.5, self.try_startup)
     
 
         self._waiting_for_result = False
@@ -196,8 +203,7 @@ class GoalManager(Node):
                 self._target_ = None
      
 
-                self._state = AutoState.RETURN_BOX_COARSE
-                self.publish_box_goal_candidates()
+                self.request_box_goal_candidates(reason='pickup_success')
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
             else:
@@ -227,58 +233,119 @@ class GoalManager(Node):
 
 
 
-    def publish_new_target(self):
-        '''Checks if targets are available, if yes then it sets self._target_ to the closest one and, returns True if successful '''
-        # service: get_closest_cube
-        req_goals_available = GoalsAvailable.Request()
-        # Send the request asynchronously
-        future_goals_available = self.cli_goals_available.call_async(req_goals_available)
-        # Attach a callback function that will run ONLY when the response arrives.
-        future_goals_available.add_done_callback(self.goals_available_response_callback)
+    def request_new_target(self, reason: str = 'unspecified'):
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn(f'Cannot request new target ({reason}): robot pose unavailable.')
+            if reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
 
-        if not self._goals_available:
-            self.get_logger().warn(f'No goals available during publish_new_target(). cli_goals_available service returned False')
-            return False
-
-        prev_target = self._target_
-        req_closest_goal = GetClosestCube.Request()
-        req_closest_goal.robot_x, req_closest_goal.robot_y =self.get_robot_xy()
-        future_closest_goal = self.cli_get_closest_cube.call_async(req_closest_goal)
-        future_closest_goal.add_done_callback(self.get_closest_cube_response_callback)
-        new_target = self._target_
-        
-        if prev_target == new_target:
-            self.get_logger().warn(f'during publish_new_target: prev_target = new_target ->service didnt return new target')
-            return False
-        
-        return True
+        self._pending_target_reason = reason
+        req = GoalsAvailable.Request()
+        future = self.cli_goals_available.call_async(req)
+        future.add_done_callback(self.goals_available_response_callback)
 
 
     def goals_available_response_callback(self, future):
-        """This function is triggered automatically when the goals_avaibalbe service responds."""
         try:
-            # Extract the actual response from the Future object
             res = future.result()
-            self.get_logger().info(f'Goals available service returned: {res.goals_available}')
-            self._goals_available = res.goals_available
         except Exception as e:
-            # It's good practice to catch exceptions in case the service server crashed or failed
             self.get_logger().error(f'goals_available call failed: {e}')
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        self._goals_available = res.goals_available
+        self.get_logger().info(f'Goals available service returned: {res.goals_available}')
+
+        if not res.goals_available:
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn('Robot pose unavailable after goals_available response.')
+            return
+
+        req = GetClosestCube.Request()
+        req.robot_x = robot_xy[0]
+        req.robot_y = robot_xy[1]
+        future = self.cli_get_closest_cube.call_async(req)
+        future.add_done_callback(self.get_closest_cube_response_callback)
 
     def get_closest_cube_response_callback(self, future):
         try:
             res = future.result()
-            self._target_ = (res.obj_x, res.obj_y)
-            self._target_id = res.obj_id
-            self.get_logger().info(f'closest cube to robot at: {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
-            self.publish_goal(res.obj_x, res.obj_y, 0.0)
-            
         except Exception as e:
             self.get_logger().error(f'get_closest_cube Service call failed: {e}')
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        self._target_ = (res.obj_x, res.obj_y)
+        self._target_id = res.obj_id
+        self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
+
+        self._active_search_goal = None
+        self._state = AutoState.APPROACH_OBJECT_COARSE
+        self.publish_goal(res.obj_x, res.obj_y, 0.0)
 
 
 
 
+
+    def try_startup(self):
+        if self.manual_goal:
+            return
+
+        if self._initial_goal_dispatched:
+            return
+
+        if self._state != AutoState.INITIALIZATION:
+            return
+
+        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
+        if robot_pose is None:
+            self.get_logger().info('Startup waiting: robot pose not available yet.')
+            return
+
+        self._start_x, self._start_y, self._start_yaw = robot_pose
+
+        if self._pending_startup_check:
+            return
+
+        self._pending_startup_check = True
+        req = GoalsAvailable.Request()
+        future = self.cli_goals_available.call_async(req)
+        future.add_done_callback(self.startup_goals_available_callback)
+
+    def startup_goals_available_callback(self, future):
+        self._pending_startup_check = False
+
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Startup goals_available check failed: {e}')
+            return
+
+        self._goals_available = res.goals_available
+        self._static_loaded = True
+
+        if res.goals_available:
+            self.get_logger().info('Startup: object_manager is ready and goals are available.')
+            self.dispatch_initial_goal_after_loading()
+            return
+
+        self.get_logger().info('Startup: object_manager ready, but no goals yet. Starting search.')
+        self._initial_goal_dispatched = True
+        self._state = AutoState.SEARCH
+        self.publish_next_search_goal()
 
     def lookup_xy_yaw(self, parent_frame: str, child_frame: str):
         try:
@@ -312,25 +379,8 @@ class GoalManager(Node):
         if self._initial_goal_dispatched:
             return
 
-        success = self.publish_new_target()
-
-        if success: 
-            self._state = AutoState.APPROACH_OBJECT_COARSE
-            tx, ty = self._target_
-            self.get_logger().info(
-                f'Initial target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
-            )
-
-        # check target to check if we succeded with the publish_new_target
-        if self._target_ is not None:
-            self._initial_goal_dispatched = True
-            return
-
-        # No cubes known: begin exploration search.
-        self._state = AutoState.SEARCH
-        self.publish_next_search_goal()
-        self.get_logger().info('State SEARCH: starting random exploratory search.')
         self._initial_goal_dispatched = True
+        self.request_new_target(reason='startup')
 
 
    
@@ -433,22 +483,42 @@ class GoalManager(Node):
 
         self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
 
-    def publish_box_goal_candidates(self):
+    def request_box_goal_candidates(self, reason: str = 'return_box'):
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn(f'Cannot request closest box ({reason}): robot pose unavailable.')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
 
+        self._pending_box_reason = reason
         req = GetClosestBox.Request()
-        req.robot_x, req.robot_y = self.get_robot_xy()
+        req.robot_x = robot_xy[0]
+        req.robot_y = robot_xy[1]
         future = self.cli_get_closest_box.call_async(req)
         future.add_done_callback(self.get_closest_box_response_callback)
 
+    def get_closest_box_response_callback(self, future):
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'get_closest_box service call failed: {e}')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
+
+        self._box_id = res.obj_id
+        self._box_pose = (res.obj_x, res.obj_y, res.obj_yaw)
+        self.get_logger().info(f'Closest box position received at: {self._box_pose}')
+
         if self._box_pose is None or self._box_id is None:
-            self.get_logger().warn('No live box pose available. Cannot publish box goal candidates.')
+            self.get_logger().warn('No live box pose available after service response.')
             self._state = AutoState.SEARCH
             self.publish_next_search_goal()
             return
 
         bx, by, byaw = self._box_pose
 
-        # Approach box from its two long sides (left/right in box local frame).
         axis_yaw = byaw + math.pi / 2.0
         ux = math.cos(axis_yaw)
         uy = math.sin(axis_yaw)
@@ -475,6 +545,7 @@ class GoalManager(Node):
             pose.orientation.w = q[3]
             pa.poses.append(pose)
 
+        self._state = AutoState.RETURN_BOX_COARSE
         self._goal_candidates_pub.publish(pa)
         self._waiting_for_result = True
         self.get_logger().info(
@@ -482,12 +553,6 @@ class GoalManager(Node):
             f'c0=({cands[0][0]:.2f},{cands[0][1]:.2f}), '
             f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f})'
         )
-
-    def get_closest_box_response_callback(self, future):
-        res = future.result()
-        self._box_id = res.obj_id
-        self._box_pose = (res.obj_x, res.obj_y, res.obj_yaw)
-        self.get_logger().info(f'Closest box position recieved at: {self._box_pose}')
 
     # ----------------------------
 
@@ -520,19 +585,7 @@ class GoalManager(Node):
     def _continue_after_drop(self):
         # If we still have cubes, go for the closest one; else go to SEARCH point
 
-        success = self.publish_new_target()
-        if success:
-            tx, ty = self._target_
-            self._state = AutoState.APPROACH_OBJECT_COARSE
-            self.get_logger().info(
-                f'Target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
-            )
-            return
-        
-        # No cubes known: return to SEARCH
-        self._state = AutoState.SEARCH
-        self.publish_next_search_goal()
-        self.get_logger().info('State SEARCH: continuing exploratory patrol while detection runs.')
+        self.request_new_target(reason='after_drop')
 
     # ----------------------------
 
