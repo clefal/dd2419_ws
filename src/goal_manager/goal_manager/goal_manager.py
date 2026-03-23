@@ -15,7 +15,7 @@ from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String, Float32, Bool
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
-from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetClosestBox
 
 
 from .exploration import RandomWaypointExplorer
@@ -102,8 +102,13 @@ class GoalManager(Node):
             self.get_logger().info('get_closest_cube service not available, waiting again...')
 
         self.cli_set_status = self.create_client(SetStatus, 'object_manager/set_status')
-        while not self.cli_set_status.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('set_status service not available, waiting again...')
+        while not self.cli_get_closest_cube.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_cube service not available, waiting again...')
+
+        self.cli_get_closest_box = self.create_client(GetClosestBox, 'object_manager/get_closest_box')
+        while not self.cli_get_closest_box.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_box service not available, waiting again...')
+
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -467,6 +472,10 @@ class GoalManager(Node):
 
     def publish_box_goal_candidates(self):
 
+        req = GetClosestBox.Request()
+        req.robot_x, req.robot_y = self.get_robot_xy()
+        future = self.cli_get_closest_box.call_async(req)
+        future.add_done_callback(self.get_closest_box_response_callback)
 
         if self._box_pose is None or self._box_id is None:
             self.get_logger().warn('No live box pose available. Cannot publish box goal candidates.')
@@ -510,6 +519,12 @@ class GoalManager(Node):
             f'c0=({cands[0][0]:.2f},{cands[0][1]:.2f}), '
             f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f})'
         )
+
+    def get_closest_box_response_callback(self, future):
+        res = future.result()
+        self._box_id = res.obj_id
+        self._box_pose = (res.obj_x, res.obj_y, res.obj_yaw)
+        self.get_logger().info(f'Closest box position recieved at: {self._box_pose}')
 
     # ----------------------------
 
