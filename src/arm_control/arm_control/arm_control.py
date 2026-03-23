@@ -30,6 +30,11 @@ IDLE_P2 = 16.6
 IDLE_P3 = 166.4
 IDLE_P4 = 89.8
 
+#define holding position
+HOLDING_P2 = 30
+HOLDING_P3 = 170
+HOLDING_P4 = 120
+
 #more standard positions 
 START_POSITION = [40, 120, 30, 220, 180, 120]
 CLOSED_GRIPPER_ANGLE = 100
@@ -51,8 +56,8 @@ class Arm_control(Node):
         self.pickup_ready = False
         self.in_idle_position = False
         self.holding_object = False
-        self.position = START_POSITION
-        self.new_position = START_POSITION
+        self.position = START_POSITION.copy()
+        self.new_position = START_POSITION.copy()
         self.time = np.full((6), 3000)
         self.rho = 0
         self.cube_y = 0
@@ -204,8 +209,7 @@ class Arm_control(Node):
             t = max(MIN_TIME, min(MAX_TIME, int(t)))
             self.time.append(t)
     
-    """
-    Publish arm control message with currrent self.new_position and self.time 
+    """Publish arm control message with currrent self.new_position and self.time 
     Sleeps for the duration of longest arm movement to avoid concurrent arm messages 
     """
     def publish_arm_control(self):
@@ -258,8 +262,8 @@ class Arm_control(Node):
 
         self.rho = middle_rho
 
-    """A return to idle postion from pickup position"""
-    def send_msg_pickup_to_idle(self):
+    """A return to idle postion from pickup position (used when detection times out)"""
+    def send_msg_detect_to_idle(self):
         #Go to middle pickup
         middle_rho = (MIN_RHO + MAX_RHO) / 2
         p4, p3, p2 = self.calc_arm_angles(middle_rho, Z)
@@ -272,8 +276,24 @@ class Arm_control(Node):
         self.new_position[4] = IDLE_P4
         self.publish_arm_control()
 
+    def send_msg_pickup_to_holding(self):
+        self.new_position[4] = HOLDING_P4
+        self.publish_arm_control()
+
+        self.new_position[2] = IDLE_P2
+        self.new_position[3] = IDLE_P3
+        self.publish_arm_control()
+
+    """When arm in holding position without holding cube, open gripper and return to Idle"""
+    def send_msg_holding_to_idle(self):
+        self.new_position[0] = OPEN_GRIPPER_ANGLE
+        self.new_position[2] = IDLE_P2
+        self.new_position[3] = IDLE_P3
+        self.new_position[4] = IDLE_P4
+        self.publish_arm_control()
+
     """Move from idle position to drop of position"""
-    def send_msg_idle_to_drop(self):
+    def send_msg_holding_to_drop(self):
         pass
         #TODO
         #Go into a drop off position 
@@ -306,14 +326,15 @@ class Arm_control(Node):
 
     def pick_up_object(self):
         self.send_msg_close_gripper()
-        self.send_msg_pickup_to_idle()
+        self.send_msg_pickup_to_holding()
         if self.is_holding_object():
             self.state = "holding"
             self.publish_res("PICK_UP_SUCCESS")
         else:
             self.publish_res("PICK_UP_FAIL_NO_OBJECT")
+            self.send_msg_holding_to_idle()
             self.state = "idle"
-            #TODO handle error 
+            #TODO handle error ???
 
     def initialize(self):
         if self.state == "start":
@@ -337,7 +358,7 @@ class Arm_control(Node):
     def drop_object(self):
         if self.state == "holding":
             self.state = "drop"
-            self.send_msg_idle_to_drop()
+            self.send_msg_holding_to_drop()
             self.send_msg_open_gripper()
             self.send_msg_drop_to_idle()
             self.state = "idle"
@@ -359,11 +380,14 @@ def main():
     node = Arm_control()
     node.send_msg_initalize_position()
     node.send_msg_idle_to_detect()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    rclpy.shutdown()
+    p4, p3, p2 = node.calc_arm_angles(MAX_RHO, Z)
+    node.new_position[2:5] = [p2, p3, p4]
+    node.publish_arm_control()
+    # try:
+    #     rclpy.spin(node)
+    # except KeyboardInterrupt:
+    #     pass
+    # rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
