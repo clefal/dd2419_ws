@@ -11,20 +11,26 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 
 set(msg_files
-  "msgs/ArmControl.msg"
-  "msgs/ArmFeedback.msg"
-  "msgs/DutyCycles.msg"
-  "msgs/Encoders.msg"
+  "msg/ArmControl.msg"
+  "msg/ArmFeedback.msg"
+  "msg/DutyCycles.msg"
+  "msg/Encoders.msg"
+  "msg/ObjPose.msg"
   )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
+  "srv/SetStatus.srv"
+  "srv/GetClosestCube.srv"
+  "srv/GoalsAvailable.srv"
+  "srv/GetAllObjects.srv"
+  "srv/GetClosestBox.srv"
   DEPENDENCIES std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
 
-if(BUILD_TESTING)
+if(BUILD_TESTING) # 2. The physical folders are still named srvs and msgs
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
