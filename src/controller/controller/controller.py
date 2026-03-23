@@ -235,57 +235,7 @@ class Controller(Node):
         self._final_target_id = target_id or None
         self.get_logger().info(f'Final approach target id set to: {self._final_target_id}')
 
-    def live_list_callback(self, msg: String):
-        # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
-        tracked = self._parse_live_list(msg.data)
-        if tracked is None:
-            return
-
-        self._tracked_objects = tracked
-        if self._final_target_id is not None and self._final_target_id in self._tracked_objects:
-            self._final_target_last_seen_wall = time.time()
-
-    def _parse_live_list(self, payload: str) -> Optional[Dict[str, Tuple[float, float]]]:
-        if not payload.strip():
-            return {}
-
-        try:
-            data = json.loads(payload)
-        except Exception:
-            self.get_logger().warn('Failed to parse detection_manager live_list payload. Keeping previous tracked objects.')
-            return None
-
-        tracked: Dict[str, Tuple[float, float]] = {}
-
-        if isinstance(data, dict) and 'objects' in data and isinstance(data['objects'], list):
-            iterable = data['objects']
-        elif isinstance(data, list):
-            iterable = data
-        elif isinstance(data, dict):
-            iterable = []
-            for object_id, item in data.items():
-                if isinstance(item, dict):
-                    entry = dict(item)
-                    entry['id'] = object_id
-                    iterable.append(entry)
-        else:
-            iterable = []
-
-        for item in iterable:
-            if not isinstance(item, dict):
-                continue
-            object_id = str(item.get('id', '')).strip()
-            if object_id == '':
-                continue
-            try:
-                x = float(item['x'])
-                y = float(item['y'])
-            except Exception:
-                continue
-            tracked[object_id] = (x, y)
-
-        return tracked
-
+    # def live_list_callback(self, msg: String):
     # ----------------------------
 
     def _closest_path_index(self, rx: float, ry: float) -> int:
