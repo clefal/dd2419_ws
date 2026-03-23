@@ -51,6 +51,16 @@ class Arm_control(Node):
 
         self.in_start_position = True
 
+    def send_msg_return_to_start(self):
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 50
+        msg.position[3] = 210
+        msg.position[4] = 120
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
+
     def send_msg_raise_camera(self):
         msg = ArmControl()
         msg.position[0] = 10
@@ -123,16 +133,12 @@ class Arm_control(Node):
     def pick_up_object(self):
         if (self.in_start_position):
             self.send_msg_raise_camera()
-            time.sleep(3.0)
 
             self.send_msg_lower_arm()
-            time.sleep(3.0)
 
             self.send_msg_close_grip()
-            time.sleep(3.0)
 
             self.send_msg_raise_arm()
-            time.sleep(3.0)
 
             self.in_start_position = False
             self.holding_object = True #TODO: check that an object is actually in arm
@@ -149,7 +155,7 @@ class Arm_control(Node):
         if (self.holding_object):
             self.send_msg_open_grip()
             self.holding_object = False
-            self.send_msg_start_position()
+            self.send_msg_return_to_start()
             self.publish_res("DROP_SUCCESS")
         else:
             self.publish_res("DROP_FAIL_NO_OBJECT")
@@ -166,7 +172,11 @@ class Arm_control(Node):
 def main():
     rclpy.init()
     node = Arm_control()
-    rclpy.spin(node)
+    node.start_position()
+    node.pick_up_object()
+    node.drop_object()
+
+    #rclpy.spin(node)
     rclpy.shutdown()
 
 if __name__ == '__main__':
