@@ -197,7 +197,7 @@ class GoalManager(Node):
 
         if self._state == AutoState.WAIT_PICKUP_RESULT:
             if msg.data == 'PICK_UP_SUCCESS':
-                self.get_logger().info('Arm pickup succeeded. Returning home.')
+                self.get_logger().info('Arm pickup succeeded. Returning to box.')
 
                 # Remove picked cube from list (best-effort) and clear current target
                 if self._target_ is not None:
@@ -229,7 +229,7 @@ class GoalManager(Node):
 
     def set_status(self):
         req = SetStatus.Request()
-        req.obj_id = self._target_cube_id
+        req.obj_id = self._target_id
         req.status = 'unavailable'  # we currently use this function to set the status of an object_id to unavailable after we picked it up
         future = self.cli_set_status.call_async(req)
         # i think we dont need an done_callback here because we dont return anything...
@@ -279,7 +279,7 @@ class GoalManager(Node):
         try:
             res = future.result()
             self._target_ = (res.obj_x, res.obj_y)
-            self._target_cube_id = res.obj_id
+            self._target_id = res.obj_id
             self.get_logger().info(f'closest cube to robot at: {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
             self.publish_goal(res.obj_x, res.obj_y, 0.0)
             
@@ -287,6 +287,20 @@ class GoalManager(Node):
             self.get_logger().error(f'get_closest_cube Service call failed: {e}')
 
 
+    def load_robot_inital_pose(self):
+        if self._static_loaded:
+            return
+        #start pose (robot in map)
+        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
+        if robot_pose is not None:
+            self._start_x, self._start_y, self._start_yaw = robot_pose
+            self.get_logger().info(f'Loaded start pose (robot in map): x={self._start_x:.2f}, y={self._start_y:.2f}, yaw={self._start_yaw:.2f}')
+
+        self._static_loaded = True
+
+        # Startup gate: do not dispatch first nav goal until static workspace/map frames are loaded.
+        if (not self.manual_goal) and (not self._initial_goal_dispatched):
+            self.dispatch_initial_goal_after_loading()
 
 
     def dispatch_initial_goal_after_loading(self):
