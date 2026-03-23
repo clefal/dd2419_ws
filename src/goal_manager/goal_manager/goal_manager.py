@@ -79,13 +79,9 @@ class GoalManager(Node):
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
         self._goal_candidates_pub = self.create_publisher(PoseArray, '/nav/goal_candidates', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
-        self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
-        self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
-        self._box_pub = self.create_publisher(PoseStamped, '/nav/box', 10)
         self._backup_pub = self.create_publisher(Float32, '/nav/backup_distance', 10)
         self._final_approach_enable_pub = self.create_publisher(Bool, '/nav/final_approach/enable', 10)
         self._final_approach_target_id_pub = self.create_publisher(String, '/nav/final_approach/target_id', 10)
-        self._object_consumed_pub = self.create_publisher(String, '/nav/object_consumed', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
@@ -203,7 +199,7 @@ class GoalManager(Node):
                     self.set_status() # set status of the current target to unavailable snce the pick up succeeded
 
                 self._target_ = None
-                self.publish_topics()
+     
 
                 self._state = AutoState.RETURN_HOME
                 self.publish_box_goal_candidates()
@@ -351,49 +347,6 @@ class GoalManager(Node):
         self._explorer.set_planning_grid(msg)
 
 
-    def publish_topics(self):
-        # Publish cube list
-        pa = PoseArray()
-        pa.header.stamp = self.get_clock().now().to_msg()
-        pa.header.frame_id = self._fixed_frame
-        for (x, y) in self._cubes:
-            p = PoseStamped()
-            # PoseArray stores Pose, so create Pose then append
-            pose = PoseStamped().pose
-            pose.position.x = float(x)
-            pose.position.y = float(y)
-            pose.position.z = 0.0
-            pose.orientation.w = 1.0
-            pa.poses.append(pose)
-        self._cubes_pub.publish(pa)
-
-        # Publish current target cube pose (if any)
-        if self._target_ is not None:
-            tx, ty = self._target_
-            tgt = PoseStamped()
-            tgt.header.stamp = pa.header.stamp
-            tgt.header.frame_id = self._fixed_frame
-            tgt.pose.position.x = float(tx)
-            tgt.pose.position.y = float(ty)
-            tgt.pose.position.z = 0.0
-            tgt.pose.orientation.w = 1.0
-            self._target_pub.publish(tgt)
-
-        if self._box_pose is not None:  #TODO Is this still needed?
-            bx, by, byaw = self._box_pose
-            box_msg = PoseStamped()
-            box_msg.header.stamp = pa.header.stamp
-            box_msg.header.frame_id = self._fixed_frame
-            box_msg.pose.position.x = float(bx)
-            box_msg.pose.position.y = float(by)
-            box_msg.pose.position.z = 0.0
-            q = quaternion_from_euler(0.0, 0.0, byaw)
-            box_msg.pose.orientation.x = q[0]
-            box_msg.pose.orientation.y = q[1]
-            box_msg.pose.orientation.z = q[2]
-            box_msg.pose.orientation.w = q[3]
-            self._box_pub.publish(box_msg)
-    # ----------------------------
 
     def get_robot_xy(self):
         try:

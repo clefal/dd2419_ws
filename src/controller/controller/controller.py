@@ -235,7 +235,7 @@ class Controller(Node):
         self._final_target_id = target_id or None
         self.get_logger().info(f'Final approach target id set to: {self._final_target_id}')
 
-    # def live_list_callback(self, msg: String):
+    # TODO def live_list_callback(self, msg: String):
     # ----------------------------
 
     def _closest_path_index(self, rx: float, ry: float) -> int:

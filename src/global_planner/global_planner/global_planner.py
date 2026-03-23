@@ -82,12 +82,7 @@ class GlobalPlannerNode(Node):
             self.on_target_cube,
             10,
         )
-        self.sub_box = self.create_subscription(
-            PoseStamped,
-            "/nav/box",
-            self.on_box,
-            10,
-        )
+
 
 
         path_qos = QoSProfile(
