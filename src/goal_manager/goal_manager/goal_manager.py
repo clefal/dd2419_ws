@@ -90,6 +90,19 @@ class GoalManager(Node):
         self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
         self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
 
+
+        self.cli_goals_available = self.create_client(GoalsAvailable, 'object_manager/goals_available')
+        while not self.cli_goals_available.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('goals_available service not available, waiting again...')
+
+        self.cli_get_closest_cube = self.create_client(GetClosestCube, 'object_manager/get_closest_cube')
+        while not self.cli_get_closest_cube.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_cube service not available, waiting again...')
+
+        self.cli_set_status = self.create_client(SetStatus, 'object_manager/set_status')
+        while not self.cli_get_closest_cube.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_cube service not available, waiting again...')
+
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
@@ -176,6 +189,7 @@ class GoalManager(Node):
 
         if self._state == AutoState.WAIT_PICKUP_RESULT:
             if msg.data == 'PICK_UP_SUCCESS':   #TODO this should be verified with arm camera later -> publish consumed objects
+                #TODO goals are directly sent from object_manager, no publishing of consumed objects needed.
                 self.get_logger().info('Arm pickup succeeded. Waiting for consumed object to disappear from live_list.')
                 if self._target_id is not None:
                     self.publish_object_consumed(self._target_id)
@@ -199,6 +213,60 @@ class GoalManager(Node):
                 self.get_logger().warn('Drop failed: DROP_FAIL_NO_OBJECT')
             else:
                 self.get_logger().info(f'Arm result received while waiting for drop: {msg.data}')
+
+
+
+
+    def publish_new_target(self):
+        '''Checks if targets are available, if yes then it sets self._target_ to the closest one and, returns True if successful '''
+        # service: get_closest_cube
+        req_goals_available = GoalsAvailable.Request()
+        # Send the request asynchronously
+        future_goals_available = self.cli_goals_available.call_async(req_goals_available)
+        # Attach a callback function that will run ONLY when the response arrives.
+        future_goals_available.add_done_callback(self.goals_available_response_callback)
+
+        if not self._goals_available:
+            self.get_logger().warn(f'No goals available during publish_new_target(). cli_goals_available service returned False')
+            return False
+
+        prev_target = self._target_
+        req_closest_goal = GetClosestCube.Request()
+        req_closest_goal.robot_x, req_closest_goal.robot_y =self.get_robot_xy()
+        future_closest_goal = self.cli_get_closest_cube.call_async(req_closest_goal)
+        future_closest_goal.add_done_callback(self.get_closest_cube_response_callback)
+        new_target = self._target_
+        
+        if prev_target == new_target:
+            self.get_logger().warn(f'during publish_new_target: prev_target = new_target ->service didnt return new target')
+            return False
+        
+        return True
+
+
+    def goals_available_response_callback(self, future):
+        """This function is triggered automatically when the goals_avaibalbe service responds."""
+        try:
+            # Extract the actual response from the Future object
+            res = future.result()
+            self.get_logger().info(f'Goals available service returned: {res.goals_available}')
+            self._goals_available = res.goals_available
+        except Exception as e:
+            # It's good practice to catch exceptions in case the service server crashed or failed
+            self.get_logger().error(f'goals_available call failed: {e}')
+
+    def get_closest_cube_response_callback(self, future):
+        try:
+            res = future.result()
+            self._target_ = (res.obj_x, res.obj_y)
+            self._target_cube_id = res.obj_id
+            self.get_logger().info(f'closest cube to robot at: {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
+            self.publish_goal(res.obj_x, res.obj_y, 0.0)
+            
+        except Exception as e:
+            self.get_logger().error(f'get_closest_cube Service call failed: {e}')
+
+
 
     def live_list_callback(self, msg: String):
         # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
