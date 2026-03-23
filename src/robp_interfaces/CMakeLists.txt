@@ -15,6 +15,7 @@ set(msg_files
   "msg/ArmFeedback.msg"
   "msg/DutyCycles.msg"
   "msg/Encoders.msg"
+  "msg/ObjPose.msg"
   )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -22,6 +23,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetStatus.srv"
   "srv/GetClosestCube.srv"
   "srv/GoalsAvailable.srv"
+  "srv/GetAllObjects.srv"
+  "srv/GetClosestBox.srv"
   DEPENDENCIES std_msgs
 )
 

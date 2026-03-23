@@ -6,7 +6,8 @@ from rclpy.node import Node
 from geometry_msgs.msg import PointStamped, TransformStamped
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster, StaticTransformBroadcaster
-from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetAllObjects, GetClosestBox, GetPosOfObj
+from robp_interfaces.msg import ObjPose
 
 
 ## RENAME THIS NODE TO OBJECT MANAGER!!###
@@ -54,8 +55,11 @@ class ObjectManager(Node):
         # services 
         self.srv_goals_available = self.create_service(GoalsAvailable,'object_manager/goals_available', self.goals_available_callback)
         self.srv_get_closest_cube = self.create_service(GetClosestCube,'object_manager/get_closest_cube', self.get_closest_cube_callback)
+        self.srv_get_closest_box = self.create_service(GetClosestBox,'object_manager/get_closest_box', self.get_closest_box_callback)
         self.srv_set_status = self.create_service(SetStatus,'object_manager/set_status', self.set_status_callback)
-        
+        self.srv_get_all_objects = self.create_service(GetAllObjects,'object_manager/get_all_objects', self.get_all_objects_callback)
+        self.srv_get_pos_of_obj = self.create_service(GetPosOfObj,'object_manager/get_pos_of_obj', self.get_pos_of_obj_callback)
+
         # load objects from the workspace file into the list
         self._fixed_frame = 'map'
         self._object_frame_prefix = 'object'
@@ -140,7 +144,6 @@ class ObjectManager(Node):
             # we could switch to dynamic broadcasts though, but i fear that if we wanted to use these transforms we could get some interpolation into the future errors since we
             # need to know the transform after we detected the object and not inbetween 2 detections
              
-
 # ---------------------------------
 
     def get_points_from_csv_once(self):
@@ -262,13 +265,39 @@ class ObjectManager(Node):
                     closest_obj_id = obj.id
                     closest_obj_x = obj.last_x
                     closest_obj_y = obj.last_y
+                    closest_obj_yaw = obj.last_yaw
+
 
         res.obj_id = closest_obj_id
         res.obj_x = closest_obj_x
         res.obj_y = closest_obj_y
+        res.obj_yaw = closest_obj_yaw
         
         return res
     
+    def get_closest_box_callback(self,req, res):
+
+        closest_obj_id = None
+        for obj in self.object_list:
+            if obj.status == 'available' and obj.type == 'box':
+                if closest_obj_id == None:
+                    closest_obj_id = obj.id
+                    closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
+                if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
+                    closest_obj_id = obj.id
+                    closest_obj_x = obj.last_x
+                    closest_obj_y = obj.last_y
+                    closest_obj_yaw = obj.last_yaw
+
+
+        res.obj_id = closest_obj_id
+        res.obj_x = closest_obj_x
+        res.obj_y = closest_obj_y
+        res.obj_yaw = closest_obj_yaw
+        
+        return res
+    
+# -----------------------
 
     def set_status_callback(self, req, res):
         obj_id, status = req.obj_id, req.status
@@ -279,11 +308,35 @@ class ObjectManager(Node):
         
         return res
 
-# we need a service that returns the closest box as well
+# ---------------------
 
-# we need a service that returns a list of all available objects (box and cubes)
+    def get_all_objects_callback(self, req, res):
+        '''returns a list of all available objects (box and cubes)'''
+        obj_pose_list = []
+        for obj in self.object_list:
+            if obj.status == 'available':
+                obj_pose = ObjPose()
+                obj_pose.obj_id = obj.id
+                obj_pose.obj_type = obj.type
+                obj_pose.obj_x = obj.last_x
+                obj_pose.obj_y= obj.last_y
+                obj_pose.obj_yaw = obj.last_yaw
+                obj_pose_list.append(obj_pose)
+        res.obj_poses = obj_pose_list
+        return res        
 
-# we need a service that returns new latest position depending on an object id
+# ------------------------
+
+    def get_pos_of_obj_callback(self, req, res):
+        
+        for obj in self.object_list:
+            if obj.id == req.obj_id:
+                res.obj_x = obj.last_x
+                res.obj_y = obj.last_y
+                res.obj_yaw = obj.last_yaw
+                return res
+
+        self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')
 
 
 # ------------------------
