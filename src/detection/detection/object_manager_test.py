@@ -25,7 +25,6 @@ class ObjectManagerTest(Node):
         self.get_logger().info('Testing goals_available service asynchronously...')
 
         req = GoalsAvailable.Request()
-        
         # Send the request asynchronously
         future = self.cli_goals_available.call_async(req)
         # Attach a callback function that will run ONLY when the response arrives.

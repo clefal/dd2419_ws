@@ -6,7 +6,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PointStamped, TransformStamped
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster, StaticTransformBroadcaster
-from robp_interfaces.srv import GoalsAvailable, GetClosestCube
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus
 
 
 ## RENAME THIS NODE TO OBJECT MANAGER!!###
@@ -54,6 +54,7 @@ class ObjectManager(Node):
         # services 
         self.srv_goals_available = self.create_service(GoalsAvailable,'object_manager/goals_available', self.goals_available_callback)
         self.srv_get_closest_cube = self.create_service(GetClosestCube,'object_manager/get_closest_cube', self.get_closest_cube_callback)
+        self.srv_set_status = self.create_service(SetStatus,'object_manager/set_status', self.set_status_callback)
         
         # load objects from the workspace file into the list
         self._fixed_frame = 'map'
@@ -268,6 +269,23 @@ class ObjectManager(Node):
         
         return res
     
+
+    def set_status_callback(self, req, res):
+        obj_id, status = req.obj_id, req.status
+
+        for obj in self.object_list:
+            if obj.id == obj_id:
+                obj.status = status
+        
+        return res
+
+# we need a service that returns the closest box as well
+
+# we need a service that returns a list of all available objects (box and cubes)
+
+# we need a service that returns new latest position depending on an object id
+
+
 # ------------------------
 
 def main():
