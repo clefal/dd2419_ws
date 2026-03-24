@@ -273,6 +273,11 @@ class ObjectManager(Node):
                     closest_obj_y = obj.last_y
                     closest_obj_yaw = obj.last_yaw
 
+        if closest_obj_id is not None:
+            for obj in self.object_list:
+                if obj.id == closest_obj_id:
+                    obj.status = 'isgoal'
+                    break
 
         res.obj_id = closest_obj_id
         res.obj_x = closest_obj_x
