@@ -520,7 +520,8 @@ class Controller(Node):
         v = clamp(v, 0.0, v_nom)
 
         # Steering
-        w = k_steer * v * kappa
+        w = k_steer * kappa
+        #w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
 
         # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
