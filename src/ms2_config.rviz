@@ -9,11 +9,15 @@ Panels:
         - /Grid1
         - /Path1/Topic1
         - /Map1
-        - /Map1/Status1
         - /TF1
         - /TF1/Frames1
         - /Pose1
         - /PoseArray1
+        - /PointStamped1
+        - /PointStamped2
+        - /PointStamped3
+        - /PointStamped4
+        - /PointStamped5
         - /PointStamped6
       Splitter Ratio: 0.5277161598205566
     Tree Height: 1156
@@ -158,10 +162,6 @@ Visualization Manager:
           Value: true
         object3:
           Value: true
-        object4:
-          Value: true
-        object5:
-          Value: true
         odom:
           Value: true
         realsense_camera_color_frame:
@@ -191,21 +191,18 @@ Visualization Manager:
             {}
           object3:
             {}
-          object4:
-            {}
-          object5:
-            {}
           odom:
             base_link:
               lidar_link:
+                {}
+              realsense_camera_depth_optical_frame:
                 {}
               realsense_camera_link:
                 realsense_camera_color_frame:
                   realsense_camera_color_optical_frame:
                     {}
                 realsense_camera_depth_frame:
-                  realsense_camera_depth_optical_frame:
-                    {}
+                  {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -252,7 +249,7 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 37; 90; 204
-      Enabled: false
+      Enabled: true
       History Length: 1
       Name: PointStamped
       Radius: 0.05000000074505806
@@ -263,11 +260,11 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /detection/objects/blue_cube
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 6; 204; 29
-      Enabled: false
+      Enabled: true
       History Length: 1
       Name: PointStamped
       Radius: 0.05000000074505806
@@ -278,11 +275,11 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /detection/objects/green_cube
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 204; 11; 14
-      Enabled: false
+      Enabled: true
       History Length: 1
       Name: PointStamped
       Radius: 0.05000000074505806
@@ -293,11 +290,11 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /detection/objects/red_cube
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 204; 89; 23
-      Enabled: false
+      Enabled: true
       History Length: 1
       Name: PointStamped
       Radius: 0.05000000074505806
@@ -308,14 +305,14 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /detection/objects/wood_cube
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 0; 170; 0
-      Enabled: false
+      Enabled: true
       History Length: 1
       Name: PointStamped
-      Radius: 0.30000001192092896
+      Radius: 0.05000000074505806
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -323,7 +320,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /detection/objects/green_cube
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz_default_plugins/PointStamped
       Color: 145; 140; 157
@@ -385,7 +382,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.6280648708343506
+      Distance: 4.614087104797363
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -400,10 +397,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.974797248840332
+      Pitch: 1.0797971487045288
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.003549337387085
+      Yaw: 3.228550910949707
     Saved: ~
 Window Geometry:
   Displays:

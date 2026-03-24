@@ -80,12 +80,12 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.3)        # m
+        self.declare_parameter('lookahead_distance', 0.15)        # m
         self.declare_parameter('nominal_linear_speed', 0.7)     # 0.35 duty-equivalent
         self.declare_parameter('max_angular_speed', 0.3)        # 0.2 duty-equivalent
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.55) #3.5
+        self.declare_parameter('steering_gain', 0.75) #0.35
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
