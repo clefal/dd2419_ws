@@ -254,7 +254,7 @@ class ObjectManager(Node):
         
 # -----------------------
     def get_closest_cube_callback(self,req, res):
-
+        self.get_logger().info(f'get_closest_CUBE_callback entered')
         closest_obj_id = None
         closest_obj_x = 0.0
         closest_obj_y = 0.0
@@ -282,7 +282,7 @@ class ObjectManager(Node):
         return res
     
     def get_closest_box_callback(self, req, res):
-
+        self.get_logger().info(f'get_closest_BOX_callback entered')
         closest_obj_id = None
         closest_obj_x = 0.0
         closest_obj_y = 0.0
