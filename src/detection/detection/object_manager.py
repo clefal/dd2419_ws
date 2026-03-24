@@ -281,7 +281,7 @@ class ObjectManager(Node):
         
         return res
     
-    def get_closest_box_callback(self,req, res):
+    def get_closest_box_callback(self, req, res):
 
         closest_obj_id = None
         closest_obj_x = 0.0
