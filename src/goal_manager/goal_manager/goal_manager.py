@@ -359,20 +359,6 @@ class GoalManager(Node):
         return (x, y, yaw)
     
 
-    def load_robot_inital_pose(self):
-        if self._static_loaded:
-            return
-        #start pose (robot in map)
-        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
-        if robot_pose is not None:
-            self._start_x, self._start_y, self._start_yaw = robot_pose
-            self.get_logger().info(f'Loaded start pose (robot in map): x={self._start_x:.2f}, y={self._start_y:.2f}, yaw={self._start_yaw:.2f}')
-
-        self._static_loaded = True
-
-        # Startup gate: do not dispatch first nav goal until static workspace/map frames are loaded.
-        if (not self.manual_goal) and (not self._initial_goal_dispatched):
-            self.dispatch_initial_goal_after_loading()
 
 
     def dispatch_initial_goal_after_loading(self):
