@@ -75,8 +75,8 @@ class Controller(Node):
         self._final_target_request_period = 0.1
         self._final_target_request_last_wall = 0.0
 
-        self.cli_get_pos_of_obj = self.create_client(GetPosOfObj, 'object_manager/get_pos_of_obj')
-        while not self.cli_get_pos_of_obj.wait_for_service(timeout_sec=1.0):
+        self._get_pos_of_obj_client = self.create_client(GetPosOfObj, 'object_manager/get_pos_of_obj')
+        while not self._get_pos_of_obj_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
@@ -235,6 +235,7 @@ class Controller(Node):
             self._final_target_xy = None
             self._final_target_last_seen_wall = None
             self._final_target_request_pending = False
+            self._final_target_request_last_wall = 0.0
             self.publish_status('RUNNING')
             self.get_logger().info('Final approach enabled.')
         else:
@@ -247,6 +248,7 @@ class Controller(Node):
         self._final_target_xy = None
         self._final_target_last_seen_wall = None
         self._final_target_request_pending = False
+        self._final_target_request_last_wall = 0.0
         self.get_logger().info(f'Final approach target id set to: {self._final_target_id}')
 
     def request_final_target_pose(self) -> None:
@@ -376,7 +378,24 @@ class Controller(Node):
             if target_xy is None:
                 timeout_s = float(self.get_parameter('final_target_timeout').value)
                 last_seen = self._final_target_last_seen_wall
-                if last_seen is None or (time.time() - last_seen) > timeout_s:
+                if last_seen is None:
+                    waiting_for_first_fix = (
+                        self._final_target_request_pending
+                        or (time.time() - self._final_target_request_last_wall) <= timeout_s
+                    )
+                    if waiting_for_first_fix:
+                        self.stop()
+                        return
+
+                    self.stop()
+                    self.publish_status('FAILED')
+                    self._final_approach_enabled = False
+                    self.get_logger().warn(
+                        f'Final approach failed: no pose received yet for target {self._final_target_id}.'
+                    )
+                    return
+
+                if (time.time() - last_seen) > timeout_s:
                     self.stop()
                     self.publish_status('FAILED')
                     self._final_approach_enabled = False
