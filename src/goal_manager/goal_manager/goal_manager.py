@@ -198,7 +198,7 @@ class GoalManager(Node):
 
                 # Remove picked cube from list (best-effort) and clear current target
                 if self._target_ is not None:
-                    self.set_status() # set status of the current target to unavailable snce the pick up succeeded
+                    self.set_status(reason='cube_picked') # set status of the current target to unavailable snce the pick up succeeded
 
                 self._target_ = None
      
@@ -214,6 +214,9 @@ class GoalManager(Node):
             if msg.data == 'DROP_SUCCESS':
                 self.get_logger().info('Drop succeeded.')
 
+                # set status of the box to available again
+                if self._box_id is not None:
+                    self.set_status(reason='dropoff_at_box')
        
                 self._state = AutoState.BACKUP_AFTER_DROP
                 self.publish_backup_distance(0.15)
@@ -223,10 +226,14 @@ class GoalManager(Node):
             else:
                 self.get_logger().info(f'Arm result received while waiting for drop: {msg.data}')
 
-    def set_status(self):
-        req = SetStatus.Request()
-        req.obj_id = self._target_id
-        req.status = 'unavailable'  # we currently use this function to set the status of an object_id to unavailable after we picked it up
+    def set_status(self, reason):
+        req = SetStatus.Request() 
+        if reason == 'cube_picked':
+            req.obj_id = self._target_id
+            req.status = 'unavailable'  # after a dropoff succeeds we need to change the status to unavailable to not select it as goal again (and to not inflate it)
+        elif reason == 'dropoff_at_box':
+            req.obj_id = self._box_id
+            req.status = 'available'  # after a dropoff at box A, we have to set the status of box A back from 'isgoal' to 'available' in order to mark it as occupoied cells later in the global planner
         future = self.cli_set_status.call_async(req)
         # i think we dont need an done_callback here because we dont return anything...
 

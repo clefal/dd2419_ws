@@ -220,11 +220,6 @@ class GlobalPlannerNode(Node):
             obj_poses :List[ObjPose] = res.obj_poses
             self._cubes: List[Tuple[float, float]] = []   # in map frame
             for obj in obj_poses:
-                # if math.hypot(obj.obj_x - self.goal_x, obj.obj_y - self.goal_y) < 0.10:
-                #     # check if object from the list is close to the goal object, if so dont add it to the _cubes list
-                #     continue
-                if obj.obj_type == 'box': # boxes are not added to the cubes list, thus ther are not getting inflated, fix this in the future
-                    continue
                 self._cubes.append((obj.obj_x, obj.obj_y))
 
         except Exception as e:
