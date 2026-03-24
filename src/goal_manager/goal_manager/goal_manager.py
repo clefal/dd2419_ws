@@ -15,6 +15,8 @@ from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String, Float32, Bool
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetClosestBox
+
 
 from .exploration import RandomWaypointExplorer
 
@@ -40,20 +42,24 @@ class GoalManager(Node):
         self.manual_goal = False
         
         self._state = AutoState.IDLE
-        self._latest_cube = None
-        self._detection_locked = False
-        self._approach_distance = 0.17
 
-        self._merge_radius = 0.10  # m, deduplicate detections
-        self._cubes = []      # list of (x, y) in fixed frame
+        self._static_loaded = False
+
+    
         self._target_ = None   # (x, y) in fixed frame
         self._target_id = None
-        self._live_objects = {}  # object_id -> (x, y) in fixed frame
-        self._live_boxes = {}  # box_id -> (x, y, yaw) in fixed frame
         self._box_id = None
         self._box_pose = None  # (x, y, yaw) in fixed frame
-        self._pending_consumed_object_id = None
-        self._pending_consumed_deadline = None
+        self._start_x = 0.0
+        self._start_y = 0.0
+        self._start_yaw = 0.0
+
+
+        self._goals_available = False
+        self._pending_target_reason = None
+        self._pending_box_reason = None
+        self._pending_startup_check = False
+
 
 
         self._search_x = 1.0
@@ -75,30 +81,43 @@ class GoalManager(Node):
         self._goal_pub = self.create_publisher(PoseStamped, '/nav/goal', 10)
         self._goal_candidates_pub = self.create_publisher(PoseArray, '/nav/goal_candidates', 10)
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
-        self._cubes_pub = self.create_publisher(PoseArray, '/nav/objects/cubes', 10)
-        self._target_pub = self.create_publisher(PoseStamped, '/nav/target/cube', 10)
-        self._box_pub = self.create_publisher(PoseStamped, '/nav/box', 10)
         self._backup_pub = self.create_publisher(Float32, '/nav/backup_distance', 10)
         self._final_approach_enable_pub = self.create_publisher(Bool, '/nav/final_approach/enable', 10)
         self._final_approach_target_id_pub = self.create_publisher(String, '/nav/final_approach/target_id', 10)
-        self._object_consumed_pub = self.create_publisher(String, '/nav/object_consumed', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        self.create_subscription(String, 'detection/detection_manager/live_list', self.live_list_callback, 10)
         self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
         self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
+
+        self.cli_goals_available = self.create_client(GoalsAvailable, 'object_manager/goals_available')
+        while not self.cli_goals_available.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('goals_available service not available, waiting again...')
+
+        self.cli_get_closest_cube = self.create_client(GetClosestCube, 'object_manager/get_closest_cube')
+        while not self.cli_get_closest_cube.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_cube service not available, waiting again...')
+
+        self.cli_set_status = self.create_client(SetStatus, 'object_manager/set_status')
+        while not self.cli_set_status.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('set_status service not available, waiting again...')
+
+        self.cli_get_closest_box = self.create_client(GetClosestBox, 'object_manager/get_closest_box')
+        while not self.cli_get_closest_box.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_closest_box service not available, waiting again...')
+
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._initial_goal_dispatched = False
-        self._live_list_ready = False
+        self._startup_timer = self.create_timer(0.5, self.try_startup)
+    
 
         self._waiting_for_result = False
         self._first_goal_delay_done = False
-        self.create_timer(0.2, self.check_pending_consumed_object)
+    
 
         if self.manual_goal:
             thread = threading.Thread(target=self.manual_input_loop, daemon=True)
@@ -123,7 +142,6 @@ class GoalManager(Node):
             elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT_COARSE:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Coarse object approach reached. Starting final approach.')
-                    self._refresh_target_from_live_objects()
                     if not self.start_final_approach(self._target_id, AutoState.APPROACH_OBJECT_FINAL):
                         self._state = AutoState.SEARCH
                         self.publish_next_search_goal()
@@ -175,12 +193,17 @@ class GoalManager(Node):
             return
 
         if self._state == AutoState.WAIT_PICKUP_RESULT:
-            if msg.data == 'PICK_UP_SUCCESS':   #TODO this should be verified with arm camera later -> publish consumed objects
-                self.get_logger().info('Arm pickup succeeded. Waiting for consumed object to disappear from live_list.')
-                if self._target_id is not None:
-                    self.publish_object_consumed(self._target_id)
-                    self._pending_consumed_object_id = self._target_id
-                    self._pending_consumed_deadline = time.time() + 5.0
+            if msg.data == 'PICK_UP_SUCCESS':
+                self.get_logger().info('Arm pickup succeeded. Returning to box.')
+
+                # Remove picked cube from list (best-effort) and clear current target
+                if self._target_ is not None:
+                    self.set_status() # set status of the current target to unavailable snce the pick up succeeded
+
+                self._target_ = None
+     
+
+                self.request_box_goal_candidates(reason='pickup_success')
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
             else:
@@ -191,7 +214,7 @@ class GoalManager(Node):
             if msg.data == 'DROP_SUCCESS':
                 self.get_logger().info('Drop succeeded.')
 
-                self._detection_locked = False
+       
                 self._state = AutoState.BACKUP_AFTER_DROP
                 self.publish_backup_distance(0.15)
                 
@@ -200,148 +223,167 @@ class GoalManager(Node):
             else:
                 self.get_logger().info(f'Arm result received while waiting for drop: {msg.data}')
 
-    def live_list_callback(self, msg: String):
-        # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
-        parsed = self._parse_live_list(msg.data)
-        if parsed is None:
-            return
-        live_objects, live_boxes = parsed
+    def set_status(self):
+        req = SetStatus.Request()
+        req.obj_id = self._target_id
+        req.status = 'unavailable'  # we currently use this function to set the status of an object_id to unavailable after we picked it up
+        future = self.cli_set_status.call_async(req)
+        # i think we dont need an done_callback here because we dont return anything...
 
-        self._live_list_ready = True
-        self._live_objects = dict(live_objects)
-        self._update_box_from_live_list(live_boxes)
-        self._sync_cubes_from_live_objects()
-        self._refresh_target_from_live_objects()
-        self.publish_topics()
 
-        if self._pending_consumed_object_id is not None and self._pending_consumed_object_id not in self._live_objects:
-            self.finish_consumed_object_handshake()
 
-        if not self._initial_goal_dispatched and self._state == AutoState.INITIALIZATION:
-            self.dispatch_initial_goal_after_loading()
+
+    def request_new_target(self, reason: str = 'unspecified'):
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn(f'Cannot request new target ({reason}): robot pose unavailable.')
+            if reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
             return
 
+        self._pending_target_reason = reason
+        req = GoalsAvailable.Request()
+        future = self.cli_goals_available.call_async(req)
+        future.add_done_callback(self.goals_available_response_callback)
+
+
+    def goals_available_response_callback(self, future):
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'goals_available call failed: {e}')
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        self._goals_available = res.goals_available
+        self.get_logger().info(f'Goals available service returned: {res.goals_available}')
+
+        if not res.goals_available:
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn('Robot pose unavailable after goals_available response.')
+            return
+
+        req = GetClosestCube.Request()
+        req.robot_x = robot_xy[0]
+        req.robot_y = robot_xy[1]
+        future = self.cli_get_closest_cube.call_async(req)
+        future.add_done_callback(self.get_closest_cube_response_callback)
+
+    def get_closest_cube_response_callback(self, future):
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'get_closest_cube Service call failed: {e}')
+            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+                self._state = AutoState.SEARCH
+                self.publish_next_search_goal()
+            return
+
+        self._target_ = (res.obj_x, res.obj_y)
+        self._target_id = res.obj_id
+        self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
+
+        self._active_search_goal = None
+        self._state = AutoState.APPROACH_OBJECT_COARSE
+        self.publish_goal(res.obj_x, res.obj_y, 0.0)
+
+
+
+
+
+    def try_startup(self):
         if self.manual_goal:
             return
 
-        if self._state in (
-            AutoState.WAIT_PICKUP_RESULT,
-            AutoState.APPROACH_OBJECT_FINAL,
-            AutoState.RETURN_BOX_COARSE,
-            AutoState.RETURN_BOX_FINAL,
-            AutoState.WAIT_DROP_RESULT,
-        ):
+        if self._initial_goal_dispatched:
             return
 
-        if not self._live_list_ready or self._waiting_for_result:
+        if self._state != AutoState.INITIALIZATION:
             return
 
-        if self._state not in (AutoState.SEARCH, AutoState.INITIALIZATION):
+        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
+        if robot_pose is None:
+            self.get_logger().info('Startup waiting: robot pose not available yet.')
             return
 
-        best_id = self.select_closest_object_id()
-        if best_id is None:
+        self._start_x, self._start_y, self._start_yaw = robot_pose
+
+        if self._pending_startup_check:
             return
 
-        if self._target_id == best_id and self._target_ is not None:
-            return
+        self._pending_startup_check = True
+        req = GoalsAvailable.Request()
+        future = self.cli_goals_available.call_async(req)
+        future.add_done_callback(self.startup_goals_available_callback)
 
-        self._target_id = best_id
-        self._refresh_target_from_live_objects()
-        if self._target_ is None:
-            return
-
-        self.publish_topics()  # publish updated target immediately
-
-        tx, ty = self._target_
-        # Enter coarse approach state; final approach starts after the 1 m standoff is reached.
-        self._active_search_goal = None
-        self._state = AutoState.APPROACH_OBJECT_COARSE
-        self.get_logger().info(
-            f'Target object {self._target_id} at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
-        )
-        self.publish_goal(tx, ty, 0.0)
-
-    def _parse_live_list(self, payload: str):
-        if not payload.strip():
-            return ({}, {})
+    def startup_goals_available_callback(self, future):
+        self._pending_startup_check = False
 
         try:
-            data = json.loads(payload)
+            res = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Startup goals_available check failed: {e}')
+            return
+
+        self._goals_available = res.goals_available
+        self._static_loaded = True
+
+        if res.goals_available:
+            self.get_logger().info('Startup: object_manager is ready and goals are available.')
+            self.dispatch_initial_goal_after_loading()
+            return
+
+        self.get_logger().info('Startup: object_manager ready, but no goals yet. Starting search.')
+        self._initial_goal_dispatched = True
+        self._state = AutoState.SEARCH
+        self.publish_next_search_goal()
+
+    def lookup_xy_yaw(self, parent_frame: str, child_frame: str):
+        try:
+            t = self._tf_buffer.lookup_transform(parent_frame, child_frame, rclpy.time.Time())
         except Exception:
-            self.get_logger().warn('Failed to parse detection_manager live_list payload. Keeping previous objects.')
             return None
+        x = t.transform.translation.x
+        y = t.transform.translation.y
+        q = t.transform.rotation
+        yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        return (x, y, yaw)
+    
 
-        tracked = {}
-        boxes = {}
+    def load_robot_inital_pose(self):
+        if self._static_loaded:
+            return
+        #start pose (robot in map)
+        robot_pose = self.lookup_xy_yaw(self._fixed_frame, self._base_frame)
+        if robot_pose is not None:
+            self._start_x, self._start_y, self._start_yaw = robot_pose
+            self.get_logger().info(f'Loaded start pose (robot in map): x={self._start_x:.2f}, y={self._start_y:.2f}, yaw={self._start_yaw:.2f}')
 
-        if isinstance(data, dict) and 'objects' in data and isinstance(data['objects'], list):
-            iterable = data['objects']
-        elif isinstance(data, list):
-            iterable = data
-        elif isinstance(data, dict):
-            iterable = []
-            for object_id, item in data.items():
-                if isinstance(item, dict):
-                    entry = dict(item)
-                    entry['id'] = object_id
-                    iterable.append(entry)
-        else:
-            iterable = []
+        self._static_loaded = True
 
-        for item in iterable:
-            if not isinstance(item, dict):
-                continue
-            object_id = str(item.get('id', '')).strip()
-            if object_id == '':
-                continue
-            try:
-                x = float(item['x'])
-                y = float(item['y'])
-            except Exception:
-                continue
-            if object_id.startswith('box_'):
-                yaw = self._extract_box_yaw(item)
-                boxes[object_id] = (x, y, yaw)
-            else:
-                tracked[object_id] = (x, y)
+        # Startup gate: do not dispatch first nav goal until static workspace/map frames are loaded.
+        if (not self.manual_goal) and (not self._initial_goal_dispatched):
+            self.dispatch_initial_goal_after_loading()
 
-        return (tracked, boxes)
 
     def dispatch_initial_goal_after_loading(self):
         if self._initial_goal_dispatched:
             return
 
-        # Wait for detection_manager live_list before starting autonomy.
-        if not self._live_list_ready:
-            self.get_logger().info('Still waiting for detection_manager live_list during initialization.')
-            return
-
-        # If cubes are known, start with closest cube approach.
-        if len(self._cubes) > 0:
-            best_id = self.select_closest_object_id()
-            if best_id is not None:
-                self._target_id = best_id
-                self._refresh_target_from_live_objects()
-            robot_xy = self.get_robot_xy()
-            if robot_xy is not None and self._target_ is not None:
-                self.publish_topics()
-                tx, ty = self._target_
-                self._state = AutoState.APPROACH_OBJECT_COARSE
-                self.get_logger().info(
-                    f'Initial target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
-                )
-                self.publish_goal(tx, ty, 0.0)
-                self._initial_goal_dispatched = True
-                return
-            self.get_logger().warn('Cubes known at startup, but robot pose unavailable. Falling back to search.')
-
-        # No cubes known: begin exploration search.
-        self._state = AutoState.SEARCH
-        self.publish_next_search_goal()
-        self.get_logger().info('State SEARCH: starting random exploratory search after first live_list update.')
         self._initial_goal_dispatched = True
+        self.request_new_target(reason='startup')
 
+
+   
     def workspace_callback(self, msg: PolygonStamped):
         if msg.header.frame_id and msg.header.frame_id != self._fixed_frame:
             self.get_logger().warn(
@@ -365,49 +407,6 @@ class GoalManager(Node):
         self._explorer.set_planning_grid(msg)
 
 
-    def publish_topics(self):
-        # Publish cube list
-        pa = PoseArray()
-        pa.header.stamp = self.get_clock().now().to_msg()
-        pa.header.frame_id = self._fixed_frame
-        for (x, y) in self._cubes:
-            p = PoseStamped()
-            # PoseArray stores Pose, so create Pose then append
-            pose = PoseStamped().pose
-            pose.position.x = float(x)
-            pose.position.y = float(y)
-            pose.position.z = 0.0
-            pose.orientation.w = 1.0
-            pa.poses.append(pose)
-        self._cubes_pub.publish(pa)
-
-        # Publish current target cube pose (if any)
-        if self._target_ is not None:
-            tx, ty = self._target_
-            tgt = PoseStamped()
-            tgt.header.stamp = pa.header.stamp
-            tgt.header.frame_id = self._fixed_frame
-            tgt.pose.position.x = float(tx)
-            tgt.pose.position.y = float(ty)
-            tgt.pose.position.z = 0.0
-            tgt.pose.orientation.w = 1.0
-            self._target_pub.publish(tgt)
-
-        if self._box_pose is not None:
-            bx, by, byaw = self._box_pose
-            box_msg = PoseStamped()
-            box_msg.header.stamp = pa.header.stamp
-            box_msg.header.frame_id = self._fixed_frame
-            box_msg.pose.position.x = float(bx)
-            box_msg.pose.position.y = float(by)
-            box_msg.pose.position.z = 0.0
-            q = quaternion_from_euler(0.0, 0.0, byaw)
-            box_msg.pose.orientation.x = q[0]
-            box_msg.pose.orientation.y = q[1]
-            box_msg.pose.orientation.z = q[2]
-            box_msg.pose.orientation.w = q[3]
-            self._box_pub.publish(box_msg)
-    # ----------------------------
 
     def get_robot_xy(self):
         try:
@@ -417,66 +416,6 @@ class GoalManager(Node):
             return None
         return t.transform.translation.x, t.transform.translation.y
 
-    def select_closest_object_id(self):
-        object_candidates = [
-            (object_id, xy) for object_id, xy in self._live_objects.items()
-            if object_id.startswith('object_')
-        ]
-        if len(object_candidates) == 0:
-            return None
-
-        robot_xy = self.get_robot_xy()
-        if robot_xy is None:
-            return object_candidates[0][0]
-
-        rx, ry = robot_xy
-        best_id, _ = min(
-            object_candidates,
-            key=lambda item: math.hypot(item[1][0] - rx, item[1][1] - ry),
-        )
-        return best_id
-
-    def select_box_id(self):
-        box_candidates = sorted(self._live_boxes.keys()) if hasattr(self, '_live_boxes') else []
-        if len(box_candidates) == 0:
-            return None
-        return box_candidates[0]
-
-    def _refresh_target_from_live_objects(self):
-        if self._target_id is None:
-            self._target_ = None
-            return
-
-        self._target_ = self._live_objects.get(self._target_id)
-
-    def _sync_cubes_from_live_objects(self):
-        self._cubes = [
-            xy for object_id, xy in self._live_objects.items()
-            if object_id.startswith('object_')
-        ]
-
-    def _extract_box_yaw(self, item):
-        # TODO: align this with the exact detection_manager live_list box orientation fields once merged.
-        if 'yaw' in item:
-            return float(item['yaw'])
-        if 'theta' in item:
-            return float(item['theta'])
-        orientation = item.get('orientation')
-        if isinstance(orientation, dict):
-            if 'yaw' in orientation:
-                return float(orientation['yaw'])
-            if all(k in orientation for k in ('x', 'y', 'z', 'w')):
-                q = orientation
-                return euler_from_quaternion([q['x'], q['y'], q['z'], q['w']])[2]
-        return 0.0
-
-    def _update_box_from_live_list(self, live_boxes):
-        self._live_boxes = dict(live_boxes)
-        self._box_id = self.select_box_id()
-        if self._box_id is None:
-            self._box_pose = None
-            return
-        self._box_pose = self._live_boxes.get(self._box_id)
 
     def start_final_approach(self, target_id, next_state):
         if target_id is None:
@@ -544,16 +483,42 @@ class GoalManager(Node):
 
         self.get_logger().info(f'Goal sent: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}')
 
-    def publish_box_goal_candidates(self):
+    def request_box_goal_candidates(self, reason: str = 'return_box'):
+        robot_xy = self.get_robot_xy()
+        if robot_xy is None:
+            self.get_logger().warn(f'Cannot request closest box ({reason}): robot pose unavailable.')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
+
+        self._pending_box_reason = reason
+        req = GetClosestBox.Request()
+        req.robot_x = robot_xy[0]
+        req.robot_y = robot_xy[1]
+        future = self.cli_get_closest_box.call_async(req)
+        future.add_done_callback(self.get_closest_box_response_callback)
+
+    def get_closest_box_response_callback(self, future):
+        try:
+            res = future.result()
+        except Exception as e:
+            self.get_logger().error(f'get_closest_box service call failed: {e}')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
+
+        self._box_id = res.obj_id
+        self._box_pose = (res.obj_x, res.obj_y, res.obj_yaw)
+        self.get_logger().info(f'Closest box position received at: {self._box_pose}')
+
         if self._box_pose is None or self._box_id is None:
-            self.get_logger().warn('No live box pose available. Cannot publish box goal candidates.')
+            self.get_logger().warn('No live box pose available after service response.')
             self._state = AutoState.SEARCH
             self.publish_next_search_goal()
             return
 
         bx, by, byaw = self._box_pose
 
-        # Approach box from its two long sides (left/right in box local frame).
         axis_yaw = byaw + math.pi / 2.0
         ux = math.cos(axis_yaw)
         uy = math.sin(axis_yaw)
@@ -580,6 +545,7 @@ class GoalManager(Node):
             pose.orientation.w = q[3]
             pa.poses.append(pose)
 
+        self._state = AutoState.RETURN_BOX_COARSE
         self._goal_candidates_pub.publish(pa)
         self._waiting_for_result = True
         self.get_logger().info(
@@ -615,59 +581,11 @@ class GoalManager(Node):
         self._final_approach_target_id_pub.publish(msg)
         self.get_logger().info(f'Final approach target id sent: {object_id}')
 
-    def publish_object_consumed(self, object_id: str):
-        msg = String()
-        msg.data = object_id
-        self._object_consumed_pub.publish(msg)
-        self.get_logger().info(f'Object consumed feedback sent: {object_id}')
-
-    def finish_consumed_object_handshake(self):
-        self.get_logger().info('Consumed object removed from live_list. Proceeding to box return.')
-        self._pending_consumed_object_id = None
-        self._pending_consumed_deadline = None
-        self._target_ = None
-        self._target_id = None
-        self.publish_topics()
-
-        self._state = AutoState.RETURN_BOX_COARSE
-        self.publish_box_goal_candidates()
-
-    def check_pending_consumed_object(self):
-        if self._pending_consumed_object_id is None:
-            return
-
-        if self._pending_consumed_deadline is None:
-            return
-
-        if time.time() <= self._pending_consumed_deadline:
-            return
-
-        self.get_logger().warn(
-            f'Consumed object {self._pending_consumed_object_id} still present after timeout. Continuing anyway.'
-        )
-        self.finish_consumed_object_handshake()
-
+ 
     def _continue_after_drop(self):
         # If we still have cubes, go for the closest one; else go to SEARCH point
-        best_id = self.select_closest_object_id()
-        if best_id is not None:
-            self._target_id = best_id
-            self._refresh_target_from_live_objects()
-            if self._target_ is not None:
-                self.publish_topics()
 
-                tx, ty = self._target_
-                self._state = AutoState.APPROACH_OBJECT_COARSE
-                self.get_logger().info(
-                    f'Target object selected at x={tx:.2f}, y={ty:.2f}. Publishing coarse goal.'
-                )
-                self.publish_goal(tx, ty, 0.0)
-                return
-
-        # No cubes known: return to SEARCH
-        self._state = AutoState.SEARCH
-        self.publish_next_search_goal()
-        self.get_logger().info('State SEARCH: continuing exploratory patrol while detection runs.')
+        self.request_new_target(reason='after_drop')
 
     # ----------------------------
 

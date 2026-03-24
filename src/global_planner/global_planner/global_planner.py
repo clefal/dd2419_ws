@@ -11,7 +11,8 @@ from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
-
+from robp_interfaces.srv import GetAllObjects
+from robp_interfaces.msg import ObjPose
 
 GridIndex = Tuple[int, int]  # (gx, gy)
 
@@ -65,29 +66,15 @@ class GlobalPlannerNode(Node):
         )
 
         self.sub_map = self.create_subscription(OccupancyGrid, self.map_topic, self.on_map, map_qos)
-        self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10)
+        self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10) 
+        # TODO we could change this to a message type that includes x,y and obj_id of the goal, that could make the list update cleaner
         self.sub_goal_candidates = self.create_subscription(
             PoseArray, self.goal_candidates_topic, self.on_goal_candidates, 10
         )
-        self.sub_cubes = self.create_subscription(
-            PoseArray,
-            "/nav/objects/cubes",
-            self.on_cubes,
-            10,
-        )
 
-        self.sub_target_cube = self.create_subscription(
-            PoseStamped,
-            "/nav/target/cube",
-            self.on_target_cube,
-            10,
-        )
-        self.sub_box = self.create_subscription(
-            PoseStamped,
-            "/nav/box",
-            self.on_box,
-            10,
-        )
+        self.cli_get_all_objects = self.create_client(GetAllObjects, "/nav/objects/get_all_objects")
+        while not self.cli_get_all_objects.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_all_objects service not available, waiting again...')       
 
 
         path_qos = QoSProfile(
@@ -112,8 +99,6 @@ class GlobalPlannerNode(Node):
             planning_qos,
         )
 
-
-
         # TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
@@ -125,6 +110,8 @@ class GlobalPlannerNode(Node):
         self._cubes: List[Tuple[float, float]] = []   # in map frame
         self._target_object: Optional[Tuple[float, float]] = None
         self._box_xy: Optional[Tuple[float, float]] = None
+        self.goal_x = None  # initialize this with None, value will be assigned during first goal callback
+        self.goal_y = None
 
 
         self.get_logger().info(
@@ -151,24 +138,6 @@ class GlobalPlannerNode(Node):
         self._plan_and_publish_candidates(msg, reason="goal_candidates")
 
 
-    def on_cubes(self, msg: PoseArray) -> None:
-        self._cubes = [
-            (p.position.x, p.position.y)
-            for p in msg.poses
-        ]
-
-    def on_target_cube(self, msg: PoseStamped) -> None:
-        self._target_object = (
-            msg.pose.position.x,
-            msg.pose.position.y,
-        )
-
-    def on_box(self, msg: PoseStamped) -> None:
-        self._box_xy = (
-            msg.pose.position.x,
-            msg.pose.position.y,
-        )
-
     # -------------------------
     # Planning orchestration
     # -------------------------
@@ -180,12 +149,22 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("No goal yet; cannot plan.")
             return
 
+        # now call the GetAllObj Service and update the List accordingly 
+        # make sure to exclude the goal position from the Object List, otherwise we will black the goal out
+
+        # updateobject_list needs goal pose in the future callback that is why we need it as a global variable
+        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y) # moved up since it is needed for the Obj_List_update
+        self.goal_x = goal_xy[0]
+        self.goal_y = goal_xy[1]
+
+        self.update_object_list()
+
         start_xy = self._get_robot_xy_in_map()
         if start_xy is None:
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan.")
             return
+        
 
-        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
 
         start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
         goal_idx = self.world_to_grid(goal_xy[0], goal_xy[1], self._meta)
@@ -229,6 +208,28 @@ class GlobalPlannerNode(Node):
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
+    def update_object_list(self):
+        req = GetAllObjects.Request()
+        future = self.cli_get_all_objects.call_async(req)
+        future.add_done_callback(self.get_all_objects_callback)
+
+    def get_all_objects_callback(self, future):
+        
+        try:
+            res :GetAllObjects.Response = future.result()
+            obj_poses :List[ObjPose] = res.obj_poses
+            self._cubes: List[Tuple[float, float]] = []   # in map frame
+            for obj in obj_poses:
+                if math.hypot(obj.obj_x - self.goal_x, obj.obj_y - self.goal_y) < 0.10:
+                    # check if object from the list is close to the goal object, if so dont add it to the _cubes list
+                    continue
+                self._cubes.append((obj.obj_x, obj.obj_y))
+
+        except Exception as e:
+            self.get_logger().info(f'get_all_objects service call failed {e}')
+        
+        
+
     def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")
@@ -237,6 +238,16 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("Received empty goal candidate list.")
             self._publish_empty_path(reason="empty_goal_candidates")
             return
+        
+        goal_box_avg_x = (msg.poses[0].pose.position.x + msg.poses[1].pose.position.x)/2
+        goal_box_avg_y = (msg.poses[0].pose.position.y + msg.poses[1].pose.position.y)/2
+        # since we have 2 find the average value in order to make it work with the update_list function
+        
+        self.goal_x = goal_box_avg_x
+        self.goal_y = goal_box_avg_y
+
+        self.update_object_list()   
+
 
         frame = (msg.header.frame_id or "").strip()
         if frame not in ("", self.global_frame):
@@ -457,7 +468,7 @@ class GlobalPlannerNode(Node):
 
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
-        if include_box_lethal:
+        if include_box_lethal:  #TODO: expand to work with several boxes
             box_xy = self._get_box_xy_in_map()
             if box_xy is not None:
                 box_size = self.get_parameter("box_size").get_parameter_value().double_value

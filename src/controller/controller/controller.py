@@ -3,7 +3,7 @@
 import json
 import math
 import time
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 import rclpy
 from rclpy.node import Node
 
@@ -12,6 +12,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 from std_msgs.msg import String, Bool, Float32
 from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
+from robp_interfaces.srv import GetPosOfObj
 
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion
@@ -52,7 +53,7 @@ class Controller(Node):
         self.create_subscription(Float32, '/nav/backup_distance', self.backup_callback, 10)
         self.create_subscription(Bool, '/nav/final_approach/enable', self.final_approach_enable_callback, 10)
         self.create_subscription(String, '/nav/final_approach/target_id', self.final_approach_target_id_callback, 10)
-        self.create_subscription(String, 'detection/detection_manager/live_list', self.live_list_callback, 10)
+
 
     
         # TF: map -> base_link
@@ -68,8 +69,15 @@ class Controller(Node):
 
         self._final_approach_enabled = False
         self._final_target_id = None
-        self._tracked_objects: Dict[str, Tuple[float, float]] = {}
+        self._final_target_xy: Optional[Tuple[float, float]] = None
         self._final_target_last_seen_wall: Optional[float] = None
+        self._final_target_request_pending = False
+        self._final_target_request_period = 0.1
+        self._final_target_request_last_wall = 0.0
+
+        self.cli_get_pos_of_obj = self.create_client(GetPosOfObj, 'object_manager/get_pos_of_obj')
+        while not self.cli_get_pos_of_obj.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.3)        # m
@@ -224,67 +232,63 @@ class Controller(Node):
         if self._final_approach_enabled:
             self._path_xy = []
             self._goal_yaw = None
+            self._final_target_xy = None
+            self._final_target_last_seen_wall = None
+            self._final_target_request_pending = False
             self.publish_status('RUNNING')
             self.get_logger().info('Final approach enabled.')
         else:
             self.stop()
+            self._final_target_request_pending = False
             self.get_logger().info('Final approach disabled.')
 
     def final_approach_target_id_callback(self, msg: String):
         target_id = msg.data.strip()
-        self._final_target_id = target_id or None
+        if not target_id:
+            self._final_target_id = None
+        else:
+            try:
+                self._final_target_id = int(target_id)
+            except ValueError:
+                self._final_target_id = None
+                self.get_logger().warn(f'Invalid final approach target id received: "{target_id}"')
+                return
+
+        self._final_target_xy = None
+        self._final_target_last_seen_wall = None
+        self._final_target_request_pending = False
         self.get_logger().info(f'Final approach target id set to: {self._final_target_id}')
 
-    def live_list_callback(self, msg: String):
-        # TODO: replace std_msgs/String with the detection_manager live_list message once it lands.
-        tracked = self._parse_live_list(msg.data)
-        if tracked is None:
+    def request_final_target_pose(self) -> None:
+        if self._final_target_id is None or self._final_target_request_pending:
             return
 
-        self._tracked_objects = tracked
-        if self._final_target_id is not None and self._final_target_id in self._tracked_objects:
-            self._final_target_last_seen_wall = time.time()
+        now = time.time()
+        if (now - self._final_target_request_last_wall) < self._final_target_request_period:
+            return
 
-    def _parse_live_list(self, payload: str) -> Optional[Dict[str, Tuple[float, float]]]:
-        if not payload.strip():
-            return {}
+        req = GetPosOfObj.Request()
+        req.obj_id = int(self._final_target_id)
 
+        self._final_target_request_pending = True
+        self._final_target_request_last_wall = now
+        future = self._get_pos_of_obj_client.call_async(req)
+        future.add_done_callback(self.final_target_pose_response_callback)
+
+    def final_target_pose_response_callback(self, future) -> None:
+        self._final_target_request_pending = False
         try:
-            data = json.loads(payload)
-        except Exception:
-            self.get_logger().warn('Failed to parse detection_manager live_list payload. Keeping previous tracked objects.')
-            return None
+            res = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'Failed to refresh pose for final target {self._final_target_id}: {exc}'
+            )
+            return
 
-        tracked: Dict[str, Tuple[float, float]] = {}
+        self._final_target_xy = (res.obj_x, res.obj_y)
+        self._final_target_last_seen_wall = time.time()
 
-        if isinstance(data, dict) and 'objects' in data and isinstance(data['objects'], list):
-            iterable = data['objects']
-        elif isinstance(data, list):
-            iterable = data
-        elif isinstance(data, dict):
-            iterable = []
-            for object_id, item in data.items():
-                if isinstance(item, dict):
-                    entry = dict(item)
-                    entry['id'] = object_id
-                    iterable.append(entry)
-        else:
-            iterable = []
 
-        for item in iterable:
-            if not isinstance(item, dict):
-                continue
-            object_id = str(item.get('id', '')).strip()
-            if object_id == '':
-                continue
-            try:
-                x = float(item['x'])
-                y = float(item['y'])
-            except Exception:
-                continue
-            tracked[object_id] = (x, y)
-
-        return tracked
 
     # ----------------------------
 
@@ -376,10 +380,10 @@ class Controller(Node):
                 self.stop()
                 return
 
-            target_xy = self._tracked_objects.get(self._final_target_id)
-            if target_xy is not None:
-                self._final_target_last_seen_wall = time.time()
-            else:
+            self.request_final_target_pose()
+
+            target_xy = self._final_target_xy
+            if target_xy is None:
                 timeout_s = float(self.get_parameter('final_target_timeout').value)
                 last_seen = self._final_target_last_seen_wall
                 if last_seen is None or (time.time() - last_seen) > timeout_s:
