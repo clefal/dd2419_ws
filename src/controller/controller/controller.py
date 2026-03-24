@@ -503,7 +503,7 @@ class Controller(Node):
 
 
         # Slow down in curves (simple, stable indoors)
-        v_curve = v_nom / (1.0 + 4.0 * abs(kappa))
+        v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
         v_curve = clamp(v_curve, 0.0, v_nom)
 
         # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
