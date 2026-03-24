@@ -112,6 +112,8 @@ class GlobalPlannerNode(Node):
         self._box_xy: Optional[Tuple[float, float]] = None
         self.goal_x = None  # initialize this with None, value will be assigned during first goal callback
         self.goal_y = None
+        self._pending_plan_mode: Optional[str] = None
+        self._pending_goal_candidates: Optional[PoseArray] = None
 
 
         self.get_logger().info(
@@ -156,15 +158,71 @@ class GlobalPlannerNode(Node):
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y) # moved up since it is needed for the Obj_List_update
         self.goal_x = goal_xy[0]
         self.goal_y = goal_xy[1]
+        self._pending_plan_mode = "single"
 
         self.update_object_list()
+        return
+
+    def update_object_list(self):
+        req = GetAllObjects.Request()
+        future = self.cli_get_all_objects.call_async(req)
+        future.add_done_callback(self.get_all_objects_callback)
+
+    def get_all_objects_callback(self, future):
+        
+        try:
+            res :GetAllObjects.Response = future.result()
+            obj_poses :List[ObjPose] = res.obj_poses
+            self._cubes: List[Tuple[float, float]] = []   # in map frame
+            for obj in obj_poses:
+                self._cubes.append((obj.obj_x, obj.obj_y))
+
+            if self._pending_plan_mode == "single":
+                self._continue_plan_and_publish(reason="new_goal")
+            elif self._pending_plan_mode == "candidates":
+                self._continue_plan_and_publish_candidates(reason="goal_candidates")
+
+        except Exception as e:
+            self.get_logger().info(f'get_all_objects service call failed {e}')
+        
+        
+
+    def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
+        if self._map is None or self._meta is None:
+            self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if len(msg.poses) == 0:
+            self.get_logger().warn("Received empty goal candidate list.")
+            self._publish_empty_path(reason="empty_goal_candidates")
+            return
+    
+        goal_box_avg_x = (msg.poses[0].position.x + msg.poses[1].position.x)/2
+        goal_box_avg_y = (msg.poses[0].position.y + msg.poses[1].position.y)/2
+        # since we have 2 find the average value in order to make it work with the update_list function
+        
+        self.goal_x = goal_box_avg_x
+        self.goal_y = goal_box_avg_y
+        self._pending_goal_candidates = msg
+        self._pending_plan_mode = "candidates"
+
+        self.update_object_list()   
+        return
+
+    def _continue_plan_and_publish(self, reason: str) -> None:
+        if self._map is None or self._meta is None:
+            self.get_logger().warn("No map yet; cannot plan.")
+            return
+        if self._goal_msg is None:
+            self.get_logger().warn("No goal yet; cannot plan.")
+            return
+
+        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
+        self._pending_plan_mode = None
 
         start_xy = self._get_robot_xy_in_map()
         if start_xy is None:
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan.")
             return
-        
-
 
         start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
         goal_idx = self.world_to_grid(goal_xy[0], goal_xy[1], self._meta)
@@ -208,43 +266,21 @@ class GlobalPlannerNode(Node):
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
-    def update_object_list(self):
-        req = GetAllObjects.Request()
-        future = self.cli_get_all_objects.call_async(req)
-        future.add_done_callback(self.get_all_objects_callback)
+    def _continue_plan_and_publish_candidates(self, reason: str) -> None:
+        msg = self._pending_goal_candidates
+        self._pending_plan_mode = None
+        self._pending_goal_candidates = None
 
-    def get_all_objects_callback(self, future):
-        
-        try:
-            res :GetAllObjects.Response = future.result()
-            obj_poses :List[ObjPose] = res.obj_poses
-            self._cubes: List[Tuple[float, float]] = []   # in map frame
-            for obj in obj_poses:
-                self._cubes.append((obj.obj_x, obj.obj_y))
-
-        except Exception as e:
-            self.get_logger().info(f'get_all_objects service call failed {e}')
-        
-        
-
-    def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if msg is None:
+            self.get_logger().warn("No goal candidates yet; cannot plan candidate goals.")
             return
         if len(msg.poses) == 0:
             self.get_logger().warn("Received empty goal candidate list.")
             self._publish_empty_path(reason="empty_goal_candidates")
             return
-    
-        goal_box_avg_x = (msg.poses[0].position.x + msg.poses[1].position.x)/2
-        goal_box_avg_y = (msg.poses[0].position.y + msg.poses[1].position.y)/2
-        # since we have 2 find the average value in order to make it work with the update_list function
-        
-        self.goal_x = goal_box_avg_x
-        self.goal_y = goal_box_avg_y
-
-        self.update_object_list()   
-
 
         frame = (msg.header.frame_id or "").strip()
         if frame not in ("", self.global_frame):
