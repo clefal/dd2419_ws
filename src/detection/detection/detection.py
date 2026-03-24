@@ -498,7 +498,7 @@ class Detection(Node):
         msg.point.z = centroid[2]
 
         if self.is_close_to_obstacle(centroid[0],centroid[1]):
-            self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
+            # self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
             return
         # else:
             # self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
