@@ -485,6 +485,7 @@ class Controller(Node):
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
+            self.get_logger().debug('Coarse turn-in-place active.')
             wmax = float(self.get_parameter('max_angular_speed').value)
             k_turn = float(self.get_parameter('turn_gain').value)
             w = clamp(k_turn * yaw_err, -wmax, wmax)
