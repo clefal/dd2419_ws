@@ -199,6 +199,20 @@ class Arm_control(Node):
         print(s1, s2, s3)
         return s1, s2, s3 
 
+    def calc_rho_min(self, angle_5):
+        rho_min = 160 / math.cos(abs(120 - angle_5))
+        return rho_min
+
+    def calc_rotation(self, x, y):
+        #signs of rotation may be incorrect 
+        #x and y are distance from arm center
+        new_angle = math.degrees(math.acos( x / y ))
+        new_servo_angle = 120 - new_angle
+        return new_angle, new_servo_angle
+    
+    def calc_new_rho(self, rotation, x, y):
+        pass
+
     """Update self.time to match angle delta"""
     def set_time(self):
         self.time = []
@@ -377,12 +391,12 @@ class Arm_control(Node):
 def main():
     rclpy.init()
     node = Arm_control()
-    test_pick_up_min_range(node)
-    #test_pick_up_max_range(node)
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+    #test_pick_up_min_range(node)
+    test_pick_up_max_range(node)
+    # try:
+    #     rclpy.spin(node)
+    # except KeyboardInterrupt:
+    #     pass
     rclpy.shutdown()
 
 def test_pick_up_min_range(node):
