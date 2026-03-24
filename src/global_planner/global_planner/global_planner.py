@@ -238,9 +238,9 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("Received empty goal candidate list.")
             self._publish_empty_path(reason="empty_goal_candidates")
             return
-        
-        goal_box_avg_x = (msg.poses[0].pose.position.x + msg.poses[1].pose.position.x)/2
-        goal_box_avg_y = (msg.poses[0].pose.position.y + msg.poses[1].pose.position.y)/2
+    
+        goal_box_avg_x = (msg.poses[0].position.x + msg.poses[1].pose.position.x)/2
+        goal_box_avg_y = (msg.poses[0].position.y + msg.poses[1].pose.position.y)/2
         # since we have 2 find the average value in order to make it work with the update_list function
         
         self.goal_x = goal_box_avg_x
