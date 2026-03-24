@@ -256,10 +256,16 @@ class ObjectManager(Node):
     def get_closest_cube_callback(self,req, res):
 
         closest_obj_id = None
+        closest_obj_x = 0.0
+        closest_obj_y = 0.0
+        closest_obj_yaw = 0.0
         for obj in self.object_list:
             if obj.status == 'available' and obj.type != 'box':
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
+                    closest_obj_x = obj.last_x
+                    closest_obj_y = obj.last_y
+                    closest_obj_yaw = obj.last_yaw
                     closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
                 if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
                     closest_obj_id = obj.id
@@ -278,10 +284,16 @@ class ObjectManager(Node):
     def get_closest_box_callback(self,req, res):
 
         closest_obj_id = None
+        closest_obj_x = 0.0
+        closest_obj_y = 0.0
+        closest_obj_yaw = 0.0
         for obj in self.object_list:
             if obj.status == 'available' and obj.type == 'box':
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
+                    closest_obj_x = obj.last_x
+                    closest_obj_y = obj.last_y
+                    closest_obj_yaw = obj.last_yaw
                     closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
                 if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
                     closest_obj_id = obj.id
@@ -352,4 +364,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

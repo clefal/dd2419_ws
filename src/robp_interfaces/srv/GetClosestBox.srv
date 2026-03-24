@@ -5,3 +5,4 @@ int64 obj_id
 # should return the latest known position of the object
 float64 obj_x 
 float64 obj_y
+float64 obj_yaw
