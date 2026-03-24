@@ -106,7 +106,7 @@ class Controller(Node):
         self._dc_min = 0.08
 
         # When to turn in place to reacquire path direction
-        self._turn_in_place_yaw_thresh = 0.6  # rad
+        self._turn_in_place_yaw_thresh = 0.4  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
