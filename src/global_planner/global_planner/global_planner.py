@@ -43,7 +43,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
-        self.declare_parameter("coarse_object_standoff", 1.0)
+        self.declare_parameter("coarse_object_standoff", 0.5)
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
