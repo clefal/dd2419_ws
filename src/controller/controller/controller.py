@@ -85,7 +85,7 @@ class Controller(Node):
         self.declare_parameter('max_angular_speed', 0.3)        # 0.2 duty-equivalent
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.4)
+        self.declare_parameter('steering_gain', 0.2)
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
@@ -503,7 +503,7 @@ class Controller(Node):
 
 
         # Slow down in curves (simple, stable indoors)
-        v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = v_nom / (1.0 + 2.0 * abs(kappa))
         v_curve = clamp(v_curve, 0.0, v_nom)
 
         # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
@@ -521,7 +521,6 @@ class Controller(Node):
 
         # Steering
         w = k_steer * kappa
-        #w = k_steer * v * kappa
         w = clamp(w, -wmax, wmax)
 
         # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
