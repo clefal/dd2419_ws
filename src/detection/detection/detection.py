@@ -274,8 +274,8 @@ class Detection(Node):
                 msg_wood = pc2.create_cloud(centroid_header, fields, all_wood_points)
                 self._pub.publish(msg_wood)
 
-                for centroid in wood_centroids:    
-                    self.publish_detection(centroid, centroid_header, 'wood')
+                #for centroid in wood_centroids:    
+                    # self.publish_detection(centroid, centroid_header, 'wood')
                     
                 del self.point_buffers['wood'][0] # after publishing clear oldes points of the buffer
                         
