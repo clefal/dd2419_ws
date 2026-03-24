@@ -280,8 +280,8 @@ class Arm_control(Node):
         self.new_position[4] = HOLDING_P4
         self.publish_arm_control()
 
-        self.new_position[2] = IDLE_P2
-        self.new_position[3] = IDLE_P3
+        self.new_position[2] = HOLDING_P2
+        self.new_position[3] = HOLDING_P3
         self.publish_arm_control()
 
     """When arm in holding position without holding cube, open gripper and return to Idle"""
@@ -344,7 +344,6 @@ class Arm_control(Node):
         else:
             self.publish_res("START_FAIL")
 
-
     def initialize_pickup_process(self):
         if self.state == "idle":
             if self.is_box_in_pickup_range():
@@ -378,16 +377,29 @@ class Arm_control(Node):
 def main():
     rclpy.init()
     node = Arm_control()
+    test_pick_up_min_range(node)
+    #test_pick_up_max_range(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    rclpy.shutdown()
+
+def test_pick_up_min_range(node):
+    node.send_msg_initalize_position()
+    node.send_msg_idle_to_detect()
+    p4, p3, p2 = node.calc_arm_angles(MIN_RHO, Z)
+    node.new_position[2:5] = [p2, p3, p4]
+    node.publish_arm_control()
+    node.pick_up_object()
+    
+def test_pick_up_max_range(node):
     node.send_msg_initalize_position()
     node.send_msg_idle_to_detect()
     p4, p3, p2 = node.calc_arm_angles(MAX_RHO, Z)
     node.new_position[2:5] = [p2, p3, p4]
     node.publish_arm_control()
-    # try:
-    #     rclpy.spin(node)
-    # except KeyboardInterrupt:
-    #     pass
-    # rclpy.shutdown()
+    node.pick_up_object()
 
 if __name__ == '__main__':
     main()
