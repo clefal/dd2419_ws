@@ -81,11 +81,11 @@ class Controller(Node):
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.3)        # m
-        self.declare_parameter('nominal_linear_speed', 0.5)     # 0.35 duty-equivalent
-        self.declare_parameter('max_angular_speed', 0.25)        # 0.2 duty-equivalent
+        self.declare_parameter('nominal_linear_speed', 0.7)     # 0.35 duty-equivalent
+        self.declare_parameter('max_angular_speed', 0.3)        # 0.2 duty-equivalent
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.3)
+        self.declare_parameter('steering_gain', 0.4)
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
@@ -106,7 +106,7 @@ class Controller(Node):
         self._dc_min = 0.08
 
         # When to turn in place to reacquire path direction
-        self._turn_in_place_yaw_thresh = 0.75  # rad
+        self._turn_in_place_yaw_thresh = 0.6  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
