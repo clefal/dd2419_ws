@@ -72,7 +72,7 @@ class GlobalPlannerNode(Node):
             PoseArray, self.goal_candidates_topic, self.on_goal_candidates, 10
         )
 
-        self.cli_get_all_objects = self.create_client(GetAllObjects, "/nav/objects/get_all_objects")
+        self.cli_get_all_objects = self.create_client(GetAllObjects, '/object_manager/get_all_objects')
         while not self.cli_get_all_objects.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('get_all_objects service not available, waiting again...')       
 
@@ -95,7 +95,7 @@ class GlobalPlannerNode(Node):
 
         self.pub_planning_grid = self.create_publisher(
             OccupancyGrid,
-            "/nav/planning_grid",
+            '/nav/planning_grid',
             planning_qos,
         )
 
