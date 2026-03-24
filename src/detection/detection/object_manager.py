@@ -323,7 +323,7 @@ class ObjectManager(Node):
 
     def set_status_callback(self, req, res):
         obj_id, status = req.obj_id, req.status
-
+        self.get_logger().info(f'status of object {req.obj_id} will now be set to {req.status} ')
         for obj in self.object_list:
             if obj.id == obj_id:
                 obj.status = status
@@ -336,7 +336,7 @@ class ObjectManager(Node):
         '''returns a list of all available objects (box and cubes)'''
         obj_pose_list = []
         for obj in self.object_list:
-            if obj.status == 'available':
+            if obj.status == 'available':   # we give the global planner all objects that are not the goal and that are not already picked up
                 obj_pose = ObjPose()
                 obj_pose.obj_id = obj.id
                 obj_pose.obj_type = obj.type
