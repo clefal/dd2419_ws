@@ -12,7 +12,7 @@ from rclpy.node import Node
 
 from geometry_msgs.msg import PoseStamped, PoseArray, PolygonStamped
 from nav_msgs.msg import OccupancyGrid
-from std_msgs.msg import String, Float32, Bool
+from std_msgs.msg import String, Float32, Bool, Int64
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
 from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetClosestBox
@@ -83,7 +83,7 @@ class GoalManager(Node):
         self._arm_status_pub = self.create_publisher(String, '/arm/action', 10)
         self._backup_pub = self.create_publisher(Float32, '/nav/backup_distance', 10)
         self._final_approach_enable_pub = self.create_publisher(Bool, '/nav/final_approach/enable', 10)
-        self._final_approach_target_id_pub = self.create_publisher(String, '/nav/final_approach/target_id', 10)
+        self._final_approach_target_id_pub = self.create_publisher(Int64, '/nav/final_approach/target_id', 10)
 
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
@@ -561,9 +561,9 @@ class GoalManager(Node):
         self._final_approach_enable_pub.publish(msg)
         self.get_logger().info(f'Final approach enable sent: {enabled}')
 
-    def publish_final_approach_target_id(self, object_id: str):
-        msg = String()
-        msg.data = object_id
+    def publish_final_approach_target_id(self, object_id):
+        msg = Int64()
+        msg.data = int(object_id)
         self._final_approach_target_id_pub.publish(msg)
         self.get_logger().info(f'Final approach target id sent: {object_id}')
 

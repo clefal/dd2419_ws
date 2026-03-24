@@ -9,7 +9,7 @@ from rclpy.node import Node
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
-from std_msgs.msg import String, Bool, Float32
+from std_msgs.msg import String, Bool, Float32, Int64
 from nav_msgs.msg import Path
 from robp_interfaces.msg import DutyCycles
 from robp_interfaces.srv import GetPosOfObj
@@ -52,7 +52,7 @@ class Controller(Node):
         self.create_subscription(Path, '/nav/global_path', self.path_callback, path_qos)
         self.create_subscription(Float32, '/nav/backup_distance', self.backup_callback, 10)
         self.create_subscription(Bool, '/nav/final_approach/enable', self.final_approach_enable_callback, 10)
-        self.create_subscription(String, '/nav/final_approach/target_id', self.final_approach_target_id_callback, 10)
+        self.create_subscription(Int64, '/nav/final_approach/target_id', self.final_approach_target_id_callback, 10)
 
 
     
@@ -242,18 +242,8 @@ class Controller(Node):
             self._final_target_request_pending = False
             self.get_logger().info('Final approach disabled.')
 
-    def final_approach_target_id_callback(self, msg: String):
-        target_id = msg.data.strip()
-        if not target_id:
-            self._final_target_id = None
-        else:
-            try:
-                self._final_target_id = int(target_id)
-            except ValueError:
-                self._final_target_id = None
-                self.get_logger().warn(f'Invalid final approach target id received: "{target_id}"')
-                return
-
+    def final_approach_target_id_callback(self, msg: Int64):
+        self._final_target_id = int(msg.data)
         self._final_target_xy = None
         self._final_target_last_seen_wall = None
         self._final_target_request_pending = False
