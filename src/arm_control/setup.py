@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arm_control = arm_control.arm_control:main'
+            'arm_control = arm_control.arm_control:main',
+            'arm_vision = arm_control.arm_vision:main',
         ],
     },
 )
