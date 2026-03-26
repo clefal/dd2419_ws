@@ -147,6 +147,8 @@ class Arm_control(Node):
 
     def drop_object(self):
         if (self.holding_object):
+            self.send_msg_lower_arm()
+            time.sleep(3.0)
             self.send_msg_open_grip()
             self.holding_object = False
             self.send_msg_start_position()
