@@ -91,7 +91,7 @@ class Controller(Node):
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.2)                 # duty-per-rad for in-place turning
-        self.declare_parameter('control_period', 0.1)           # s (0.05=20Hz, 0.1=10Hz)
+        self.declare_parameter('control_period', 0.05)           # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
 
         self.declare_parameter('final_nominal_speed', 0.1)                # duty-equivalent for close approach
@@ -106,7 +106,7 @@ class Controller(Node):
         self._dc_min = 0.08
 
         # When to turn in place to reacquire path direction
-        self._turn_in_place_yaw_thresh = 0.4  # rad
+        self._turn_in_place_yaw_thresh = 0.2  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
