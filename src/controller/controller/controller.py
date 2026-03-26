@@ -82,11 +82,11 @@ class Controller(Node):
 
         # Parameters
         self.declare_parameter('lookahead_distance', 0.15)        # m
-        self.declare_parameter('nominal_linear_speed', 0.45)    # default slower for path tracking
-        self.declare_parameter('max_angular_speed', 0.2)        # cap turning a bit more conservatively
+        self.declare_parameter('nominal_linear_speed', 0.35)    # default slower for path tracking
+        self.declare_parameter('max_angular_speed', 0.1)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.35) #0.35
+        self.declare_parameter('steering_gain', 0.15) #0.35
 
 
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
