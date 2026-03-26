@@ -100,7 +100,7 @@ class Controller(Node):
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
         self.declare_parameter('final_stop_distance', 0.17)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
-
+        self.declare_parameter('final_lateral_offset', 0.01)   
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
@@ -116,6 +116,7 @@ class Controller(Node):
         self._timer = self.create_timer(period, self.control_tick)
         self._last_left_cmd = 0.0
         self._last_right_cmd = 0.0
+        self._was_turning_in_place = False
         
         self._backup_active = False
         self._backup_target_m = 0.0
@@ -310,6 +311,26 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
+
+    def _apply_final_lateral_offset(
+        self,
+        robot_pose: Tuple[float, float, float],
+        target_xy: Tuple[float, float],
+    ) -> Tuple[float, float]:
+        offset = float(self.get_parameter('final_lateral_offset').value)
+        if abs(offset) <= 1e-6:
+            return target_xy
+
+        rx, ry, _ = robot_pose
+        tx, ty = target_xy
+        heading = math.atan2(ty - ry, tx - rx)
+
+        # Positive offset means shift the target to the robot's left relative to
+        # the current approach direction. Negative shifts it to the right.
+        nx = -math.sin(heading)
+        ny = math.cos(heading)
+        return tx + offset * nx, ty + offset * ny
+
     def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
         Affine deadzone remap:
@@ -411,7 +432,10 @@ class Controller(Node):
                 turn_in_place_yaw_thresh=float(self.get_parameter('final_turn_in_place_yaw_thresh').value),
                 stop_distance=float(self.get_parameter('final_stop_distance').value),
             )
-            command = self._final_controller.compute_command(pose, target_xy)
+           
+            adjusted_target_xy = self._apply_final_lateral_offset(pose, target_xy)
+            command = self._final_controller.compute_command(pose, adjusted_target_xy)
+
             if command.reached:
                 self.stop()
                 self.publish_status('REACHED')
@@ -442,6 +466,7 @@ class Controller(Node):
         dist_to_goal = math.hypot(gx - rx, gy - ry)
 
         if dist_to_goal <= goal_tol:
+            self._was_turning_in_place = False
             if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
                 yaw_err = wrap_angle(self._goal_yaw - ryaw)
                 if abs(yaw_err) <= self._yaw_tol:
@@ -468,6 +493,7 @@ class Controller(Node):
         lookahead = max(0.05, lookahead)
         tgt = self._lookahead_point(rx, ry, lookahead)
         if tgt is None:
+            self._was_turning_in_place = False
             self.stop()
             return
 
@@ -485,7 +511,9 @@ class Controller(Node):
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
         if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
-            self.get_logger().debug('Coarse turn-in-place active.')
+            if not self._was_turning_in_place:
+                self.get_logger().info('Entering turn-in-place.')
+            self._was_turning_in_place = True
             wmax = float(self.get_parameter('max_angular_speed').value)
             k_turn = float(self.get_parameter('turn_gain').value)
             w = clamp(k_turn * yaw_err, -wmax, wmax)
@@ -493,6 +521,7 @@ class Controller(Node):
             left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
             self.send_duty(left, right)
             return
+        self._was_turning_in_place = False
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
         kappa = (2.0 * y_r) / (lookahead * lookahead)
