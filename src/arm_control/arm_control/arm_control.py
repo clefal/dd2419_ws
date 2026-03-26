@@ -25,6 +25,7 @@ class Arm_control(Node):
     def send_msg_start_position(self):
         msg = ArmControl()
         msg.position[0] = 10
+        msg.position[1] = 60
         msg.position[2] = 170
         msg.position[3] = 220
         msg.position[4] = 180
@@ -34,6 +35,7 @@ class Arm_control(Node):
 
         msg = ArmControl()
         msg.position[0] = 10
+        msg.position[1] = 90
         msg.position[2] = 170
         msg.position[3] = 210
         msg.position[4] = 120
