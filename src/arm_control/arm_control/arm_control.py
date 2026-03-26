@@ -20,9 +20,9 @@ from arm_control.arm_kinematics import planar_to_joint_target
 from arm_control.arm_kinematics import rho_midpoint
 
 
-MS_PER_DEGREE = 60
-MIN_TIME_MS = 200
-MAX_TIME_MS = 3000
+MS_PER_DEGREE = 120
+MIN_TIME_MS = 3000
+MAX_TIME_MS = 6000
 
 OPEN_GRIPPER_ANGLE = 10.0
 CLOSED_GRIPPER_ANGLE = 100.0
@@ -300,7 +300,7 @@ class ArmControlNode(Node):
         self.control_pub.publish(msg)
 
         self.position = self.new_position.copy()
-        max_move_time_ms = max(msg.time) if msg.time else MIN_TIME_MS
+        max_move_time_ms = max(msg.time) if len(msg.time) > 0 else MIN_TIME_MS
         self.motion_complete_time = self.get_clock().now() + Duration(seconds=max_move_time_ms / 1000.0)
 
         if new_state is not None:
