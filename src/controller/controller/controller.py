@@ -87,6 +87,7 @@ class Controller(Node):
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.75) #0.35
+        self.declare_parameter('heading_error_gain', 0.6)          # extra yaw-error correction during path tracking
 
 
         self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
@@ -576,8 +577,9 @@ class Controller(Node):
         v = min(v_curve, v_goal)
         v = clamp(v, 0.0, v_nom)
 
-        # Steering
-        w = k_steer * kappa
+        # Steering: pure pursuit curvature plus direct heading-error correction
+        k_heading = float(self.get_parameter('heading_error_gain').value)
+        w = k_steer * kappa + k_heading * yaw_err
         w = clamp(w, -wmax, wmax)
 
         # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
