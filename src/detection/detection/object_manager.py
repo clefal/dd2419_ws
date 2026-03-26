@@ -127,6 +127,12 @@ class ObjectManager(Node):
         # self.get_logger().info(f'Publishing {len(self.object_list)} objects')
         parent_frame = self._fixed_frame
         for obj in self.object_list:
+            
+            if obj.type == 'box':
+                frame_name = self._box_frame 
+            else:
+                frame_name = f'{self._object_frame_prefix}{obj.id}'
+
             frame_name = f'{self._object_frame_prefix}{obj.id}'
             t = TransformStamped()
             t.header.stamp = self.get_clock().now().to_msg()    # maybe change this and actually take the timestamp from when the objects were published for that we need to save the stamp in the object list
