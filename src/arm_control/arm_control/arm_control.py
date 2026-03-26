@@ -456,8 +456,7 @@ class Arm_control(Node):
 def main():
     rclpy.init()
     node = Arm_control()
-    node.initialize()
-    #test_pick_up_max_range(node)
+    test_pick_up_max_range(node)
     #test_pick_up_min_range(node)
     #test_drop_off(node)
     #test_full_pickup(node)
