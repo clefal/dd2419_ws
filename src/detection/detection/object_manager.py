@@ -66,8 +66,8 @@ class ObjectManager(Node):
         self._max_static_objects = 50
 
         self._static_loaded = False
-        self.create_timer(0.5, self.get_points_from_csv_once)
-
+        self.create_timer(5, self.get_points_from_csv_once)
+        self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
 
 # ----------------------------------
@@ -210,6 +210,9 @@ class ObjectManager(Node):
             self.object_list.append(obj)
         
 # -------------------------
+
+    def debugging_msg(self):
+        self.get_logger().info(f'currently there are {len(self.object_list)} objects in the object_list')
         
 ############ Object-Topic- Callbacks #############
 
