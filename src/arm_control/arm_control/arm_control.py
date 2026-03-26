@@ -101,6 +101,16 @@ class Arm_control(Node):
         self.pub.publish(msg)
         time.sleep(3.0)
 
+    def send_msg_to_box(self):
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 150
+        msg.position[3] = 190
+        msg.position[4] = 55
+
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
     def send_msg_raise_arm(self):
         msg = ArmControl()
         msg.position[0] = 100
@@ -147,7 +157,7 @@ class Arm_control(Node):
 
     def drop_object(self):
         if (self.holding_object):
-            self.send_msg_lower_arm()
+            self.send_msg_to_box()
             time.sleep(3.0)
             self.send_msg_open_grip()
             self.holding_object = False
