@@ -98,7 +98,7 @@ class Controller(Node):
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
-        self.declare_parameter('final_stop_distance', 0.17) 
+        self.declare_parameter('final_stop_distance', 0.19)                 #0.17 gold
         self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
@@ -570,8 +570,11 @@ class Controller(Node):
         sin_y = math.sin(ryaw)
         y_r = -sin_y * dx + cos_y * dy
 
-        # Pure Pursuit curvature: kappa = 2*y_r / L^2
-        kappa = (2.0 * y_r) / (lookahead * lookahead)
+        # Use the actual robot-to-target distance in the pure-pursuit denominator.
+        # This stays better behaved when the robot is off the path or the target
+        # point is not exactly one geometric lookahead radius away.
+        ld2 = max(dx * dx + dy * dy, 1e-6)
+        kappa = (2.0 * y_r) / ld2
 
         v_nom = float(self.get_parameter('nominal_linear_speed').value)
         wmax = float(self.get_parameter('max_angular_speed').value)
