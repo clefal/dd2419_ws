@@ -356,6 +356,7 @@ class ObjectManager(Node):
                 res.obj_x = obj.last_x
                 res.obj_y = obj.last_y
                 res.obj_yaw = obj.last_yaw
+                self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
                 return res
 
         self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')
