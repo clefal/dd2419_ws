@@ -86,7 +86,7 @@ class Controller(Node):
         self.declare_parameter('max_angular_speed', 0.15)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.1) #0.35
+        self.declare_parameter('steering_gain', 0.05) #0.35
 
 
         self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
