@@ -493,8 +493,8 @@ class Detection(Node):
   
         # medium trehsholds
         tol_red = 0.03   
-        tol_green = 0.015
-        tol_blue = 0.02
+        tol_green = 0.01
+        tol_blue = 0.015
         tol_box = 0.02  
 
         # strict thresholds
