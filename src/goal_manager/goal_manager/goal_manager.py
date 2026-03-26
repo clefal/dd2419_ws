@@ -73,7 +73,7 @@ class GoalManager(Node):
             failed_blacklist_radius_m=0.6,
             occ_lethal=90,
         )
-        self._box_side_offset = 0.58  # coarse standoff along the two long sides
+        self._box_side_offset = 0.4  # coarse standoff along the two long sides
 
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
