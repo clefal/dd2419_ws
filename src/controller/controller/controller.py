@@ -99,7 +99,7 @@ class Controller(Node):
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
         self.declare_parameter('final_stop_distance', 0.23)                 # 0.17 gold
-        self.declare_parameter('final_lateral_offset', 0.5)                # m
+        self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
 
