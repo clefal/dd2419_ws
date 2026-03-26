@@ -52,6 +52,7 @@ STABLE_Y_TOLERANCE = 8
 
 TEST_RHO_STEP_MM = 5.0
 TEST_ALPHA_STEP_DEG = 5.0
+TEST_Z_STEP_MM = 5.0
 
 
 class State(Enum):
@@ -136,6 +137,20 @@ class ArmControlNode(Node):
                 rho=self.current_target_rho,
                 alpha_deg=self.current_target_alpha - TEST_ALPHA_STEP_DEG,
                 label='TEST_RIGHT',
+            )
+        elif command == 'TEST_Z_UP':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho,
+                alpha_deg=self.current_target_alpha,
+                z=self.current_target_z + TEST_Z_STEP_MM,
+                label='TEST_Z_UP',
+            )
+        elif command == 'TEST_Z_DOWN':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho,
+                alpha_deg=self.current_target_alpha,
+                z=self.current_target_z - TEST_Z_STEP_MM,
+                label='TEST_Z_DOWN',
             )
         elif command == 'TEST_STATUS':
             self.publish_result(
@@ -225,22 +240,30 @@ class ArmControlNode(Node):
 
         self.command_named_pose(DROP_POSE, new_state=State.MOVING_TO_DROP)
 
-    def handle_test_planar_command(self, rho: float, alpha_deg: float, label: str):
+    def handle_test_planar_command(
+        self,
+        rho: float,
+        alpha_deg: float,
+        label: str,
+        z: float | None = None,
+    ):
         if self.state != State.IDLE:
             self.publish_result(f'{label}_FAIL_NO_IDLE')
             return
+
+        test_z = self.current_target_z if z is None else z
 
         try:
             planar_target = make_planar_target(
                 rho=rho,
                 alpha_deg=alpha_deg,
-                z=self.current_target_z,
+                z=test_z,
             )
             joint_target = planar_to_joint_target(planar_target)
             self.command_planar_target(
                 rho=rho,
                 alpha_deg=alpha_deg,
-                z=self.current_target_z,
+                z=test_z,
             )
         except ValueError as exc:
             self.publish_result(f'{label}_FAIL {exc}')

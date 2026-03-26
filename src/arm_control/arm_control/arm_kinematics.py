@@ -12,10 +12,10 @@ L2 = 94.0
 BASE_SERVO_CENTER = 120.0
 WRIST_DOWN_ORIENTATION_DEG = -90.0
 
-BASE_LIMITS = (60.0, 120.0)     # P5: straight at 120°, initial: 120
+BASE_LIMITS = (75.0, 165.0)     # P5: straight at 120°, initial: 120
 SHOULDER_LIMITS = (30.0, 120.0) # P4: straight at 120°         initial: 180
 ELBOW_LIMITS = (150.0, 210.0)   # P3: DONT USE TOO MUCH 200-220    initial: 220
-WRIST_LIMITS = (50.0, 170.0)    # P2: straight at 120°      initial:30
+WRIST_LIMITS = (40.0, 170.0)    # P2: straight at 120°      initial:30
 ORIENTATION_WRIST = (17.0, 140.0)   #P1: straight at 120°   initial: 120
 GRIPPER_LIMITS = (10.0, 100.0)  #P0 open: 10°, close: 100°  initial: 40
 
@@ -96,7 +96,7 @@ def inverse_kinematics_2d(rho: float, z: float, orientation_deg: float = WRIST_D
 
 
 def alpha_to_base_servo(alpha_deg: float) -> float:
-    return BASE_SERVO_CENTER - alpha_deg
+    return BASE_SERVO_CENTER + alpha_deg
 
 
 def make_planar_target(rho: float, alpha_deg: float, z: float = DEFAULT_PICKUP_Z) -> PlanarTarget:
