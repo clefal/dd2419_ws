@@ -129,10 +129,10 @@ class ObjectManager(Node):
         for obj in self.object_list:
 
             if obj.type == 'box':
-                frame_name = f'{self._box_frame}{obj.id}'
+                frame_name = f'det_{self._box_frame}{obj.id}'
 
             else:
-                frame_name = f'{self._object_frame_prefix}{obj.id}'
+                frame_name = f'det_{self._object_frame_prefix}{obj.id}'
 
             t = TransformStamped()
             t.header.stamp = self.get_clock().now().to_msg()    # maybe change this and actually take the timestamp from when the objects were published for that we need to save the stamp in the object list
