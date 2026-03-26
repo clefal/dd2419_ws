@@ -105,6 +105,9 @@ class ObjectManager(Node):
             for idx, o in enumerate(self.object_list):
                 if o.type == obj.type or o.type == 'map_cube':
                     # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
+                    if o.type == 'map_cube' and obj.type == 'box':
+                        continue
+                        
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
                         # if the object is similar (=close to another object and of same type)
                         updated_obj = o.copy()
