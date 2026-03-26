@@ -380,6 +380,7 @@ class Arm_control(Node):
         cube_middle = (MIN_CUBE_Y + MAX_CUBE_Y) / 2
         cube_diff =  cube_middle - self.cube_y
         new_rho = self.rho + cube_diff * PIXEL_TO_MM
+        print(new_rho)
 
         self.publish_msg_calc_arm_position(new_rho, Z)
         # p4, p3, p2 = self.calc_arm_angles(new_rho, Z)
