@@ -47,7 +47,6 @@ class ObjectManager(Node):
         self.sub_red_cube = self.create_subscription(PointStamped,'/detection/objects/red_cube', self.red_callback, 10)
         self.sub_green_cube = self.create_subscription(PointStamped,'/detection/objects/green_cube', self.green_callback, 10)
         self.sub_blue_cube = self.create_subscription(PointStamped,'/detection/objects/blue_cube', self.blue_callback, 10)
-        self.sub_wood_cube = self.create_subscription(PointStamped,'/detection/objects/wood_cube', self.wood_callback, 10)
         self.sub_box = self.create_subscription(PointStamped,'/detection/objects/box', self.box_callback, 10)
 
         self.object_list = list()
@@ -89,7 +88,7 @@ class ObjectManager(Node):
     def get_new_obj_idx(self):
         '''returns new unique object index'''
         if len(self.object_list) == 0:
-            return 0
+            return 100
         else:
             return self.object_list[-1].id + 1
     
@@ -115,6 +114,7 @@ class ObjectManager(Node):
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         self.object_list[idx] = updated_obj
+                        updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
 
                         similarity_counter += 1
             
@@ -134,7 +134,6 @@ class ObjectManager(Node):
             else:
                 frame_name = f'{self._object_frame_prefix}{obj.id}'
 
-            frame_name = f'{self._object_frame_prefix}{obj.id}'
             t = TransformStamped()
             t.header.stamp = self.get_clock().now().to_msg()    # maybe change this and actually take the timestamp from when the objects were published for that we need to save the stamp in the object list
             t.header.frame_id = parent_frame
@@ -184,8 +183,8 @@ class ObjectManager(Node):
                 break
             ox, oy, _ = obj_pose
 
-            static_cube_idx = self.get_new_obj_idx()
-            static_cube_obj = Obj(static_cube_idx, ox, oy, yaw = 0, status='available', type = 'map_cube')
+            # static_cube_idx = self.get_new_obj_idx()
+            static_cube_obj = Obj(i, ox, oy, yaw = 0, status='available', type = 'map_cube')
 
             if self.check_similarity(static_cube_obj) == 0: 
                 self.object_list.append(static_cube_obj)
@@ -230,12 +229,6 @@ class ObjectManager(Node):
     def blue_callback(self, msg  : PointStamped):
         yaw = 0
         obj_type = 'blue_cube'
-        self.process_object(msg.point.x, msg.point.y, yaw, obj_type)
-        self.publish_objects()
-
-    def wood_callback(self, msg  : PointStamped):
-        yaw = 0
-        obj_type = 'wood_cube'
         self.process_object(msg.point.x, msg.point.y, yaw, obj_type)
         self.publish_objects()
 
