@@ -89,7 +89,7 @@ class Controller(Node):
         self.declare_parameter('steering_gain', 0.15) #0.35
 
 
-        self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
+        self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.2)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.05)           # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
@@ -99,7 +99,7 @@ class Controller(Node):
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
         self.declare_parameter('final_stop_distance', 0.17) 
-        self.declare_parameter('final_lateral_offset', 0.01)                # m
+        self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
 
@@ -474,7 +474,7 @@ class Controller(Node):
             
             adjusted_target_xy = self._apply_final_lateral_offset(pose, target_xy)
             command = self._final_controller.compute_command(pose, adjusted_target_xy)
-            
+
             if command.reached:
                 self.stop()
                 self.publish_status('REACHED')
