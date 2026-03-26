@@ -121,7 +121,7 @@ class ObjectManager(Node):
 
     def publish_objects(self):
         '''publishes all objects from the object_list'''
-        self.get_logger().info(f'Publishing {len(self.object_list)} objects')
+        # self.get_logger().info(f'Publishing {len(self.object_list)} objects')
         parent_frame = self._fixed_frame
         for obj in self.object_list:
             frame_name = f'{self._object_frame_prefix}{obj.id}'

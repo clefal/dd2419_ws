@@ -187,7 +187,7 @@ class Detection(Node):
             if len(self.point_buffers['red'])>=self.buffer_size:
                 all_red_points = np.vstack(self.point_buffers['red'])
                 red_centroids = self.process_clusters(all_red_points)
-                self.get_logger().info(f'red: {len(all_red_points)}')
+                # self.get_logger().info(f'red: {len(all_red_points)}')
 
                 # only for visualization in rviz
                 msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
@@ -210,7 +210,7 @@ class Detection(Node):
             if len(self.point_buffers['green'])>=self.buffer_size:
                 all_green_points = np.vstack(self.point_buffers['green'])
                 green_centroids = self.process_clusters(all_green_points)
-                self.get_logger().info(f'green: {len(all_green_points)}')
+                # self.get_logger().info(f'green: {len(all_green_points)}')
 
                 # only for visualization in rviz
                 msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
@@ -233,7 +233,7 @@ class Detection(Node):
             if len(self.point_buffers['blue'])>=self.buffer_size:
                 all_blue_points = np.vstack(self.point_buffers['blue'])
                 blue_centroids = self.process_clusters(all_blue_points)
-                self.get_logger().info(f'blue: {len(all_blue_points)}')
+                # self.get_logger().info(f'blue: {len(all_blue_points)}')
 
 
                 # only for visualization in rviz
@@ -257,7 +257,7 @@ class Detection(Node):
             if len(self.point_buffers['box'])>=self.buffer_size:
                 all_box_points = np.vstack(self.point_buffers['box'])
                 box_centroids = self.process_clusters(all_box_points, box=True)
-                self.get_logger().info(f'box: {len(all_box_points)}')
+                # self.get_logger().info(f'box: {len(all_box_points)}')
 
                 # only for visualization in rviz
                 msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
