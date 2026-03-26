@@ -151,6 +151,7 @@ class Arm_control(Node):
         # Maybe just a timeout is fine? 
 
         self.last_detections.append(cy)
+        print("HI")
 
         if len(self.last_detections) > REQUIRED_DETECTIONS:
             self.last_detections.pop(0)
