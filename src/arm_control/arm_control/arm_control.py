@@ -108,10 +108,9 @@ class Arm_control(Node):
         )
 
     def image_callback(self, msg: Image):
-        if self.state not in ["detect"]:
+        if self.state is not State.DETECT:
             return
 
-        print("HI")
         if msg.encoding == 'bgr8':
             frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         elif msg.encoding == 'yuv422_yuy2':
