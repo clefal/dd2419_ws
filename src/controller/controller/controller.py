@@ -66,7 +66,6 @@ class Controller(Node):
         # Latest path (map frame)
         self._path_xy = []
         self._goal_yaw = None
-        self._path_start_heading: Optional[float] = None
         self._initial_turn_in_place_pending = False
 
         self._final_approach_enabled = False
@@ -190,7 +189,6 @@ class Controller(Node):
             )
             self._path_xy = []
             self._goal_yaw = None
-            self._path_start_heading = None
             self._initial_turn_in_place_pending = False
             self._was_turning_in_place = False
             self.publish_status('FAILED')
@@ -199,7 +197,6 @@ class Controller(Node):
         if len(msg.poses) == 0:
             self._path_xy = []
             self._goal_yaw = None
-            self._path_start_heading = None
             self._initial_turn_in_place_pending = False
             self._was_turning_in_place = False
             self.publish_status('IDLE')
@@ -207,8 +204,7 @@ class Controller(Node):
             return
 
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
-        self._path_start_heading = self._compute_path_start_heading()
-        self._initial_turn_in_place_pending = self._path_start_heading is not None
+        self._initial_turn_in_place_pending = True
         self._was_turning_in_place = False
 
         # Final yaw (planner now provides orientation)
@@ -320,19 +316,6 @@ class Controller(Node):
 
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
-
-    def _compute_path_start_heading(self) -> Optional[float]:
-        if len(self._path_xy) < 2:
-            return None
-
-        x0, y0 = self._path_xy[0]
-        for x1, y1 in self._path_xy[1:]:
-            dx = x1 - x0
-            dy = y1 - y0
-            if math.hypot(dx, dy) > 1e-3:
-                return math.atan2(dy, dx)
-        return None
-
 
     def _apply_final_lateral_offset(
         self,
@@ -474,7 +457,6 @@ class Controller(Node):
 
         # Empty path -> stop
         if not self._path_xy:
-            self._path_start_heading = None
             self._initial_turn_in_place_pending = False
             self._was_turning_in_place = False
             self.stop()
@@ -489,8 +471,19 @@ class Controller(Node):
 
         rx, ry, ryaw = pose
 
-        if self._initial_turn_in_place_pending and (self._path_start_heading is not None):
-            yaw_err = wrap_angle(self._path_start_heading - ryaw)
+        lookahead = float(self.get_parameter('lookahead_distance').value)
+        lookahead = max(0.05, lookahead)
+
+        if self._initial_turn_in_place_pending:
+            tgt = self._lookahead_point(rx, ry, lookahead)
+            if tgt is None:
+                self._initial_turn_in_place_pending = False
+                self._was_turning_in_place = False
+                self.stop()
+                return
+
+            tx, ty, _ = tgt
+            yaw_err = wrap_angle(math.atan2(ty - ry, tx - rx) - ryaw)
             yaw_tol = float(self.get_parameter('initial_turn_in_place_yaw_tol').value)
             if abs(yaw_err) > yaw_tol:
                 if not self._was_turning_in_place:
@@ -519,7 +512,6 @@ class Controller(Node):
                     self.stop()
                     self.publish_status('REACHED')
                     self._path_xy = []
-                    self._path_start_heading = None
                     self._initial_turn_in_place_pending = False
                     return
 
@@ -534,13 +526,10 @@ class Controller(Node):
             self.stop()
             self.publish_status('REACHED')
             self._path_xy = []
-            self._path_start_heading = None
             self._initial_turn_in_place_pending = False
             return
 
         # Lookahead target
-        lookahead = float(self.get_parameter('lookahead_distance').value)
-        lookahead = max(0.05, lookahead)
         tgt = self._lookahead_point(rx, ry, lookahead)
         if tgt is None:
             self._was_turning_in_place = False
