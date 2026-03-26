@@ -10,6 +10,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPo
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros import TransformException
+from geometry_msgs.msg import PolygonStamped
 
 class Mapping(Node):
     def __init__(self):
@@ -21,8 +22,9 @@ class Mapping(Node):
         self.declare_parameter("lidar_topic", "/lidar/scan")
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
-        self.declare_parameter("grid_size", 20) # m
-        self.declare_parameter("grid_origin", [-5.0, -5.0]) # m
+        self.declare_parameter("workspace_polygon_topic", "/workspace")
+        self.declare_parameter("grid_size", 12) # m
+        self.declare_parameter("grid_origin", [-3.0, -3.0]) # m
 
 
         # ------------------- CONFIG PARAMS ---------------
@@ -95,6 +97,22 @@ class Mapping(Node):
         occupancy_grid_msg.data = self.grid.get_data()
 
         self.ocuppancy_grid_publisher.publish(occupancy_grid_msg)
+
+        # Workspace polygon subscriber
+        workspace_polygon_topic = self.get_parameter("workspace_polygon_topic").value
+        qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.workspace_polygon_subscription = self.create_subscription(
+            PolygonStamped,
+            workspace_polygon_topic,
+            self.workspace_polygon_callback,
+            qos
+        )
+        self.polygon = []
         
 
         self.get_logger().info("Mapping node started")
@@ -103,7 +121,13 @@ class Mapping(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
-
+    def workspace_polygon_callback(self, msg: PolygonStamped):
+        self.polygon = np.array(
+            [[pt.x, pt.y] for pt in msg.polygon.points],
+            dtype=float
+        )
+        self.grid.set_workspace_polygon(self.polygon)
+        self.grid.initialize_outside_polygon_as_occupied()
 
     def lidar_callback(self, msg: LaserScan):
         if self.is_turning:
@@ -215,19 +239,60 @@ class OcupancyGridData:
         self.height = int(size // resolution)
         self.origin = origin
 
-        # Log-odds grid (float)
         self.log_odds = np.zeros((self.height, self.width), dtype=np.float32)
 
-        # Parameters
-        self.l_occ = l_occ    # log odds increase for occupied
-        self.l_free = l_free   # log odds decrease for free
+        self.l_occ = l_occ
+        self.l_free = l_free
         self.l_min = l_min
         self.l_max = l_max
+
+        self.workspace_polygon = None
+        self.workspace_mask = None
 
     def world_to_grid(self, x, y):
         x_index = int((x - self.origin[0]) // self.resolution)
         y_index = int((y - self.origin[1]) // self.resolution)
         return x_index, y_index
+
+    def point_in_polygon(self, x, y, polygon):
+        inside = False
+        n = len(polygon)
+
+        for i in range(n):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n]
+
+            intersects = ((y1 > y) != (y2 > y))
+            if intersects:
+                x_intersect = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+                if x < x_intersect:
+                    inside = not inside
+
+        return inside
+
+    def set_workspace_polygon(self, polygon):
+        self.workspace_polygon = polygon
+        self.workspace_mask = np.zeros((self.height, self.width), dtype=bool)
+
+        for y_idx in range(self.height):
+            for x_idx in range(self.width):
+                wx = self.origin[0] + (x_idx + 0.5) * self.resolution
+                wy = self.origin[1] + (y_idx + 0.5) * self.resolution
+                self.workspace_mask[y_idx, x_idx] = self.point_in_polygon(wx, wy, polygon)
+
+    def initialize_outside_polygon_as_occupied(self):
+        if self.workspace_mask is None:
+            return
+        self.log_odds[~self.workspace_mask] = self.l_max
+
+    def is_inside_workspace_idx(self, x_idx, y_idx):
+        if x_idx < 0 or x_idx >= self.width or y_idx < 0 or y_idx >= self.height:
+            return False
+
+        if self.workspace_mask is None:
+            return True
+
+        return self.workspace_mask[y_idx, x_idx]
 
     def update(self, x, y, occupied=True):
         if x < self.origin[0] or x > self.origin[0] + self.size:
@@ -237,9 +302,7 @@ class OcupancyGridData:
 
         x_index, y_index = self.world_to_grid(x, y)
 
-        if x_index < 0 or x_index >= self.width:
-            return
-        if y_index < 0 or y_index >= self.height:
+        if not self.is_inside_workspace_idx(x_index, y_index):
             return
 
         if occupied:
@@ -247,20 +310,12 @@ class OcupancyGridData:
         else:
             self.log_odds[y_index, x_index] += self.l_free
 
-        # Clamp
         self.log_odds[y_index, x_index] = np.clip(
             self.log_odds[y_index, x_index],
             self.l_min,
             self.l_max
         )
 
-    def get_data(self):
-        probs = 1 - 1 / (1 + np.exp(self.log_odds))  # sigmoid
-
-        occupancy = (probs * 100).astype(np.int8)
-
-        return occupancy.reshape(-1).tolist()
-    
     def bresenham(self, x0, y0, x1, y1):
         cells = []
 
@@ -291,20 +346,20 @@ class OcupancyGridData:
 
         cells.append((x1, y1))
         return cells
-    
+
     def update_ray(self, x_robot, y_robot, x_hit, y_hit, last_occupied=True):
         x0, y0 = self.world_to_grid(x_robot, y_robot)
         x1, y1 = self.world_to_grid(x_hit, y_hit)
 
         cells = self.bresenham(x0, y0, x1, y1)
+        valid_cells = [(x, y) for (x, y) in cells if self.is_inside_workspace_idx(x, y)]
 
-        for i, (x, y) in enumerate(cells):
-            if x < 0 or x >= self.width or y < 0 or y >= self.height:
-                continue
+        if not valid_cells:
+            return
 
+        for i, (x, y) in enumerate(valid_cells):
             if last_occupied:
-                # First cell → occupied
-                if i == len(cells) - 1:
+                if i == len(valid_cells) - 1:
                     self.log_odds[y, x] += self.l_occ
                 else:
                     self.log_odds[y, x] += self.l_free
@@ -316,3 +371,8 @@ class OcupancyGridData:
                 self.l_min,
                 self.l_max
             )
+
+    def get_data(self):
+        probs = 1 - 1 / (1 + np.exp(self.log_odds))
+        occupancy = (probs * 100).astype(np.int8)
+        return occupancy.reshape(-1).tolist()
