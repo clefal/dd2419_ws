@@ -14,14 +14,14 @@ from arm_control.arm_kinematics import DROP_POSE
 from arm_control.arm_kinematics import HOLDING_POSE
 from arm_control.arm_kinematics import IDLE_POSE
 from arm_control.arm_kinematics import INITIAL_POSITION
-from arm_control.arm_kinematics import START_POSITION
 from arm_control.arm_kinematics import make_planar_target
 from arm_control.arm_kinematics import planar_to_joint_target
+from arm_control.arm_kinematics import START_POSITION
 from arm_control.arm_kinematics import rho_midpoint
 
 
 MS_PER_DEGREE = 120
-MIN_TIME_MS = 3000
+MIN_TIME_MS = 1000
 MAX_TIME_MS = 6000
 
 OPEN_GRIPPER_ANGLE = 10.0
@@ -49,6 +49,9 @@ MAX_ALPHA_STEP_DEG = 2.0
 REQUIRED_DETECTIONS = 3
 STABLE_X_TOLERANCE = 8
 STABLE_Y_TOLERANCE = 8
+
+TEST_RHO_STEP_MM = 5.0
+TEST_ALPHA_STEP_DEG = 5.0
 
 
 class State(Enum):
@@ -108,6 +111,39 @@ class ArmControlNode(Node):
             self.handle_pickup_command()
         elif command == 'DROP':
             self.handle_drop_command()
+        elif command == 'TEST_CENTER':
+            self.handle_test_planar_command(rho=rho_midpoint(), alpha_deg=0.0, label='TEST_CENTER')
+        elif command == 'TEST_RHO_IN':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho - TEST_RHO_STEP_MM,
+                alpha_deg=self.current_target_alpha,
+                label='TEST_RHO_IN',
+            )
+        elif command == 'TEST_RHO_OUT':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho + TEST_RHO_STEP_MM,
+                alpha_deg=self.current_target_alpha,
+                label='TEST_RHO_OUT',
+            )
+        elif command == 'TEST_LEFT':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho,
+                alpha_deg=self.current_target_alpha + TEST_ALPHA_STEP_DEG,
+                label='TEST_LEFT',
+            )
+        elif command == 'TEST_RIGHT':
+            self.handle_test_planar_command(
+                rho=self.current_target_rho,
+                alpha_deg=self.current_target_alpha - TEST_ALPHA_STEP_DEG,
+                label='TEST_RIGHT',
+            )
+        elif command == 'TEST_STATUS':
+            self.publish_result(
+                'TEST_STATUS '
+                f'rho={self.current_target_rho:.1f} '
+                f'alpha={self.current_target_alpha:.1f} '
+                f'z={self.current_target_z:.1f}'
+            )
 
     def vision_callback(self, msg: Int32MultiArray):
         if len(msg.data) < 2:
@@ -188,6 +224,38 @@ class ArmControlNode(Node):
             return
 
         self.command_named_pose(DROP_POSE, new_state=State.MOVING_TO_DROP)
+
+    def handle_test_planar_command(self, rho: float, alpha_deg: float, label: str):
+        if self.state != State.IDLE:
+            self.publish_result(f'{label}_FAIL_NO_IDLE')
+            return
+
+        try:
+            planar_target = make_planar_target(
+                rho=rho,
+                alpha_deg=alpha_deg,
+                z=self.current_target_z,
+            )
+            joint_target = planar_to_joint_target(planar_target)
+            self.command_planar_target(
+                rho=rho,
+                alpha_deg=alpha_deg,
+                z=self.current_target_z,
+            )
+        except ValueError as exc:
+            self.publish_result(f'{label}_FAIL {exc}')
+            return
+
+        self.publish_result(
+            f'{label}_OK '
+            f'rho={self.current_target_rho:.1f} '
+            f'alpha={self.current_target_alpha:.1f} '
+            f'z={self.current_target_z:.1f} '
+            f'p2={joint_target.wrist:.1f} '
+            f'p3={joint_target.elbow:.1f} '
+            f'p4={joint_target.shoulder:.1f} '
+            f'p5={joint_target.base:.1f}'
+        )
 
     def command_observe_pose(self):
         self.current_target_rho = rho_midpoint()
