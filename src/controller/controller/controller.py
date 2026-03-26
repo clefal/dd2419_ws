@@ -81,7 +81,7 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.25)        # m
+        self.declare_parameter('lookahead_distance', 0.15)        # m
         self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
         self.declare_parameter('max_angular_speed', 0.1)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
@@ -98,7 +98,8 @@ class Controller(Node):
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
-        self.declare_parameter('final_stop_distance', 0.17)                # m
+        self.declare_parameter('final_stop_distance', 0.17) 
+        self.declare_parameter('final_lateral_offset', 0.01)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
 
@@ -350,6 +351,25 @@ class Controller(Node):
                 return math.atan2(py - y0, px - x0)
         return None
 
+    def _apply_final_lateral_offset(
+        self,
+        robot_pose: Tuple[float, float, float],
+        target_xy: Tuple[float, float],
+    ) -> Tuple[float, float]:
+        offset = float(self.get_parameter('final_lateral_offset').value)
+        if abs(offset) <= 1e-6:
+            return target_xy
+
+        rx, ry, _ = robot_pose
+        tx, ty = target_xy
+        heading = math.atan2(ty - ry, tx - rx)
+
+        # Positive offset means shift the target to the robot's left relative to
+        # the current approach direction. Negative shifts it to the right.
+        nx = -math.sin(heading)
+        ny = math.cos(heading)
+        return tx + offset * nx, ty + offset * ny
+    
     def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
         Uniformly scale the wheel pair only when needed so the smallest non-zero wheel
@@ -451,7 +471,10 @@ class Controller(Node):
                 turn_in_place_yaw_thresh=float(self.get_parameter('final_turn_in_place_yaw_thresh').value),
                 stop_distance=float(self.get_parameter('final_stop_distance').value),
             )
-            command = self._final_controller.compute_command(pose, target_xy)
+            
+            adjusted_target_xy = self._apply_final_lateral_offset(pose, target_xy)
+            command = self._final_controller.compute_command(pose, adjusted_target_xy)
+            
             if command.reached:
                 self.stop()
                 self.publish_status('REACHED')
