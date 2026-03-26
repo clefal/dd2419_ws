@@ -24,7 +24,7 @@ class Arm_control(Node):
 
     def send_msg_start_position(self):
         msg = ArmControl()
-        msg.position[0] = 40
+        msg.position[0] = 10
         msg.position[2] = 170
         msg.position[3] = 220
         msg.position[4] = 180
@@ -185,8 +185,9 @@ class Arm_control(Node):
             time.sleep(3.0)
             self.send_msg_open_grip()
             self.holding_object = False
-            self.send_msg_start_position_after_dropoff()
             self.publish_res("DROP_SUCCESS")
+            self.send_msg_start_position_after_dropoff()
+            
         else:
             self.publish_res("DROP_FAIL_NO_OBJECT")
             self.get_logger().error(f'Can not drop object: Not holdning an object')
