@@ -66,6 +66,8 @@ class Controller(Node):
         # Latest path (map frame)
         self._path_xy = []
         self._goal_yaw = None
+        self._path_start_heading: Optional[float] = None
+        self._initial_turn_in_place_pending = False
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -101,12 +103,11 @@ class Controller(Node):
         self.declare_parameter('final_stop_distance', 0.17)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
         self.declare_parameter('final_lateral_offset', 0.01)   
+        self.declare_parameter('initial_turn_in_place_yaw_tol', 0.08)      # rad
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
 
-        # When to turn in place to reacquire path direction
-        self._turn_in_place_yaw_thresh = 0.2  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
@@ -189,17 +190,26 @@ class Controller(Node):
             )
             self._path_xy = []
             self._goal_yaw = None
+            self._path_start_heading = None
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
             self.publish_status('FAILED')
             return
 
         if len(msg.poses) == 0:
             self._path_xy = []
             self._goal_yaw = None
+            self._path_start_heading = None
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
             self.publish_status('IDLE')
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
             return
 
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
+        self._path_start_heading = self._compute_path_start_heading()
+        self._initial_turn_in_place_pending = self._path_start_heading is not None
+        self._was_turning_in_place = False
 
         # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
@@ -311,6 +321,18 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
+    def _compute_path_start_heading(self) -> Optional[float]:
+        if len(self._path_xy) < 2:
+            return None
+
+        x0, y0 = self._path_xy[0]
+        for x1, y1 in self._path_xy[1:]:
+            dx = x1 - x0
+            dy = y1 - y0
+            if math.hypot(dx, dy) > 1e-3:
+                return math.atan2(dy, dx)
+        return None
+
 
     def _apply_final_lateral_offset(
         self,
@@ -353,6 +375,8 @@ class Controller(Node):
 
     def control_tick(self):
         if self._backup_active:
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
             pose = self.get_pose_2d()
             if pose is None:
                 self.stop()
@@ -381,6 +405,8 @@ class Controller(Node):
             return
 
         if self._final_approach_enabled:
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
             pose = self.get_pose_2d()
             if pose is None:
                 self.stop()
@@ -448,6 +474,9 @@ class Controller(Node):
 
         # Empty path -> stop
         if not self._path_xy:
+            self._path_start_heading = None
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
             self.stop()
             return
 
@@ -459,6 +488,23 @@ class Controller(Node):
             return
 
         rx, ry, ryaw = pose
+
+        if self._initial_turn_in_place_pending and (self._path_start_heading is not None):
+            yaw_err = wrap_angle(self._path_start_heading - ryaw)
+            yaw_tol = float(self.get_parameter('initial_turn_in_place_yaw_tol').value)
+            if abs(yaw_err) > yaw_tol:
+                if not self._was_turning_in_place:
+                    self.get_logger().info('Entering initial turn-in-place.')
+                self._was_turning_in_place = True
+                wmax = float(self.get_parameter('max_angular_speed').value)
+                k_turn = float(self.get_parameter('turn_gain').value)
+                w = clamp(k_turn * yaw_err, -wmax, wmax)
+                left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+                self.send_duty(left, right)
+                return
+
+            self._initial_turn_in_place_pending = False
+            self._was_turning_in_place = False
 
         # Goal check
         gx, gy = self._path_xy[-1]
@@ -473,6 +519,8 @@ class Controller(Node):
                     self.stop()
                     self.publish_status('REACHED')
                     self._path_xy = []
+                    self._path_start_heading = None
+                    self._initial_turn_in_place_pending = False
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
@@ -486,6 +534,8 @@ class Controller(Node):
             self.stop()
             self.publish_status('REACHED')
             self._path_xy = []
+            self._path_start_heading = None
+            self._initial_turn_in_place_pending = False
             return
 
         # Lookahead target
@@ -510,17 +560,6 @@ class Controller(Node):
         # If target behind / too misaligned -> turn in place
         heading_to_tgt = math.atan2(dy, dx)
         yaw_err = wrap_angle(heading_to_tgt - ryaw)
-        if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
-            if not self._was_turning_in_place:
-                self.get_logger().info('Entering turn-in-place.')
-            self._was_turning_in_place = True
-            wmax = float(self.get_parameter('max_angular_speed').value)
-            k_turn = float(self.get_parameter('turn_gain').value)
-            w = clamp(k_turn * yaw_err, -wmax, wmax)
-
-            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
-            self.send_duty(left, right)
-            return
         self._was_turning_in_place = False
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
