@@ -88,7 +88,7 @@ class ObjectManager(Node):
     def get_new_obj_idx(self):
         '''returns new unique object index'''
         if len(self.object_list) == 0:
-            return 100
+            return 0
         else:
             return self.object_list[-1].id + 1
     
@@ -183,8 +183,8 @@ class ObjectManager(Node):
                 break
             ox, oy, _ = obj_pose
 
-            # static_cube_idx = self.get_new_obj_idx()
-            static_cube_obj = Obj(i, ox, oy, yaw = 0, status='available', type = 'map_cube')
+            static_cube_idx = self.get_new_obj_idx()
+            static_cube_obj = Obj(static_cube_idx, ox, oy, yaw = 0, status='available', type = 'map_cube')
 
             if self.check_similarity(static_cube_obj) == 0: 
                 self.object_list.append(static_cube_obj)
