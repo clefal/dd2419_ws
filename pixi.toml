@@ -17,6 +17,7 @@ flash_arm = { cmd = "platformio run --target upload", cwd = "PlatformIO/Projects
 foxglove_server = { cmd = "ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765" }
 
 arm = { cmd = "ros2 launch robp_launch arm_launch.yaml" }
+arm_control = { cmd ="ros2 run arm_control arm_control" }
 arm_camera = { cmd = "ros2 launch robp_launch arm_camera_launch.yaml" }
 lidar = { cmd = "ros2 launch robp_launch lidar_launch.yaml" }
 phidgets = { cmd = "ros2 launch robp_launch phidgets_launch.yaml" }
