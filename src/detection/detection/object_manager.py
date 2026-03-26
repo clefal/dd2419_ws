@@ -127,9 +127,10 @@ class ObjectManager(Node):
         # self.get_logger().info(f'Publishing {len(self.object_list)} objects')
         parent_frame = self._fixed_frame
         for obj in self.object_list:
-            
+
             if obj.type == 'box':
-                frame_name = self._box_frame 
+                frame_name = f'{self._box_frame}{obj.id}'
+
             else:
                 frame_name = f'{self._object_frame_prefix}{obj.id}'
 
