@@ -77,11 +77,11 @@ ros-jazzy-ros2cli-common-extensions = ">=0.3.1,<0.4"
 ros-jazzy-rosidl-cli = ">=4.6.7,<5"
 
 # Workspace
-ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
+# ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
 
 # Course packages
 ros-jazzy-robp-autocomplete = { path = "src/robp_autocomplete" }
-ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp_launch" }
+# ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp_launch" }
 ros-jazzy-robp-interfaces = { path = "src/robp_interfaces" }
 ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
@@ -98,7 +98,7 @@ ros-jazzy-localization = { path = "src/localization" }
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }
 ros-jazzy-odometry = { path = "src/odometry" }
-ros-jazzy-display-markers = { path = "src/display_markers" }
+# ros-jazzy-display-markers = { path = "src/display_markers" }
 ros-jazzy-detection = { path = "src/detection" }
 
 # Other

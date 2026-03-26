@@ -116,7 +116,7 @@ def icp_2d_point_to_point(
     converged = False
     best = (T.copy(), float("inf"), 0)
 
-    for _ in range(max_iter):
+    for iter in range(max_iter):
         src_trans = apply_T(T, src_pts)
 
         dists, idx = tree.query(src_trans, k=1)
@@ -146,4 +146,4 @@ def icp_2d_point_to_point(
         prev_rmse = rmse
 
     T_best, rmse_best, inliers_best = best
-    return T_best, {"converged": converged, "rmse": rmse_best, "inliers": inliers_best}
+    return T_best, {"converged": converged, "rmse": rmse_best, "inliers": inliers_best, "iterations": iter}

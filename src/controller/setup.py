@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'controller = controller.controller:main',
+            'mock_is_turning = controller.mock_is_turning:main',
         ],
     },
 )

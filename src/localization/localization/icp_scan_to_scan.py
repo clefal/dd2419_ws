@@ -30,6 +30,51 @@ def tf_to_T2(tf_msg) -> np.ndarray:
     ty = tf_msg.transform.translation.y
     return pose_to_T(tx, ty, yaw)
 
+def median_filter_ranges(ranges, kernel_size=5):
+    assert kernel_size % 2 == 1, "kernel_size must be odd"
+    half = kernel_size // 2
+
+    arr = np.array(ranges, dtype=float)
+    out = arr.copy()
+
+    n = len(arr)
+
+    for i in range(n):
+        window_vals = []
+
+        for j in range(max(0, i - half), min(n, i + half + 1)):
+            v = arr[j]
+            if math.isfinite(v):
+                window_vals.append(v)
+
+        if len(window_vals) > 0:
+            out[i] = float(np.median(window_vals))
+        else:
+            out[i] = np.nan
+
+    return out
+
+def remove_isolated_points_ordered(pts, neighbor_dist_thresh=0.12):
+    """
+    pts: array Nx2 ordenado como sale del scan
+    conserva puntos que tengan al menos un vecino cercano
+    """
+    if pts.shape[0] < 3:
+        return pts
+
+    keep = np.zeros(pts.shape[0], dtype=bool)
+
+    keep[0] = np.linalg.norm(pts[1] - pts[0]) < neighbor_dist_thresh
+    keep[-1] = np.linalg.norm(pts[-1] - pts[-2]) < neighbor_dist_thresh
+
+    for i in range(1, pts.shape[0] - 1):
+        d_prev = np.linalg.norm(pts[i] - pts[i - 1])
+        d_next = np.linalg.norm(pts[i] - pts[i + 1])
+
+        if d_prev < neighbor_dist_thresh or d_next < neighbor_dist_thresh:
+            keep[i] = True
+
+    return pts[keep]
 
 class IcpScanToScan(Node):
     def __init__(self):
@@ -44,15 +89,17 @@ class IcpScanToScan(Node):
 
         self.declare_parameter("downsample_step", 1)
         self.declare_parameter("scans_to_skip", 1)
-        self.declare_parameter("range_min", 0.1)
+        self.declare_parameter("range_min", 0.05)
         self.declare_parameter("range_max", 50.0)
 
-        self.declare_parameter("icp_max_iter", 50)
-        self.declare_parameter("icp_max_corr_dist", 0.35)
-        self.declare_parameter("icp_min_inliers", 60)
-        self.declare_parameter("icp_rmse_thresh", 0.20)
-        self.declare_parameter("max_step_trans", 0.5)
-        self.declare_parameter("max_step_rot_deg", 25.0)
+        self.declare_parameter("icp_max_iter", 60) # Max number of iterations
+        self.declare_parameter("icp_tol", 1e-6) # Convergence tolerance for RMSE
+        self.declare_parameter("icp_max_corr_dist", 0.10) # Max distance between corresponding points - Defines what points are matched (modify this one for better results)
+        self.declare_parameter("icp_min_inliers", 60) # Min number of inliers
+        self.declare_parameter("icp_rmse_thresh", 0.15) # RMSE threshold
+
+        self.declare_parameter("max_step_trans", 0.5) # Max step size in meters
+        self.declare_parameter("max_step_rot_deg", 25.0) # Max step size in degrees
 
         self.scan_topic = self.get_parameter("scan_topic").value
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
@@ -154,16 +201,23 @@ class IcpScanToScan(Node):
         self.tf_broadcaster.sendTransform(t)
 
     def cb_scan(self, msg: LaserScan):
-        if self.is_turning:
-            return
+        # if self.is_turning:
+        #     return
         
         if self.skipped_scans < self.scans_to_skip:
             self.skipped_scans += 1
             return
+        
+        self.skipped_scans = 0
 
         self.get_logger().info("New scan to process")
-        self.skipped_scans = 0
-        pts = self.scan_to_points(msg)
+        
+        # Filter scan
+        msg.ranges = median_filter_ranges(msg.ranges, kernel_size=11)
+
+        # Remove isolated points
+        pts = remove_isolated_points_ordered(self.scan_to_points(msg), 0.12)
+
         self.get_logger().info(f"Valid scan has {pts.shape[0]} points")
         if pts.shape[0] < 60:
             self.get_logger().info("Valid scan too small")
@@ -174,7 +228,7 @@ class IcpScanToScan(Node):
             self.prev_stamp = msg.header.stamp
             return
 
-        # Initial guess from odometry: T_guess maps current base into previous base
+        # Initial guess from odometry: T_prev_to_cur_guess maps current base into previous base
         OTB_prev = self.lookup_OTB(self.prev_stamp)
         OTB_cur = self.lookup_OTB(msg.header.stamp)
         if OTB_prev is None or OTB_cur is None:
@@ -182,19 +236,19 @@ class IcpScanToScan(Node):
             self.prev_stamp = msg.header.stamp
             return
 
-        # Relative motion in odom: prev->cur is inv(OTB_prev)*OTB_cur
-        T_cur_to_prev_guess = invert_T(OTB_prev) @ OTB_cur
+        # This maps current base into previous base
+        T_cur_in_prev_guess = invert_T(OTB_prev) @ OTB_cur
 
         # For scan matching we want src(current) -> dst(prev):
-
         # ICP: current scan (src) to previous scan (dst)
         T_icp, info = icp_2d_point_to_point(
             src_pts=pts,
             dst_pts=self.prev_pts,
-            init_T=T_cur_to_prev_guess,
+            init_T=T_cur_in_prev_guess,
             max_iter=int(self.get_parameter("icp_max_iter").value),
             max_corr_dist=float(self.get_parameter("icp_max_corr_dist").value),
             min_inliers=int(self.get_parameter("icp_min_inliers").value),
+            tol=float(self.get_parameter("icp_tol").value),
         )
 
         # Quality gating
@@ -223,7 +277,7 @@ class IcpScanToScan(Node):
         MTO = self.MTB @ invert_T(OTB_cur)
         self.broadcast_map_odom(msg.header.stamp, MTO)
 
-        self.get_logger().info(f"ICP ok: inliers={info['inliers']} rmse={info['rmse']:.3f}")
+        self.get_logger().info(f"ICP ok: inliers={info['inliers']} rmse={info['rmse']:.3f} iterations={info['iterations']}")
 
         # Update previous scan
         self.prev_pts = pts
