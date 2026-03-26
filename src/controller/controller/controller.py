@@ -83,10 +83,10 @@ class Controller(Node):
         # Parameters
         self.declare_parameter('lookahead_distance', 0.15)        # m
         self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
-        self.declare_parameter('max_angular_speed', 0.1)        # cap turning a bit more conservatively
+        self.declare_parameter('max_angular_speed', 0.2)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.15) #0.35
+        self.declare_parameter('steering_gain', 0.1) #0.35
 
 
         self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
@@ -570,11 +570,8 @@ class Controller(Node):
         sin_y = math.sin(ryaw)
         y_r = -sin_y * dx + cos_y * dy
 
-        # Use the actual robot-to-target distance in the pure-pursuit denominator.
-        # This stays better behaved when the robot is off the path or the target
-        # point is not exactly one geometric lookahead radius away.
-        ld2 = max(dx * dx + dy * dy, 1e-6)
-        kappa = (2.0 * y_r) / ld2
+        # Pure Pursuit curvature: kappa = 2*y_r / L^2
+        kappa = (2.0 * y_r) / (lookahead * lookahead)
 
         v_nom = float(self.get_parameter('nominal_linear_speed').value)
         wmax = float(self.get_parameter('max_angular_speed').value)
