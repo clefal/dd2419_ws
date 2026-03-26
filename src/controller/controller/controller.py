@@ -81,8 +81,8 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.15)        # m
-        self.declare_parameter('nominal_linear_speed', 0.35)    # default slower for path tracking
+        self.declare_parameter('lookahead_distance', 0.25)        # m
+        self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
         self.declare_parameter('max_angular_speed', 0.1)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
         self.declare_parameter('align_final_yaw', True)
@@ -314,10 +314,28 @@ class Controller(Node):
 
         i0 = self._closest_path_index(rx, ry)
 
-        for i in range(i0, len(self._path_xy)):
-            px, py = self._path_xy[i]
-            if math.hypot(px - rx, py - ry) >= lookahead:
-                return (px, py, i)
+        if i0 >= len(self._path_xy) - 1:
+            px, py = self._path_xy[-1]
+            return (px, py, len(self._path_xy) - 1)
+
+        acc = 0.0
+        px, py = self._path_xy[i0]
+        for i in range(i0 + 1, len(self._path_xy)):
+            nx, ny = self._path_xy[i]
+            seg_len = math.hypot(nx - px, ny - py)
+            if seg_len <= 1e-6:
+                px, py = nx, ny
+                continue
+
+            if acc + seg_len >= lookahead:
+                remain = lookahead - acc
+                t = clamp(remain / seg_len, 0.0, 1.0)
+                tx = px + t * (nx - px)
+                ty = py + t * (ny - py)
+                return (tx, ty, i)
+
+            acc += seg_len
+            px, py = nx, ny
 
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
