@@ -162,6 +162,14 @@ Visualization Manager:
           Value: true
         object3:
           Value: true
+        object4:
+          Value: true
+        object5:
+          Value: true
+        object6:
+          Value: true
+        object7:
+          Value: true
         odom:
           Value: true
         realsense_camera_color_frame:
@@ -190,6 +198,14 @@ Visualization Manager:
           object2:
             {}
           object3:
+            {}
+          object4:
+            {}
+          object5:
+            {}
+          object6:
+            {}
+          object7:
             {}
           odom:
             base_link:
@@ -382,7 +398,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.614087104797363
+      Distance: 4.8650102615356445
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -397,10 +413,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0797971487045288
+      Pitch: 1.3047969341278076
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.228550910949707
+      Yaw: 3.1685521602630615
     Saved: ~
 Window Geometry:
   Displays:

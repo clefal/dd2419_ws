@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import math
 import time
 from typing import Optional, Tuple
@@ -65,8 +66,6 @@ class Controller(Node):
         # Latest path (map frame)
         self._path_xy = []
         self._goal_yaw = None
-        self._start_alignment_pending = False
-        self._start_turn_logged = False
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -89,6 +88,7 @@ class Controller(Node):
         self.declare_parameter('steering_gain', 0.75) #0.35
 
 
+        self.declare_parameter('goal_slow_radius', 0.40)         # m (start slowing within this distance)
         self.declare_parameter('min_linear_speed', 0.12)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.2)                 # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.05)           # s (0.05=20Hz, 0.1=10Hz)
@@ -100,14 +100,13 @@ class Controller(Node):
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
         self.declare_parameter('final_stop_distance', 0.17)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
-        self.declare_parameter('final_lateral_offset', 0.01)                # m; +left / -right in approach direction
 
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
 
-        # Start-of-path heading error threshold for turn-in-place alignment
-        self._turn_in_place_yaw_thresh = 0.1  # rad
+        # When to turn in place to reacquire path direction
+        self._turn_in_place_yaw_thresh = 0.2  # rad
         self._yaw_tol = 0.05  # rad for final alignment
 
         # Control loop
@@ -189,23 +188,17 @@ class Controller(Node):
             )
             self._path_xy = []
             self._goal_yaw = None
-            self._start_alignment_pending = False
-            self._start_turn_logged = False
             self.publish_status('FAILED')
             return
 
         if len(msg.poses) == 0:
             self._path_xy = []
             self._goal_yaw = None
-            self._start_alignment_pending = False
-            self._start_turn_logged = False
             self.publish_status('IDLE')
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
             return
 
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
-        self._start_alignment_pending = True
-        self._start_turn_logged = False
 
         # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
@@ -230,8 +223,6 @@ class Controller(Node):
         self._backup_start_xy = None
         self._path_xy = []
         self._goal_yaw = None
-        self._start_alignment_pending = False
-        self._start_turn_logged = False
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
         self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
@@ -241,8 +232,6 @@ class Controller(Node):
         if self._final_approach_enabled:
             self._path_xy = []
             self._goal_yaw = None
-            self._start_alignment_pending = False
-            self._start_turn_logged = False
             self._final_target_xy = None
             self._final_target_last_seen_wall = None
             self._final_target_request_pending = False
@@ -251,8 +240,6 @@ class Controller(Node):
             self.get_logger().info('Final approach enabled.')
         else:
             self.stop()
-            self._start_alignment_pending = False
-            self._start_turn_logged = False
             self._final_target_request_pending = False
             self.get_logger().info('Final approach disabled.')
 
@@ -323,53 +310,24 @@ class Controller(Node):
         px, py = self._path_xy[-1]
         return (px, py, len(self._path_xy) - 1)
 
-    def _path_start_heading(self) -> Optional[float]:
-        if len(self._path_xy) < 2:
-            return None
-
-        x0, y0 = self._path_xy[0]
-        for px, py in self._path_xy[1:]:
-            if math.hypot(px - x0, py - y0) >= 0.05:
-                return math.atan2(py - y0, px - x0)
-        return None
-
-    def _apply_final_lateral_offset(
-        self,
-        robot_pose: Tuple[float, float, float],
-        target_xy: Tuple[float, float],
-    ) -> Tuple[float, float]:
-        offset = float(self.get_parameter('final_lateral_offset').value)
-        if abs(offset) <= 1e-6:
-            return target_xy
-
-        rx, ry, _ = robot_pose
-        tx, ty = target_xy
-        heading = math.atan2(ty - ry, tx - rx)
-
-        # Positive offset means shift the target to the robot's left relative to
-        # the current approach direction. Negative shifts it to the right.
-        nx = -math.sin(heading)
-        ny = math.cos(heading)
-        return tx + offset * nx, ty + offset * ny
-
     def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """
-        Uniformly scale the wheel pair only when needed so the smallest non-zero wheel
-        reaches the motor deadband threshold. This preserves the intended curvature
-        much better than remapping each wheel independently.
+        Affine deadzone remap:
+        each non-zero wheel command in [0..1] is remapped to [min_dc..1].
+        This keeps command output continuous and avoids repeated near-threshold lifting.
         """
         eps = 1e-4
-        cmds = [float(clamp(left, -1.0, 1.0)), float(clamp(right, -1.0, 1.0))]
-        mags = [abs(c) for c in cmds if abs(c) > eps]
-        if not mags:
-            return 0.0, 0.0
 
-        min_mag = min(mags)
-        if min_mag >= min_dc:
-            return cmds[0], cmds[1]
+        def remap(dc: float) -> float:
+            a = abs(dc)
+            if a <= eps:
+                return 0.0
+            a = clamp(a, 0.0, 1.0)
+            # 0% input -> min_dc, 100% input -> 1.0
+            a = min_dc + (1.0 - min_dc) * a
+            return math.copysign(a, dc)
 
-        scale = min(1.0 / max(mags), min_dc / min_mag)
-        return cmds[0] * scale, cmds[1] * scale
+        return remap(left), remap(right)
     # ----------------------------
 
     def control_tick(self):
@@ -453,8 +411,7 @@ class Controller(Node):
                 turn_in_place_yaw_thresh=float(self.get_parameter('final_turn_in_place_yaw_thresh').value),
                 stop_distance=float(self.get_parameter('final_stop_distance').value),
             )
-            adjusted_target_xy = self._apply_final_lateral_offset(pose, target_xy)
-            command = self._final_controller.compute_command(pose, adjusted_target_xy)
+            command = self._final_controller.compute_command(pose, target_xy)
             if command.reached:
                 self.stop()
                 self.publish_status('REACHED')
@@ -484,29 +441,6 @@ class Controller(Node):
         goal_tol = float(self.get_parameter('goal_tolerance').value)
         dist_to_goal = math.hypot(gx - rx, gy - ry)
 
-        if self._start_alignment_pending:
-            start_heading = self._path_start_heading()
-            if start_heading is None:
-                self._start_alignment_pending = False
-                self._start_turn_logged = False
-            else:
-                yaw_err = wrap_angle(start_heading - ryaw)
-                if abs(yaw_err) > self._turn_in_place_yaw_thresh:
-                    if not self._start_turn_logged:
-                        self.get_logger().info(
-                            f'Start alignment turn-in-place active (yaw_err={yaw_err:.2f} rad).'
-                        )
-                        self._start_turn_logged = True
-                    wmax = float(self.get_parameter('max_angular_speed').value)
-                    k_turn = float(self.get_parameter('turn_gain').value)
-                    w = clamp(k_turn * yaw_err, -wmax, wmax)
-                    left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
-                    self.send_duty(left, right)
-                    return
-
-                self._start_alignment_pending = False
-                self._start_turn_logged = False
-
         if dist_to_goal <= goal_tol:
             if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
                 yaw_err = wrap_angle(self._goal_yaw - ryaw)
@@ -514,8 +448,6 @@ class Controller(Node):
                     self.stop()
                     self.publish_status('REACHED')
                     self._path_xy = []
-                    self._start_alignment_pending = False
-                    self._start_turn_logged = False
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
@@ -529,8 +461,6 @@ class Controller(Node):
             self.stop()
             self.publish_status('REACHED')
             self._path_xy = []
-            self._start_alignment_pending = False
-            self._start_turn_logged = False
             return
 
         # Lookahead target
@@ -548,7 +478,21 @@ class Controller(Node):
         dy = ty - ry
         cos_y = math.cos(ryaw)
         sin_y = math.sin(ryaw)
+        x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
+
+        # If target behind / too misaligned -> turn in place
+        heading_to_tgt = math.atan2(dy, dx)
+        yaw_err = wrap_angle(heading_to_tgt - ryaw)
+        if abs(yaw_err) > self._turn_in_place_yaw_thresh or x_r < 0.05:
+            self.get_logger().debug('Coarse turn-in-place active.')
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
+            return
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
         kappa = (2.0 * y_r) / (lookahead * lookahead)
@@ -557,19 +501,33 @@ class Controller(Node):
         wmax = float(self.get_parameter('max_angular_speed').value)
         k_steer = float(self.get_parameter('steering_gain').value)
 
-        # Slow down linearly near the goal using the existing path geometry scale.
+
+        # Slow down in curves (simple, stable indoors)
+        v_curve = v_nom / (1.0 + 3.0 * abs(kappa))
+        v_curve = clamp(v_curve, 0.0, v_nom)
+
+        # Slow down as we approach the final goal (improves accuracy / reduces overshoot)
+        slow_radius = float(self.get_parameter('goal_slow_radius').value)
         v_min = float(self.get_parameter('min_linear_speed').value)
+
+        slow_radius = max(0.05, slow_radius)
         v_min = max(self._dc_min + 0.02, min(v_min, v_nom))  # keep above deadzone margin
 
-        slowdown_distance = max(lookahead, goal_tol, 0.05)
-        approach = clamp(dist_to_goal / slowdown_distance, 0.0, 1.0)
+        approach = clamp(dist_to_goal / slow_radius, 0.0, 1.0)
         v_goal = v_min + (v_nom - v_min) * approach
 
-        v = clamp(v_goal, 0.0, v_nom)
+        v = min(v_curve, v_goal)
+        v = clamp(v, 0.0, v_nom)
 
         # Steering
         w = k_steer * kappa
         w = clamp(w, -wmax, wmax)
+
+        # Deadband-aware feasibility: for forward motion, both wheels should stay >= min duty.
+        # If v is small, cap steering so v-|w| does not fall into deadband.
+        if v > 0.0:
+            w_deadband_limit = max(0.0, v - self._dc_min)
+            w = clamp(w, -w_deadband_limit, w_deadband_limit)
 
         # Convert to wheel duties
         left = v - w
