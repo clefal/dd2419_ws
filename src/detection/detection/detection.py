@@ -15,7 +15,7 @@ from geometry_msgs.msg import PointStamped
 from tf2_ros import Buffer, TransformListener
 from scipy.spatial.transform import Rotation
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 import math
@@ -88,9 +88,9 @@ class Detection(Node):
         self.blue_centroid_pub = self.create_publisher(PointStamped, blue_cube_topic, 10, callback_group=ReentrantCallbackGroup())
         self.box_centroid_pub = self.create_publisher(PointStamped, box_topic, 10, callback_group=ReentrantCallbackGroup())
 
-        # Subscribe to point cloud topic and call callback function on each received message
+        self.cloud_cbg = MutuallyExclusiveCallbackGroup()        # Subscribe to point cloud topic and call callback function on each received message
         self.create_subscription(
-            PointCloud2, input_cloud_topic, self.cloud_callback, 10, callback_group=ReentrantCallbackGroup())
+            PointCloud2, input_cloud_topic, self.cloud_callback, 10, callback_group=self.cloud_cbg)
         
         # Define the Latched QoS Profile for the Occupancy Grid Subscription
         latched_qos = QoSProfile(
