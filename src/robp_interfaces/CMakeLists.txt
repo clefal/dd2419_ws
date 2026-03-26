@@ -25,6 +25,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GoalsAvailable.srv"
   "srv/GetAllObjects.srv"
   "srv/GetClosestBox.srv"
+  "srv/GetPosOfObj.srv"
   DEPENDENCIES std_msgs
 )
 
