@@ -111,6 +111,7 @@ class Arm_control(Node):
         if self.state not in ["detect"]:
             return
 
+        print("HI")
         if msg.encoding == 'bgr8':
             frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         elif msg.encoding == 'yuv422_yuy2':
@@ -151,7 +152,6 @@ class Arm_control(Node):
         # Maybe just a timeout is fine? 
 
         self.last_detections.append(cy)
-        print("HI")
 
         if len(self.last_detections) > REQUIRED_DETECTIONS:
             self.last_detections.pop(0)
