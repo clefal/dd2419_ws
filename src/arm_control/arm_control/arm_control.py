@@ -54,6 +54,8 @@ TEST_RHO_STEP_MM = 5.0
 TEST_ALPHA_STEP_DEG = 5.0
 TEST_Z_STEP_MM = 5.0
 DEBUG_VISION_UPDATES = True
+VISION_LOG_MIN_INTERVAL_SEC = 0.75
+VISION_LOG_DELTA_PIXELS = 5
 
 
 class State(Enum):
@@ -96,6 +98,8 @@ class ArmControlNode(Node):
         self.latest_detection = None
         self.latest_detection_time = None
         self.detection_history = deque(maxlen=REQUIRED_DETECTIONS)
+        self.last_logged_detection = None
+        self.last_vision_log_time = None
 
         self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
@@ -169,12 +173,14 @@ class ArmControlNode(Node):
         self.latest_detection = detection
         self.latest_detection_time = self.get_clock().now()
         self.detection_history.append(detection)
-        if DEBUG_VISION_UPDATES:
+        if DEBUG_VISION_UPDATES and self.should_log_detection(detection):
             self.get_logger().info(
                 f'Vision update: x={detection.center_x} y={detection.center_y} '
                 f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
                 f'z={self.current_target_z:.1f}'
             )
+            self.last_logged_detection = detection
+            self.last_vision_log_time = self.latest_detection_time
 
     def control_loop(self):
         if self.is_motion_active():
@@ -444,6 +450,17 @@ class ArmControlNode(Node):
 
     def is_motion_active(self) -> bool:
         return self.get_clock().now() < self.motion_complete_time
+
+    def should_log_detection(self, detection: VisionDetection) -> bool:
+        if self.last_logged_detection is None or self.last_vision_log_time is None:
+            return True
+
+        age = self.get_clock().now() - self.last_vision_log_time
+        changed_enough = (
+            abs(detection.center_x - self.last_logged_detection.center_x) >= VISION_LOG_DELTA_PIXELS
+            or abs(detection.center_y - self.last_logged_detection.center_y) >= VISION_LOG_DELTA_PIXELS
+        )
+        return changed_enough and age >= Duration(seconds=VISION_LOG_MIN_INTERVAL_SEC)
 
     def clamp_step(self, value: float, limit: float) -> float:
         return max(-limit, min(limit, value))
