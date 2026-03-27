@@ -20,12 +20,12 @@ from arm_control.arm_kinematics import planar_to_joint_target
 from arm_control.arm_kinematics import rho_midpoint
 
 
-MS_PER_DEGREE = 120
-MIN_TIME_MS = 1000
-MAX_TIME_MS = 6000
+MS_PER_DEGREE = 60
+MIN_TIME_MS = 200
+MAX_TIME_MS = 3000
 
 OPEN_GRIPPER_ANGLE = 10.0
-CLOSED_GRIPPER_ANGLE = 100.0
+CLOSED_GRIPPER_ANGLE = 105.0
 BASE_CENTER_ANGLE = 120.0
 
 VISION_TOPIC = '/arm/vision/green_cube_center'
@@ -164,6 +164,14 @@ class ArmControlNode(Node):
                 f'alpha={self.current_target_alpha:.1f} '
                 f'z={self.current_target_z:.1f}'
             )
+        elif command == 'TEST_CLOSE_GRIPPER':
+            closed_gripper_pose = self.position.copy()
+            closed_gripper_pose[0] = CLOSED_GRIPPER_ANGLE
+      
+            self.publish_arm_control(closed_gripper_pose, new_state=None)
+            #self.command_named_pose(HOLDING_POSE, new_state=State.LIFTING)
+
+
 
     def vision_callback(self, msg: Int32MultiArray):
         if len(msg.data) < 2:
@@ -203,9 +211,7 @@ class ArmControlNode(Node):
             self.update_alignment()
             return
 
-        if self.state == State.CLOSING_GRIPPER:
-            self.command_named_pose(HOLDING_POSE, new_state=State.LIFTING)
-            return
+
 
         if self.state == State.LIFTING:
             self.transition_to(State.HOLDING)
@@ -314,12 +320,8 @@ class ArmControlNode(Node):
         )
 
     def command_idle_pose(self, new_state: State):
-        idle_position = self.position.copy()
-        idle_position[0] = OPEN_GRIPPER_ANGLE
-        idle_position[2] = IDLE_POSE['p2']
-        idle_position[3] = IDLE_POSE['p3']
-        idle_position[4] = IDLE_POSE['p4']
-        idle_position[5] = BASE_CENTER_ANGLE
+        idle_position = IDLE_POSE.copy()
+      
         self.publish_arm_control(idle_position, new_state)
 
     def command_start_safe(self):

@@ -2,9 +2,10 @@ import math
 from dataclasses import dataclass
 
 
-MIN_RHO = 160.0
+BASE_MIN_RHO = 160.0
 MAX_RHO = 190.0
-DEFAULT_PICKUP_Z = 15.0
+DEFAULT_PICKUP_Z = 5.0
+IDLE_Z = 105.0
 
 L1 = 101.0
 L2 = 94.0
@@ -45,12 +46,28 @@ class ArmJointTarget:
     wrist: float
 
 
-def clamp_rho(rho: float) -> float:
-    return max(MIN_RHO, min(MAX_RHO, rho))
+def get_min_rho(alpha_deg: float, rho: float) -> float:
+    angle_5 = BASE_SERVO_CENTER + alpha_deg
+    return BASE_MIN_RHO / math.cos(math.radians(abs(BASE_SERVO_CENTER - angle_5)))
 
 
-def is_rho_safe(rho: float) -> bool:
-    return MIN_RHO <= rho <= MAX_RHO
+def calc_max_abs_alpha(rho):
+    # This is the maximum deviation from 120°
+    return math.degrees(math.acos(BASE_MIN_RHO / rho))
+
+
+def calc_rho_min(angle_5):
+    return BASE_MIN_RHO / math.cos(math.radians(abs(120 - angle_5)))
+
+
+def clamp_rho(rho: float, alpha_deg: float) -> float:
+    min_rho = get_min_rho(alpha_deg, rho)
+    return max(min_rho, min(MAX_RHO, rho))
+
+
+def is_rho_safe(rho: float, alpha_deg: float) -> bool:
+    min_rho = get_min_rho(alpha_deg, rho)
+    return min_rho <= rho <= MAX_RHO
 
 
 def is_joint_value_in_limits(value: float, limits) -> bool:
@@ -69,9 +86,10 @@ def is_base_safe(base: float) -> bool:
     return is_joint_value_in_limits(base, BASE_LIMITS)
 
 
-def inverse_kinematics_2d(rho: float, z: float, orientation_deg: float = WRIST_DOWN_ORIENTATION_DEG):
-    if not is_rho_safe(rho):
-        raise ValueError(f'rho {rho:.2f} outside safe range [{MIN_RHO}, {MAX_RHO}]')
+def inverse_kinematics_2d(rho: float, z: float, orientation_deg: float = WRIST_DOWN_ORIENTATION_DEG, alpha_deg: float = 0.0):
+    if not is_rho_safe(rho, alpha_deg):
+        min_rho = get_min_rho(alpha_deg, rho)
+        raise ValueError(f'rho {rho:.2f} outside safe range [{min_rho:.2f}, {MAX_RHO}]')
 
     orientation = math.radians(orientation_deg)
     r2 = rho * rho + z * z
@@ -104,11 +122,11 @@ def alpha_to_base_servo(alpha_deg: float) -> float:
 
 
 def make_planar_target(rho: float, alpha_deg: float, z: float = DEFAULT_PICKUP_Z) -> PlanarTarget:
-    return PlanarTarget(rho=clamp_rho(rho), alpha_deg=alpha_deg, z=z)
+    return PlanarTarget(rho=clamp_rho(rho, alpha_deg), alpha_deg=alpha_deg, z=z)
 
 
 def planar_to_joint_target(target: PlanarTarget) -> ArmJointTarget:
-    shoulder, elbow, wrist = inverse_kinematics_2d(target.rho, target.z)
+    shoulder, elbow, wrist = inverse_kinematics_2d(target.rho, target.z, orientation_deg=WRIST_DOWN_ORIENTATION_DEG, alpha_deg=target.alpha_deg)
     base = alpha_to_base_servo(target.alpha_deg)
 
     if not is_base_safe(base):
@@ -129,4 +147,4 @@ def pixel_y_to_rho_step(pixel_error_y: float, pixel_to_mm: float) -> float:
 
 
 def rho_midpoint() -> float:
-    return (MIN_RHO + MAX_RHO) / 2.0
+    return (BASE_MIN_RHO + MAX_RHO) / 2.0
