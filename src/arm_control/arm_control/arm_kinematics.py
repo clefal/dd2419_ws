@@ -20,8 +20,8 @@ ORIENTATION_WRIST = (17.0, 140.0)   #P1: straight at 120°   initial: 120
 GRIPPER_LIMITS = (10.0, 100.0)  #P0 open: 10°, close: 100°  initial: 40
 
 INITIAL_POSITION = [40, 120, 30, 220, 180, 120]
-START_POSITION = [40, 120, 40, 180, 90, 120]
-IDLE_POSE = {'p2': 16.6, 'p3': 166.4, 'p4': 89.8}
+START_SAFE_POSITION = [40, 120, 166.4, 220, 180, 120]
+IDLE_POSE = {'p2': 16.6, 'p4': 89.8}
 HOLDING_POSE = {'p2': 30.0, 'p3': 170.0, 'p4': 120.0}
 DROP_POSE = {'p2': 90.0, 'p4': 80.0}
 

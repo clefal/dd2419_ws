@@ -14,9 +14,9 @@ from arm_control.arm_kinematics import DROP_POSE
 from arm_control.arm_kinematics import HOLDING_POSE
 from arm_control.arm_kinematics import IDLE_POSE
 from arm_control.arm_kinematics import INITIAL_POSITION
+from arm_control.arm_kinematics import START_SAFE_POSITION
 from arm_control.arm_kinematics import make_planar_target
 from arm_control.arm_kinematics import planar_to_joint_target
-from arm_control.arm_kinematics import START_POSITION
 from arm_control.arm_kinematics import rho_midpoint
 
 
@@ -27,7 +27,6 @@ MAX_TIME_MS = 6000
 OPEN_GRIPPER_ANGLE = 10.0
 CLOSED_GRIPPER_ANGLE = 100.0
 BASE_CENTER_ANGLE = 120.0
-SAFE_START_WRIST_ANGLE = 80.0
 
 VISION_TOPIC = '/arm/vision/green_cube_center'
 ACTION_TOPIC = '/arm/action'
@@ -60,9 +59,7 @@ VISION_LOG_DELTA_PIXELS = 5
 
 class State(Enum):
     START = 'start'
-    START_PREPARE_WRIST = 'start_prepare_wrist'
-    START_PREPARE_REST = 'start_prepare_rest'
-    START_FINAL = 'start_final'
+    MOVING_TO_START_SAFE = 'moving_to_start_safe'
     MOVING_TO_IDLE = 'moving_to_idle'
     IDLE = 'idle'
     MOVING_TO_OBSERVE = 'moving_to_observe'
@@ -189,15 +186,7 @@ class ArmControlNode(Node):
         if self.is_motion_active():
             return
 
-        if self.state == State.START_PREPARE_WRIST:
-            self.command_start_prepare_rest()
-            return
-
-        if self.state == State.START_PREPARE_REST:
-            self.command_start_final()
-            return
-
-        if self.state == State.START_FINAL:
+        if self.state == State.MOVING_TO_START_SAFE:
             self.command_idle_pose(new_state=State.MOVING_TO_IDLE)
             return
 
@@ -240,7 +229,7 @@ class ArmControlNode(Node):
             self.publish_result('START_FAIL')
             return
 
-        self.command_start_prepare_wrist()
+        self.command_start_safe()
 
     def handle_pickup_command(self):
         if self.state != State.IDLE:
@@ -333,24 +322,9 @@ class ArmControlNode(Node):
         idle_position[5] = BASE_CENTER_ANGLE
         self.publish_arm_control(idle_position, new_state)
 
-    def command_start_prepare_wrist(self):
-        target_position = self.position.copy()
-        target_position[2] = SAFE_START_WRIST_ANGLE
-        self.publish_arm_control(target_position, State.START_PREPARE_WRIST)
-
-    def command_start_prepare_rest(self):
-        target_position = self.position.copy()
-        target_position[0] = START_POSITION[0]
-        target_position[1] = START_POSITION[1]
-        target_position[3] = START_POSITION[3]
-        target_position[4] = START_POSITION[4]
-        target_position[5] = START_POSITION[5]
-        self.publish_arm_control(target_position, State.START_PREPARE_REST)
-
-    def command_start_final(self):
-        target_position = self.position.copy()
-        target_position[2] = START_POSITION[2]
-        self.publish_arm_control(target_position, State.START_FINAL)
+    def command_start_safe(self):
+        target_position = [float(value) for value in START_SAFE_POSITION]
+        self.publish_arm_control(target_position, State.MOVING_TO_START_SAFE)
 
     def command_named_pose(self, pose: dict, new_state: State):
         target_position = self.position.copy()
