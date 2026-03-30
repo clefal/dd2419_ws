@@ -13,10 +13,10 @@ L2 = 94.0
 BASE_SERVO_CENTER = 120.0
 WRIST_DOWN_ORIENTATION_DEG = -90.0
 
-BASE_LIMITS = (75.0, 165.0)     # P5: straight at 120°, initial: 120
+BASE_LIMITS = (100.0, 140.0)     # P5: straight at 120°, initial: 120
 SHOULDER_LIMITS = (30.0, 120.0) # P4: straight at 120°         initial: 180
-ELBOW_LIMITS = (150.0, 210.0)   # P3: DONT USE TOO MUCH 200-220    initial: 220
-WRIST_LIMITS = (40.0, 170.0)    # P2: straight at 120°      initial:30
+ELBOW_LIMITS = (100.0, 210.0)   # P3: DONT USE TOO MUCH 200-220    initial: 220
+WRIST_LIMITS = (25.0, 170.0)    # P2: straight at 120°      initial:30
 ORIENTATION_WRIST = (17.0, 140.0)   #P1: straight at 120°   initial: 120
 GRIPPER_LIMITS = (10.0, 100.0)  #P0 open: 10°, close: 100°  initial: 40
 #                        0     1   2    3   4    5
@@ -26,9 +26,9 @@ START_SAFE_POSITION =   [40, 120, 30, 166.4, 180, 120]
 IDLE_POSE =             [10, 120, 16.6, 166.4, 89.8, 120]
 
 
+LIFTING_POSE = {'p4': 120.0, 'p5': 120.0}
+HOLDING_POSE = {'p2': 30.0, 'p3': 170.0}
 
-
-HOLDING_POSE = {'p2': 30.0, 'p3': 170.0, 'p4': 120.0}
 DROP_POSE = {'p2': 90.0, 'p4': 80.0}
 
 @dataclass(frozen=True)
