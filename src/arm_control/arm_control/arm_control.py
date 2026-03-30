@@ -193,6 +193,10 @@ class ArmControlNode(Node):
     def control_loop(self):
         if self.is_motion_active():
             return
+        
+        if self.state == State.MOVING_TO_START_SAFE:
+            self.command_idle_pose(State.MOVING_TO_IDLE)
+            return
 
         if self.state == State.MOVING_TO_IDLE:
             self.transition_to(State.IDLE)
@@ -225,7 +229,7 @@ class ArmControlNode(Node):
             self.publish_result('DROP_SUCCESS')
 
     def handle_start_command(self):
-        if self.state != State.START:
+        if self.state != State.START or self.is_motion_active():
             self.publish_result('START_FAIL')
             return
 
@@ -319,8 +323,7 @@ class ArmControlNode(Node):
 
     def command_start(self):
         target_position = START_SAFE_POSITION.copy()
-        self.publish_arm_control(target_position)
-        self.command_idle_pose(State.MOVING_TO_IDLE)
+        self.publish_arm_control(target_position, new_state=State.MOVING_TO_START_SAFE)
 
     def command_named_pose(self, pose: dict, new_state: State):
         target_position = self.position.copy()

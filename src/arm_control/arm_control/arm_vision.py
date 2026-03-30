@@ -20,7 +20,7 @@ COLOR_RANGES = {
         'box_color': (0, 255, 0),
     },
     'red': {
-        'lower': np.array([0, 70, 50], dtype=np.uint8),
+        'lower_red': np.array([0, 70, 50], dtype=np.uint8),
         'upper': np.array([10, 255, 255], dtype=np.uint8),
         'box_color': (0, 0, 255),
     },
