@@ -9,15 +9,18 @@ from robp_interfaces.msg import ArmControl
 from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
 
-from arm_control.arm_kinematics import DEFAULT_PICKUP_Z
-from arm_control.arm_kinematics import DROP_POSE
-from arm_control.arm_kinematics import HOLDING_POSE
-from arm_control.arm_kinematics import IDLE_POSE
-from arm_control.arm_kinematics import INITIAL_POSITION
-from arm_control.arm_kinematics import START_SAFE_POSITION
-from arm_control.arm_kinematics import make_planar_target
-from arm_control.arm_kinematics import planar_to_joint_target
-from arm_control.arm_kinematics import rho_midpoint
+from arm_control.arm_kinematics import (
+    DEFAULT_PICKUP_Z,
+    IDLE_Z,
+    DROP_POSE,
+    HOLDING_POSE,
+    IDLE_POSE,
+    INITIAL_POSITION,
+    START_SAFE_POSITION,
+    make_planar_target,
+    planar_to_joint_target,
+    rho_midpoint,
+)
 
 
 MS_PER_DEGREE = 60
@@ -44,6 +47,10 @@ PIXEL_TO_MM = 0.15
 PIXEL_TO_ALPHA_DEG = 0.055
 MAX_RHO_STEP_MM = 6.0
 MAX_ALPHA_STEP_DEG = 2.0
+
+DESCENT_STEP_MM = 10.0
+FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   # your current low value
+START_PICKUP_Z = IDLE_Z  # higher starting point
 
 REQUIRED_DETECTIONS = 3
 STABLE_X_TOLERANCE = 8
@@ -307,7 +314,7 @@ class ArmControlNode(Node):
     def command_observe_pose(self):
         self.current_target_rho = rho_midpoint()
         self.current_target_alpha = 0.0
-        self.current_target_z = DEFAULT_PICKUP_Z
+        self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
         self.command_gripper(OPEN_GRIPPER_ANGLE)
         self.command_planar_target(
