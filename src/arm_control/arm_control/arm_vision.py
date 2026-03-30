@@ -20,17 +20,17 @@ COLOR_RANGES = {
         'box_color': (0, 255, 0),
     },
     'red': {
-            'ranges': [
-                {
-                    'lower': np.array([0, 70, 50], dtype=np.uint8),
-                    'upper': np.array([10, 255, 255], dtype=np.uint8),
-                },
-                {
-                    'lower': np.array([170, 70, 50], dtype=np.uint8),
-                    'upper': np.array([180, 255, 255], dtype=np.uint8),
-                }
-            ],
-            'box_color': (0, 0, 255),
+        'ranges': [
+            {
+                'lower': np.array([0, 120, 70], dtype=np.uint8),
+                'upper': np.array([7, 255, 255], dtype=np.uint8),
+            },
+            {
+                'lower': np.array([170, 120, 70], dtype=np.uint8),
+                'upper': np.array([180, 255, 255], dtype=np.uint8),
+            }
+        ],
+        'box_color': (0, 0, 255),
     },
     'blue': {
         'lower': np.array([100, 80, 40], dtype=np.uint8),
