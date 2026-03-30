@@ -33,10 +33,10 @@ COLOR_RANGES = {
         'box_color': (0, 0, 255),
     },
     'blue': {
-        'lower': np.array([100, 80, 40], dtype=np.uint8),
-        'upper': np.array([130, 255, 255], dtype=np.uint8),
+        'lower': np.array([90, 60, 30], dtype=np.uint8),
+        'upper': np.array([140, 255, 255], dtype=np.uint8),
         'box_color': (255, 0, 0),
-    },
+    }
 }
 
 
