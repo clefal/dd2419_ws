@@ -194,13 +194,9 @@ class ArmControlNode(Node):
         if self.is_motion_active():
             return
 
-        if self.state == State.MOVING_TO_START_SAFE:
-            self.command_idle_pose(new_state=State.MOVING_TO_IDLE)
-            return
-
         if self.state == State.MOVING_TO_IDLE:
             self.transition_to(State.IDLE)
-            self.publish_result('START_SUCCESS')
+            self.publish_result('IDLE_SUCCESS')
             return
 
         if self.state == State.MOVING_TO_OBSERVE:
@@ -210,8 +206,6 @@ class ArmControlNode(Node):
         if self.state == State.ALIGNING:
             self.update_alignment()
             return
-
-
 
         if self.state == State.LIFTING:
             self.transition_to(State.HOLDING)
@@ -235,7 +229,7 @@ class ArmControlNode(Node):
             self.publish_result('START_FAIL')
             return
 
-        self.command_start_safe()
+        self.command_start()
 
     def handle_pickup_command(self):
         if self.state != State.IDLE:
@@ -321,12 +315,12 @@ class ArmControlNode(Node):
 
     def command_idle_pose(self, new_state: State):
         idle_position = IDLE_POSE.copy()
-      
         self.publish_arm_control(idle_position, new_state)
 
-    def command_start_safe(self):
-        target_position = [float(value) for value in START_SAFE_POSITION]
-        self.publish_arm_control(target_position, State.MOVING_TO_START_SAFE)
+    def command_start(self):
+        target_position = START_SAFE_POSITION.copy()
+        self.publish_arm_control(target_position)
+        self.command_idle_pose(State.MOVING_TO_IDLE)
 
     def command_named_pose(self, pose: dict, new_state: State):
         target_position = self.position.copy()
