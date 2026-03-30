@@ -15,7 +15,7 @@ MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 
 COLOR_RANGES = {
     'green': {
-        'lower': np.array([40, 40, 40], dtype=np.uint8),
+        'lower': np.array([40, 40, 20], dtype=np.uint8),  # Lowered V from 40 to 20 to allow darker greens
         'upper': np.array([80, 255, 255], dtype=np.uint8),
         'box_color': (0, 255, 0),
     },

@@ -13,10 +13,12 @@ from arm_control.arm_kinematics import (
     DEFAULT_PICKUP_Z,
     IDLE_Z,
     DROP_POSE,
+    LIFTING_POSE,
     HOLDING_POSE,
     IDLE_POSE,
     INITIAL_POSITION,
     START_SAFE_POSITION,
+    BASE_MIN_RHO,
     make_planar_target,
     planar_to_joint_target,
     rho_midpoint,
@@ -40,18 +42,18 @@ CONTROL_RATE_HZ = 10.0
 VISION_TIMEOUT_SEC = 1.0
 
 TARGET_PIXEL_X = 300
-TARGET_PIXEL_Y = 424
-ALIGN_X_TOLERANCE = 12
+TARGET_PIXEL_Y = 400
+ALIGN_X_TOLERANCE = 25
 ALIGN_Y_TOLERANCE = 10
 PIXEL_TO_MM = 0.15
 PIXEL_TO_ALPHA_DEG = 0.055
 MAX_RHO_STEP_MM = 6.0
 MAX_ALPHA_STEP_DEG = 2.0
 
-DESCENT_STEP_MM = 10.0
+DESCENT_STEP_MM = 5.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   # your current low value
-START_PICKUP_Z = IDLE_Z  # higher starting point
-
+START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
+ALIGNMENT_Z = FINAL_PICKUP_Z + 10.0  # stop aligning below this Z to avoid vision issues
 REQUIRED_DETECTIONS = 3
 STABLE_X_TOLERANCE = 8
 STABLE_Y_TOLERANCE = 8
@@ -217,18 +219,23 @@ class ArmControlNode(Node):
         if self.state == State.ALIGNING:
             self.update_alignment()
             return
-
-        if self.state == State.LIFTING:
-            self.transition_to(State.HOLDING)
-            self.publish_result('PICK_UP_SUCCESS')
+        
+        if self.state == State.CLOSING_GRIPPER:
+            self.command_named_pose(LIFTING_POSE, new_state=State.LIFTING)
             return
 
+        if self.state == State.LIFTING:
+            #TODO check if cube is actually lifted by checking vision before holding pose, declaring failure if not lifted
+            self.publish_result('PICK_UP_SUCCESS')
+            self.command_named_pose(HOLDING_POSE, new_state=State.HOLDING)
+            return
+        
         if self.state == State.MOVING_TO_DROP:
             self.command_gripper(OPEN_GRIPPER_ANGLE, new_state=State.OPENING_FOR_DROP)
             return
 
         if self.state == State.OPENING_FOR_DROP:
-            self.command_named_pose(IDLE_POSE, new_state=State.RETURNING_TO_IDLE)
+            self.command_idle_pose(State.RETURNING_TO_IDLE)
             return
 
         if self.state == State.RETURNING_TO_IDLE:
@@ -312,7 +319,7 @@ class ArmControlNode(Node):
         )
 
     def command_observe_pose(self):
-        self.current_target_rho = rho_midpoint()
+        self.current_target_rho = BASE_MIN_RHO
         self.current_target_alpha = 0.0
         self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
@@ -375,33 +382,69 @@ class ArmControlNode(Node):
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
 
-        if abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE:
-            if self.track_only_mode:
-                self.track_only_mode = False
-                self.transition_to(State.IDLE)
-                self.publish_result(
-                    f'TRACK_ONLY_SUCCESS x={detection.center_x} y={detection.center_y} '
-                    f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
-                    f'z={self.current_target_z:.1f}'
-                )
-                return
-            self.command_gripper(CLOSED_GRIPPER_ANGLE, new_state=State.CLOSING_GRIPPER)
-            return
+        aligned = abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE
 
-        delta_rho = self.clamp_step(error_y * PIXEL_TO_MM, MAX_RHO_STEP_MM)
-        delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+        if self.current_target_z > ALIGNMENT_Z:
+            # Above ALIGNMENT_Z: align step-by-step
+            if aligned:
+                new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                rho = self.current_target_rho
+                alpha = self.current_target_alpha
+            else:
+                new_z = self.current_target_z
+                pixel_to_mm = PIXEL_TO_MM * (self.current_target_z / IDLE_Z)
+                delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
+                delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                rho = self.current_target_rho + delta_rho
+                alpha = self.current_target_alpha + delta_alpha
+        else:
+            # Below ALIGNMENT_Z: just descend to FINAL_PICKUP_Z without aligning
+            new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+            rho = self.current_target_rho
+            alpha = self.current_target_alpha
+            if new_z == FINAL_PICKUP_Z:
+                # At FINAL_PICKUP_Z, close gripper
+                if self.track_only_mode:
+                    if aligned:
+                        self.track_only_mode = False
+                        self.transition_to(State.IDLE)
+                        self.publish_result(
+                            f'TRACK_ONLY_SUCCESS x={detection.center_x} y={detection.center_y} '
+                            f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
+                            f'z={self.current_target_z:.1f}'
+                        )
+                        return
+                else:
+                    self.command_gripper(CLOSED_GRIPPER_ANGLE, new_state=State.CLOSING_GRIPPER)
+                    return
 
         try:
             self.command_planar_target(
-                rho=self.current_target_rho + delta_rho,
-                alpha_deg=self.current_target_alpha + delta_alpha,
-                z=self.current_target_z,
+                rho=rho,
+                alpha_deg=alpha,
+                z=new_z,
                 new_state=State.ALIGNING,
             )
         except ValueError as exc:
-            self.track_only_mode = False
-            self.transition_to(State.ERROR)
-            self.publish_result(f'PICK_UP_FAIL_RANGE: {exc}')
+            if self.current_target_z > FINAL_PICKUP_Z:
+                # If joint limits reached at high Z, descend and try again at lower height
+                fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                try:
+                    self.command_planar_target(
+                        rho=self.current_target_rho,
+                        alpha_deg=self.current_target_alpha,
+                        z=fallback_z,
+                        new_state=State.ALIGNING,
+                    )
+                except ValueError:
+                    # If still fails, then error
+                    self.track_only_mode = False
+                    self.transition_to(State.ERROR)
+                    self.publish_result(f'PICK_UP_FAIL_RANGE: {exc}')
+            else:
+                self.track_only_mode = False
+                self.transition_to(State.ERROR)
+                self.publish_result(f'PICK_UP_FAIL_RANGE: {exc}')
 
     def publish_arm_control(self, target_position: list[float], new_state: State | None = None):
         self.new_position = [float(value) for value in target_position]
