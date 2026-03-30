@@ -20,9 +20,17 @@ COLOR_RANGES = {
         'box_color': (0, 255, 0),
     },
     'red': {
-        'lower_red': np.array([0, 70, 50], dtype=np.uint8),
-        'upper': np.array([10, 255, 255], dtype=np.uint8),
-        'box_color': (0, 0, 255),
+            'ranges': [
+                {
+                    'lower': np.array([0, 70, 50], dtype=np.uint8),
+                    'upper': np.array([10, 255, 255], dtype=np.uint8),
+                },
+                {
+                    'lower': np.array([170, 70, 50], dtype=np.uint8),
+                    'upper': np.array([180, 255, 255], dtype=np.uint8),
+                }
+            ],
+            'box_color': (0, 0, 255),
     },
     'blue': {
         'lower': np.array([100, 80, 40], dtype=np.uint8),
@@ -81,7 +89,13 @@ class ArmVisionNode(Node):
         self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
     def detect_cube(self, hsv, color_name, color_config):
-        mask = cv2.inRange(hsv, color_config['lower'], color_config['upper'])
+        if 'ranges' in color_config:
+            mask = None
+            for r in color_config['ranges']:
+                m = cv2.inRange(hsv, r['lower'], r['upper'])
+                mask = m if mask is None else (mask | m)
+        else:
+            mask = cv2.inRange(hsv, color_config['lower'], color_config['upper'])
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
