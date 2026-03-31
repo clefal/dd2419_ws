@@ -415,7 +415,7 @@ class ArmControlNode(Node):
             else:
                 self.alignment_error_history.append(error_magnitude)
                 new_z = self.current_target_z
-                scale = max(0.4, z/ IDLE_Z)
+                scale = max(0.4, self.current_target_z/ IDLE_Z)
                 pixel_to_mm = PIXEL_TO_MM * scale
                 delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
                 delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
