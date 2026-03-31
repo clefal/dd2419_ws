@@ -69,6 +69,7 @@ VISION_LOG_MIN_INTERVAL_SEC = 0.75
 VISION_LOG_DELTA_PIXELS = 10
 OUT_OF_REACH_CONFIRMATION_STEPS = 3
 BOUNDARY_EPSILON = 1e-3
+OUT_OF_REACH_MIN_ERROR_IMPROVEMENT = 12.0
 
 
 class State(Enum):
@@ -113,6 +114,7 @@ class ArmControlNode(Node):
         self.last_vision_log_time = None
         self.track_only_mode = False
         self.out_of_reach_counter = 0
+        self.alignment_error_history = deque(maxlen=OUT_OF_REACH_CONFIRMATION_STEPS + 1)
 
         self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
@@ -253,7 +255,9 @@ class ArmControlNode(Node):
             self.publish_result('START_FAIL')
             return
 
-        self.command_start()
+        target_position = START_SAFE_POSITION.copy()
+        self.publish_arm_control(target_position, new_state=State.MOVING_TO_START_SAFE)
+
 
     def handle_pickup_command(self):
         if self.state != State.IDLE:
@@ -330,6 +334,7 @@ class ArmControlNode(Node):
         self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
         self.out_of_reach_counter = 0
+        self.alignment_error_history.clear()
         self.command_gripper(OPEN_GRIPPER_ANGLE)
         self.command_planar_target(
             rho=self.current_target_rho,
@@ -342,9 +347,6 @@ class ArmControlNode(Node):
         idle_position = IDLE_POSE.copy()
         self.publish_arm_control(idle_position, new_state)
 
-    def command_start(self):
-        target_position = START_SAFE_POSITION.copy()
-        self.publish_arm_control(target_position, new_state=State.MOVING_TO_START_SAFE)
 
     def command_named_pose(self, pose: dict, new_state: State):
         target_position = self.position.copy()
@@ -388,6 +390,7 @@ class ArmControlNode(Node):
 
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
+        error_magnitude = abs(error_x) + abs(error_y)
 
         aligned = abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE
 
@@ -395,10 +398,12 @@ class ArmControlNode(Node):
             # Above ALIGNMENT_Z: align step-by-step
             if aligned:
                 self.out_of_reach_counter = 0
+                self.alignment_error_history.clear()
                 new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
             else:
+                self.alignment_error_history.append(error_magnitude)
                 new_z = self.current_target_z
                 pixel_to_mm = PIXEL_TO_MM * (self.current_target_z / IDLE_Z)
                 delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
@@ -406,10 +411,14 @@ class ArmControlNode(Node):
                 requested_rho = self.current_target_rho + delta_rho
                 requested_alpha = self.current_target_alpha + delta_alpha
 
-                if self.is_out_of_reach_adjustment(requested_rho, requested_alpha):
+                if (
+                    self.is_out_of_reach_adjustment(requested_rho, requested_alpha)
+                    or self.is_alignment_stalled()
+                ):
                     self.out_of_reach_counter += 1
                     if self.out_of_reach_counter >= OUT_OF_REACH_CONFIRMATION_STEPS:
                         self.track_only_mode = False
+                        self.alignment_error_history.clear()
                         self.transition_to(State.IDLE)
                         self.publish_result('PICK_UP_FAIL_OUT_OF_REACH')
                         return
@@ -421,6 +430,7 @@ class ArmControlNode(Node):
         else:
             # Below ALIGNMENT_Z: just descend to FINAL_PICKUP_Z without aligning
             self.out_of_reach_counter = 0
+            self.alignment_error_history.clear()
             new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
             rho = self.current_target_rho
             alpha = self.current_target_alpha
@@ -551,6 +561,13 @@ class ArmControlNode(Node):
             return True
 
         return False
+
+    def is_alignment_stalled(self) -> bool:
+        if len(self.alignment_error_history) < self.alignment_error_history.maxlen:
+            return False
+
+        improvement = self.alignment_error_history[0] - self.alignment_error_history[-1]
+        return improvement < OUT_OF_REACH_MIN_ERROR_IMPROVEMENT
 
     def transition_to(self, new_state: State):
         self.state = new_state
