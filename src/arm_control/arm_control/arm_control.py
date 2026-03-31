@@ -10,7 +10,6 @@ from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
 
 from arm_control.arm_kinematics import (
-    BASE_LIMITS,
     MAX_RHO,
     DEFAULT_PICKUP_Z,
     IDLE_Z,
@@ -68,7 +67,6 @@ DEBUG_VISION_UPDATES = True
 VISION_LOG_MIN_INTERVAL_SEC = 0.75
 VISION_LOG_DELTA_PIXELS = 10
 OUT_OF_REACH_CONFIRMATION_STEPS = 3
-BOUNDARY_EPSILON = 1e-3
 OUT_OF_REACH_MIN_ERROR_IMPROVEMENT = 12.0
 
 
@@ -423,10 +421,7 @@ class ArmControlNode(Node):
                 requested_rho = self.current_target_rho + delta_rho
                 requested_alpha = self.current_target_alpha + delta_alpha
 
-                if (
-                    self.is_out_of_reach_adjustment(requested_rho, requested_alpha)
-                    or self.is_alignment_stalled()
-                ):
+                if self.is_out_of_reach_adjustment(requested_rho, requested_alpha):
                     self.out_of_reach_counter += 1
                     if self.out_of_reach_counter >= OUT_OF_REACH_CONFIRMATION_STEPS:
                         self.track_only_mode = False
@@ -437,8 +432,14 @@ class ArmControlNode(Node):
                 else:
                     self.out_of_reach_counter = 0
 
-                rho = requested_rho
-                alpha = requested_alpha
+                if self.is_alignment_stalled():
+                    self.alignment_error_history.clear()
+                    new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                    rho = self.current_target_rho
+                    alpha = self.current_target_alpha
+                else:
+                    rho = requested_rho
+                    alpha = requested_alpha
         else:
             # Below ALIGNMENT_Z: just descend to FINAL_PICKUP_Z without aligning
             self.out_of_reach_counter = 0
@@ -555,24 +556,8 @@ class ArmControlNode(Node):
         return max(-limit, min(limit, value))
 
     def is_out_of_reach_adjustment(self, requested_rho: float, requested_alpha: float) -> bool:
-        min_base_angle, max_base_angle = BASE_LIMITS
-        requested_base = BASE_CENTER_ANGLE + requested_alpha
-        current_base = BASE_CENTER_ANGLE + self.current_target_alpha
-
-        if requested_base > max_base_angle and current_base >= max_base_angle - BOUNDARY_EPSILON:
-            return True
-        if requested_base < min_base_angle and current_base <= min_base_angle + BOUNDARY_EPSILON:
-            return True
-
-        current_min_rho = get_min_rho(self.current_target_alpha, self.current_target_rho)
         requested_min_rho = get_min_rho(requested_alpha, requested_rho)
-
-        if requested_rho > MAX_RHO and self.current_target_rho >= MAX_RHO - BOUNDARY_EPSILON:
-            return True
-        if requested_rho < requested_min_rho and self.current_target_rho <= current_min_rho + BOUNDARY_EPSILON:
-            return True
-
-        return False
+        return requested_rho > MAX_RHO or requested_rho < requested_min_rho
 
     def is_alignment_stalled(self) -> bool:
         if len(self.alignment_error_history) < self.alignment_error_history.maxlen:
