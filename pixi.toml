@@ -34,7 +34,7 @@ workspace = { cmd = "ros2 launch src/mapping/launch/workspace_loader.launch.py w
 mapping = { cmd = "ros2 run mapping mapping_prob" }
 full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
 detection = { cmd = "ros2 run detection detection" }
-full_arm_launch = { cmd = "rose2 launch robp_launch arm_control_launch.xml" }
+full_arm_launch = { cmd = "ros2 launch robp_launch arm_control_launch.xml" }
 
 [tasks.install_udev_rules]
 cmd = '''
