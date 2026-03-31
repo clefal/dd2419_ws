@@ -10,6 +10,8 @@ from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
 
 from arm_control.arm_kinematics import (
+    BASE_LIMITS,
+    MAX_RHO,
     DEFAULT_PICKUP_Z,
     IDLE_Z,
     DROP_POSE,
@@ -19,6 +21,7 @@ from arm_control.arm_kinematics import (
     INITIAL_POSITION,
     START_SAFE_POSITION,
     BASE_MIN_RHO,
+    get_min_rho,
     make_planar_target,
     planar_to_joint_target,
     rho_midpoint,
@@ -51,7 +54,7 @@ MAX_RHO_STEP_MM = 6.0
 MAX_ALPHA_STEP_DEG = 2.0
 
 DESCENT_STEP_MM = 5.0
-FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   # your current low value
+FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
 START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
 ALIGNMENT_Z = FINAL_PICKUP_Z + 10.0  # stop aligning below this Z to avoid vision issues
 REQUIRED_DETECTIONS = 3
@@ -64,6 +67,8 @@ TEST_Z_STEP_MM = 5.0
 DEBUG_VISION_UPDATES = True
 VISION_LOG_MIN_INTERVAL_SEC = 0.75
 VISION_LOG_DELTA_PIXELS = 10
+OUT_OF_REACH_CONFIRMATION_STEPS = 3
+BOUNDARY_EPSILON = 1e-3
 
 
 class State(Enum):
@@ -107,6 +112,7 @@ class ArmControlNode(Node):
         self.last_logged_detection = None
         self.last_vision_log_time = None
         self.track_only_mode = False
+        self.out_of_reach_counter = 0
 
         self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
@@ -323,6 +329,7 @@ class ArmControlNode(Node):
         self.current_target_alpha = 0.0
         self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
+        self.out_of_reach_counter = 0
         self.command_gripper(OPEN_GRIPPER_ANGLE)
         self.command_planar_target(
             rho=self.current_target_rho,
@@ -387,6 +394,7 @@ class ArmControlNode(Node):
         if self.current_target_z > ALIGNMENT_Z:
             # Above ALIGNMENT_Z: align step-by-step
             if aligned:
+                self.out_of_reach_counter = 0
                 new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
@@ -395,10 +403,24 @@ class ArmControlNode(Node):
                 pixel_to_mm = PIXEL_TO_MM * (self.current_target_z / IDLE_Z)
                 delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
                 delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
-                rho = self.current_target_rho + delta_rho
-                alpha = self.current_target_alpha + delta_alpha
+                requested_rho = self.current_target_rho + delta_rho
+                requested_alpha = self.current_target_alpha + delta_alpha
+
+                if self.is_out_of_reach_adjustment(requested_rho, requested_alpha):
+                    self.out_of_reach_counter += 1
+                    if self.out_of_reach_counter >= OUT_OF_REACH_CONFIRMATION_STEPS:
+                        self.track_only_mode = False
+                        self.transition_to(State.IDLE)
+                        self.publish_result('PICK_UP_FAIL_OUT_OF_REACH')
+                        return
+                else:
+                    self.out_of_reach_counter = 0
+
+                rho = requested_rho
+                alpha = requested_alpha
         else:
             # Below ALIGNMENT_Z: just descend to FINAL_PICKUP_Z without aligning
+            self.out_of_reach_counter = 0
             new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
             rho = self.current_target_rho
             alpha = self.current_target_alpha
@@ -509,6 +531,26 @@ class ArmControlNode(Node):
 
     def clamp_step(self, value: float, limit: float) -> float:
         return max(-limit, min(limit, value))
+
+    def is_out_of_reach_adjustment(self, requested_rho: float, requested_alpha: float) -> bool:
+        min_base_angle, max_base_angle = BASE_LIMITS
+        requested_base = BASE_CENTER_ANGLE + requested_alpha
+        current_base = BASE_CENTER_ANGLE + self.current_target_alpha
+
+        if requested_base > max_base_angle and current_base >= max_base_angle - BOUNDARY_EPSILON:
+            return True
+        if requested_base < min_base_angle and current_base <= min_base_angle + BOUNDARY_EPSILON:
+            return True
+
+        current_min_rho = get_min_rho(self.current_target_alpha, self.current_target_rho)
+        requested_min_rho = get_min_rho(requested_alpha, requested_rho)
+
+        if requested_rho > MAX_RHO and self.current_target_rho >= MAX_RHO - BOUNDARY_EPSILON:
+            return True
+        if requested_rho < requested_min_rho and self.current_target_rho <= current_min_rho + BOUNDARY_EPSILON:
+            return True
+
+        return False
 
     def transition_to(self, new_state: State):
         self.state = new_state

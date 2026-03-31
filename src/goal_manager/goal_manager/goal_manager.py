@@ -204,6 +204,15 @@ class GoalManager(Node):
      
 
                 self.request_box_goal_candidates(reason='pickup_success')
+            elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
+                self.get_logger().warn('Arm reported cube out of reach. Re-approaching target.')
+                self._waiting_for_result = False
+                if self._target_ is None:
+                    self._state = AutoState.SEARCH
+                    self.publish_next_search_goal()
+                else:
+                    self._state = AutoState.APPROACH_OBJECT_COARSE
+                    self.publish_goal(self._target_[0], self._target_[1], 0.0)
             elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
                 self.get_logger().warn(f'Arm pickup failed: {msg.data}')
             else:
