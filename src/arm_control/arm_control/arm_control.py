@@ -450,15 +450,14 @@ class ArmControlNode(Node):
             if new_z == FINAL_PICKUP_Z:
                 # At FINAL_PICKUP_Z, close gripper
                 if self.track_only_mode:
-                    if aligned:
-                        self.track_only_mode = False
-                        self.transition_to(State.IDLE)
-                        self.publish_result(
-                            f'TRACK_ONLY_SUCCESS x={detection.center_x} y={detection.center_y} '
-                            f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
-                            f'z={self.current_target_z:.1f}'
-                        )
-                        return
+                    self.track_only_mode = False
+                    self.transition_to(State.IDLE)
+                    self.publish_result(
+                        f'TRACK_ONLY_SUCCESS x={detection.center_x} y={detection.center_y} '
+                        f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
+                        f'z={self.current_target_z:.1f}'
+                    )
+                    return
                 else:
                     self.command_gripper(CLOSED_GRIPPER_ANGLE, new_state=State.CLOSING_GRIPPER)
                     return
