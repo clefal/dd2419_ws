@@ -134,8 +134,20 @@ class ArmControlNode(Node):
             self.handle_pickup_command()
         elif command == 'DROP':
             self.handle_drop_command()
-        elif command == 'TEST_CENTER':
-            self.handle_test_planar_command(rho=rho_midpoint(), alpha_deg=0.0, label='TEST_CENTER')
+        elif command == 'TEST_CENTER_LOW':
+            self.handle_test_planar_command(
+                rho=rho_midpoint(),
+                alpha_deg=0.0,
+                z=FINAL_PICKUP_Z,
+                label='TEST_CENTER_LOW',
+            )
+        elif command == 'TEST_CENTER_HIGH':
+            self.handle_test_planar_command(
+                rho=rho_midpoint(),
+                alpha_deg=0.0,
+                z=START_PICKUP_Z,
+                label='TEST_CENTER_HIGH',
+            )
         elif command == 'TEST_RHO_IN':
             self.handle_test_planar_command(
                 rho=self.current_target_rho - TEST_RHO_STEP_MM,
