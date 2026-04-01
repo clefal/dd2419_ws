@@ -26,7 +26,9 @@ setup(
         'console_scripts': [
             'localization = localization.localization:main',
             'icp_scan_to_map = localization.icp_scan_to_map:main',
-            'icp_scan_to_scan = localization.icp_scan_to_scan:main'
+            'icp_scan_to_scan = localization.icp_scan_to_scan:main',
+            'icp_scan_to_line = localization.icp_scan_to_line:main',
+            'icp_scan_to_scan_stacked = localization.icp_scan_to_scan_stacked:main'
         ],
     },
 )

@@ -14,7 +14,7 @@ class MockIsTurning(Node):
         super().__init__('mock_is_turning')
 
         # Parameters
-        self.declare_parameter('omega_threshold', 1.4)   # rad/s
+        self.declare_parameter('omega_threshold', 1.0)   # rad/s
         self.declare_parameter('wheel_radius', 0.04921)     # m
         self.declare_parameter('wheel_base', 0.3075)       # m
         self.declare_parameter('ticks_per_rev', 48 * 64)   # encoder ticks / wheel revolution
@@ -32,6 +32,7 @@ class MockIsTurning(Node):
         )
 
         self.prev_time = None
+        self.prev_state = None
 
         self.get_logger().info('mock_is_turning started')
 
@@ -83,6 +84,7 @@ class MockIsTurning(Node):
 
         out_msg = Bool()
         out_msg.data = is_turning
+        self.get_logger().info(f"is_turning: {is_turning}")
         self.pub.publish(out_msg)
 
         self.get_logger().debug(

@@ -141,7 +141,7 @@ class IcpScanToScan(Node):
                 self.map_frame,
                 "start",
                 rclpy.time.Time(seconds=0),
-                timeout=rclpy.time.Duration(seconds=1),
+                timeout=rclpy.time.Duration(seconds=5),
             )
             self.MTB = tf_to_T2(tf)
             self.get_logger().info("Initialized MTB from TF: map -> start")
