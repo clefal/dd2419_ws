@@ -109,6 +109,7 @@ scipy = "*"
 ros-jazzy-std-msgs = ">=5.3.6,<6"
 colour-science = ">=0.4.7,<0.5"
 scikit-learn = ">=1.8.0,<2"
+open3d = "*"
 
 [target.linux-64.dependencies]
 # ROS

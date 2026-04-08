@@ -523,51 +523,85 @@ class IcpScanToLine(Node):
         super().__init__("scan_to_line_slam")
 
         # Topics / frames
+        # LaserScan input topic.
         self.declare_parameter("scan_topic", "/lidar/scan")
+        # Boolean topic indicating when the platform is turning; scans are skipped while true.
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
+        # Debug topic for publishing the filtered scan after preprocessing.
         self.declare_parameter("preprocessed_scan_topic", "/localization/preprocessed_scan")
+        # Debug visualization topic for publishing the current map lines.
         self.declare_parameter("map_lines_topic", "/localization/map_lines")
+        # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link")
+        # Odometry frame used as the short-term motion prior.
         self.declare_parameter("odom_frame", "odom")
+        # Global frame where the line map is expressed.
         self.declare_parameter("map_frame", "map")
 
         # Preprocessing
+        # Downsample factor for scan beams; 1 keeps every beam.
         self.declare_parameter("scan_stride", 1)
-        self.declare_parameter("range_max_clip", 3.0)
-        self.declare_parameter("range_max_filter_scan", 3.0)
+        # Maximum range kept when turning scan beams into points for mapping and ICP.
+        self.declare_parameter("range_max_clip", 3.5)
+        # Maximum range kept in the published preprocessed scan message.
+        self.declare_parameter("range_max_filter_scan", 3.5)
+        # Number of consecutive scans stacked together in the current laser frame.
         self.declare_parameter("stack_scans", 3)
+        # Median filter size applied to the raw range array.
         self.declare_parameter("median_kernel_size", 5)
+        # Reject a beam if it differs from both adjacent beams by more than this range jump.
         self.declare_parameter("range_jump_thresh", 0.20)
+        # Remove points whose immediate scan-order neighbors are both farther than this distance.
         self.declare_parameter("neighbor_dist_thresh", 0.10)
 
         # Line extraction
+        # Split ordered points into separate clusters when consecutive points are farther apart than this.
         self.declare_parameter("cluster_jump_thresh", 0.25)
-        self.declare_parameter("split_thresh", 0.04)
-        self.declare_parameter("line_min_points", 10)
-        self.declare_parameter("line_min_length", 0.40)
+        # Split-and-merge deviation threshold; smaller values produce more, shorter segments.
+        self.declare_parameter("split_thresh", 0.05)
+        # Minimum number of points required before a candidate segment is accepted as a line.
+        self.declare_parameter("line_min_points", 20)
+        # Minimum line length required before a detected segment is kept.
+        self.declare_parameter("line_min_length", 0.80)
 
         # ICP
-        self.declare_parameter("icp_max_iters", 15)
-        self.declare_parameter("icp_min_corr", 25)
-        self.declare_parameter("icp_max_perp_dist", 0.12)
+        # Maximum number of scan-to-line ICP iterations per callback.
+        self.declare_parameter("icp_max_iters", 30)
+        # Minimum number of valid point-to-line correspondences required for acceptance.
+        self.declare_parameter("icp_min_corr", 20)
+        # Maximum perpendicular point-to-line distance allowed when building correspondences.
+        self.declare_parameter("icp_max_perp_dist", 0.20)
+        # Huber loss transition point; larger residuals are down-weighted.
         self.declare_parameter("icp_huber_delta", 0.05)
-        self.declare_parameter("icp_accept_max_translation", 0.08)
-        self.declare_parameter("icp_accept_max_rotation_deg", 3.0)
-        self.declare_parameter("icp_accept_max_median_residual", 0.06)
-        self.declare_parameter("icp_accept_max_mean_residual", 0.08)
+        # Maximum translation correction allowed relative to the odometry-based initial guess.
+        self.declare_parameter("icp_accept_max_translation", 0.20)
+        # Maximum rotation correction allowed relative to the odometry-based initial guess.
+        self.declare_parameter("icp_accept_max_rotation_deg", 10.0)
+        # Reject ICP if the median absolute residual is above this threshold.
+        self.declare_parameter("icp_accept_max_median_residual", 0.08)
+        # Reject ICP if the mean absolute residual is above this threshold.
+        self.declare_parameter("icp_accept_max_mean_residual", 0.10)
 
         # Smoothing
+        # Low-pass factor used when updating map->odom from the accepted ICP estimate.
         self.declare_parameter("pose_smoothing_alpha", 0.20)
 
         # Map maintenance
+        # Hard cap on the number of stored map line segments.
         self.declare_parameter("map_max_lines", 400)
+        # Minimum midpoint separation before a similar detected line is inserted into the map.
         self.declare_parameter("map_insert_min_separation", 0.35)
+        # If true, the map stops accepting new lines after the initial seeding stage.
         self.declare_parameter("freeze_map_after_init", False)
-        self.declare_parameter("init_min_lines", 20)
+        # Minimum number of stored lines before the node switches from map seeding to ICP tracking.
+        self.declare_parameter("init_min_lines", 2)
+        # Minimum base translation required before adding more lines to the map.
         self.declare_parameter("map_update_min_translation", 0.15)
+        # Minimum base rotation required before adding more lines to the map.
         self.declare_parameter("map_update_min_rotation_deg", 8.0)
 
         # Debug
+        # Enable per-scan ICP logging with residual and correction information.
         self.declare_parameter("log_icp_debug", True)
 
         # Read params
@@ -861,7 +895,7 @@ class IcpScanToLine(Node):
 
     def scan_callback(self, scan: LaserScan) -> None:
         if self.is_turning:
-            self.get_logger().info("Ignoring scan while turning")
+            self.get_logger().warn("Ignoring scan while turning")
             return
 
         stamp = scan.header.stamp
@@ -925,6 +959,7 @@ class IcpScanToLine(Node):
             dx, dy, dth = relative_pose(T_map_laser_init, result.T)
             self.get_logger().info(
                 f"ICP | corr={result.num_corr} "
+                f"iters={result.iterations} "
                 f"mean={result.mean_abs_residual:.4f} "
                 f"median={result.median_abs_residual:.4f} "
                 f"dx={dx:.3f} dy={dy:.3f} dth_deg={math.degrees(dth):.2f} "
