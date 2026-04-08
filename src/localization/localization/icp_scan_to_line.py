@@ -539,8 +539,6 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_frame", "map")
 
         # Preprocessing
-        # Downsample factor for scan beams; 1 keeps every beam.
-        self.declare_parameter("scan_stride", 1)
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 3.5)
         # Maximum range kept in the published preprocessed scan message.
@@ -588,9 +586,17 @@ class IcpScanToLine(Node):
 
         # Map maintenance
         # Hard cap on the number of stored map line segments.
-        self.declare_parameter("map_max_lines", 400)
+        self.declare_parameter("map_max_lines", 50)
         # Minimum midpoint separation before a similar detected line is inserted into the map.
         self.declare_parameter("map_insert_min_separation", 0.35)
+        # If true, merge near-duplicate collinear segments into a longer segment.
+        self.declare_parameter("map_merge_lines", True)
+        # Maximum orientation difference (deg) for merging collinear segments.
+        self.declare_parameter("map_merge_angle_deg", 5.0)
+        # Maximum perpendicular distance (m) between segments for merging.
+        self.declare_parameter("map_merge_perp_dist", 0.1)
+        # Maximum allowed along-line gap (m) between segment intervals for merging.
+        self.declare_parameter("map_merge_max_gap", 0.25)
         # If true, the map stops accepting new lines after the initial seeding stage.
         self.declare_parameter("freeze_map_after_init", False)
         # Minimum number of stored lines before the node switches from map seeding to ICP tracking.
@@ -613,7 +619,6 @@ class IcpScanToLine(Node):
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
 
-        self.scan_stride = int(self.get_parameter("scan_stride").value)
         self.range_max_clip = float(self.get_parameter("range_max_clip").value)
         self.range_max_filter_scan = float(self.get_parameter("range_max_filter_scan").value)
         self.stack_scans = max(1, int(self.get_parameter("stack_scans").value))
@@ -639,6 +644,10 @@ class IcpScanToLine(Node):
 
         self.map_max_lines = int(self.get_parameter("map_max_lines").value)
         self.map_insert_min_separation = float(self.get_parameter("map_insert_min_separation").value)
+        self.map_merge_lines = bool(self.get_parameter("map_merge_lines").value)
+        self.map_merge_angle_deg = float(self.get_parameter("map_merge_angle_deg").value)
+        self.map_merge_perp_dist = float(self.get_parameter("map_merge_perp_dist").value)
+        self.map_merge_max_gap = float(self.get_parameter("map_merge_max_gap").value)
         self.freeze_map_after_init = bool(self.get_parameter("freeze_map_after_init").value)
         self.init_min_lines = int(self.get_parameter("init_min_lines").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
@@ -738,7 +747,6 @@ class IcpScanToLine(Node):
         points = scan_to_points(
             filtered_scan,
             range_max_clip=min(self.range_max_clip, self.range_max_filter_scan),
-            stride=self.scan_stride
         )
 
         points = remove_isolated_points_ordered(points, neighbor_dist_thresh=self.neighbor_dist_thresh)
@@ -782,8 +790,74 @@ class IcpScanToLine(Node):
 
         return True
 
+    @staticmethod
+    def _interval_along(line: LineSegment, origin: np.ndarray, d: np.ndarray) -> Tuple[float, float]:
+        s1 = float(d @ (line.p1 - origin))
+        s2 = float(d @ (line.p2 - origin))
+        return (min(s1, s2), max(s1, s2))
+
+    def _lines_mergeable(self, a: LineSegment, b: LineSegment) -> bool:
+        # Collinear-ish check (direction + perpendicular offset), then ensure the
+        # segments touch/overlap along the line up to a small gap.
+        angle = math.acos(np.clip(abs(float(a.d @ b.d)), 0.0, 1.0))
+        if angle > math.radians(self.map_merge_angle_deg):
+            return False
+
+        perp_ab = abs(float(a.n @ (b.mid - a.q)))
+        perp_ba = abs(float(b.n @ (a.mid - b.q)))
+        if perp_ab > self.map_merge_perp_dist or perp_ba > self.map_merge_perp_dist:
+            return False
+
+        d = a.d
+        origin = a.q
+        ia = self._interval_along(a, origin, d)
+        ib = self._interval_along(b, origin, d)
+        gap = max(0.0, max(ia[0], ib[0]) - min(ia[1], ib[1]))
+        return gap <= self.map_merge_max_gap
+
+    def _merge_line_into_map(self, line: LineSegment) -> bool:
+        """
+        Merge `line` with any existing map segments that are near-duplicate
+        (collinear, small perpendicular offset, small gap). Returns True if a
+        merge happened (and the map was updated), False otherwise.
+        """
+        if not self.map_merge_lines or len(self.map_lines) == 0:
+            return False
+
+        merged_pts = [line.p1, line.p2]
+        merged = False
+        candidate = line
+
+        # Iteratively merge: once the segment grows, it may become mergeable
+        # with segments that previously were just outside the interval.
+        while True:
+            merge_indices = []
+            for idx, existing in enumerate(self.map_lines):
+                if self._lines_mergeable(existing, candidate):
+                    merge_indices.append(idx)
+
+            if not merge_indices:
+                break
+
+            for idx in reversed(merge_indices):
+                ex = self.map_lines.pop(idx)
+                merged_pts.append(ex.p1)
+                merged_pts.append(ex.p2)
+                merged = True
+
+            merged_seg = fit_segment_tls(np.vstack(merged_pts))
+            if merged_seg is None:
+                break
+            candidate = merged_seg
+
+        if merged:
+            self.map_lines.append(candidate)
+        return merged
+
     def insert_lines_into_map(self, lines_map: List[LineSegment]) -> None:
         for line in lines_map:
+            if self._merge_line_into_map(line):
+                continue
             if self.should_insert_line(line):
                 self.map_lines.append(line)
 
