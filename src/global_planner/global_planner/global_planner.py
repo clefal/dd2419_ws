@@ -11,7 +11,8 @@ from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
-
+from robp_interfaces.srv import GetAllObjects
+from robp_interfaces.msg import ObjPose
 
 GridIndex = Tuple[int, int]  # (gx, gy)
 
@@ -40,15 +41,12 @@ class GlobalPlannerNode(Node):
         # Planning knobs
         self.declare_parameter("w_heuristic", 1.8)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
         self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
-        self.declare_parameter("unknown_is_lethal", False)   # OccupancyGrid unknown is -1
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
-        self.declare_parameter("allow_diagonal", True)
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
-        self.declare_parameter("cube_approach_radius", 0.16)
+        self.declare_parameter("coarse_object_standoff", 0.5)
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
-        self.declare_parameter("box_frame", "box")
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
 
@@ -68,23 +66,15 @@ class GlobalPlannerNode(Node):
         )
 
         self.sub_map = self.create_subscription(OccupancyGrid, self.map_topic, self.on_map, map_qos)
-        self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10)
+        self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10) 
+        # TODO we could change this to a message type that includes x,y and obj_id of the goal, that could make the list update cleaner
         self.sub_goal_candidates = self.create_subscription(
             PoseArray, self.goal_candidates_topic, self.on_goal_candidates, 10
         )
-        self.sub_cubes = self.create_subscription(
-            PoseArray,
-            "/nav/objects/cubes",
-            self.on_cubes,
-            10,
-        )
 
-        self.sub_target_cube = self.create_subscription(
-            PoseStamped,
-            "/nav/target/cube",
-            self.on_target_cube,
-            10,
-        )
+        self.cli_get_all_objects = self.create_client(GetAllObjects, '/object_manager/get_all_objects')
+        while not self.cli_get_all_objects.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('get_all_objects service not available, waiting again...')       
 
 
         path_qos = QoSProfile(
@@ -105,11 +95,9 @@ class GlobalPlannerNode(Node):
 
         self.pub_planning_grid = self.create_publisher(
             OccupancyGrid,
-            "/nav/planning_grid",
+            '/nav/planning_grid',
             planning_qos,
         )
-
-
 
         # TF
         self.tf_buffer = Buffer()
@@ -120,7 +108,12 @@ class GlobalPlannerNode(Node):
         self._meta: Optional[GridMeta] = None
         self._goal_msg: Optional[PoseStamped] = None
         self._cubes: List[Tuple[float, float]] = []   # in map frame
-        self._target_cube: Optional[Tuple[float, float]] = None
+        self._target_object: Optional[Tuple[float, float]] = None
+        self._box_xy: Optional[Tuple[float, float]] = None
+        self.goal_x = None  # initialize this with None, value will be assigned during first goal callback
+        self.goal_y = None
+        self._pending_plan_mode: Optional[str] = None
+        self._pending_goal_candidates: Optional[PoseArray] = None
 
 
         self.get_logger().info(
@@ -147,18 +140,6 @@ class GlobalPlannerNode(Node):
         self._plan_and_publish_candidates(msg, reason="goal_candidates")
 
 
-    def on_cubes(self, msg: PoseArray) -> None:
-        self._cubes = [
-            (p.position.x, p.position.y)
-            for p in msg.poses
-        ]
-
-    def on_target_cube(self, msg: PoseStamped) -> None:
-        self._target_cube = (
-            msg.pose.position.x,
-            msg.pose.position.y,
-        )
-
     # -------------------------
     # Planning orchestration
     # -------------------------
@@ -170,12 +151,78 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("No goal yet; cannot plan.")
             return
 
+        # now call the GetAllObj Service and update the List accordingly 
+        # make sure to exclude the goal position from the Object List, otherwise we will black the goal out
+
+        # updateobject_list needs goal pose in the future callback that is why we need it as a global variable
+        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y) # moved up since it is needed for the Obj_List_update
+        self.goal_x = goal_xy[0]
+        self.goal_y = goal_xy[1]
+        self._pending_plan_mode = "single"
+
+        self.update_object_list()
+        return
+
+    def update_object_list(self):
+        req = GetAllObjects.Request()
+        future = self.cli_get_all_objects.call_async(req)
+        future.add_done_callback(self.get_all_objects_callback)
+
+    def get_all_objects_callback(self, future):
+        
+        try:
+            res :GetAllObjects.Response = future.result()
+            obj_poses :List[ObjPose] = res.obj_poses
+            self._cubes: List[Tuple[float, float]] = []   # in map frame
+            for obj in obj_poses:
+                self._cubes.append((obj.obj_x, obj.obj_y))
+
+            if self._pending_plan_mode == "single":
+                self._continue_plan_and_publish(reason="new_goal")
+            elif self._pending_plan_mode == "candidates":
+                self._continue_plan_and_publish_candidates(reason="goal_candidates")
+
+        except Exception as e:
+            self.get_logger().info(f'get_all_objects service call failed {e}')
+        
+        
+
+    def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
+        if self._map is None or self._meta is None:
+            self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if len(msg.poses) == 0:
+            self.get_logger().warn("Received empty goal candidate list.")
+            self._publish_empty_path(reason="empty_goal_candidates")
+            return
+    
+        goal_box_avg_x = (msg.poses[0].position.x + msg.poses[1].position.x)/2
+        goal_box_avg_y = (msg.poses[0].position.y + msg.poses[1].position.y)/2
+        # since we have 2 find the average value in order to make it work with the update_list function
+        
+        self.goal_x = goal_box_avg_x
+        self.goal_y = goal_box_avg_y
+        self._pending_goal_candidates = msg
+        self._pending_plan_mode = "candidates"
+
+        self.update_object_list()   
+        return
+
+    def _continue_plan_and_publish(self, reason: str) -> None:
+        if self._map is None or self._meta is None:
+            self.get_logger().warn("No map yet; cannot plan.")
+            return
+        if self._goal_msg is None:
+            self.get_logger().warn("No goal yet; cannot plan.")
+            return
+
+        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
+        self._pending_plan_mode = None
+
         start_xy = self._get_robot_xy_in_map()
         if start_xy is None:
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan.")
             return
-
-        goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
 
         start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
         goal_idx = self.world_to_grid(goal_xy[0], goal_xy[1], self._meta)
@@ -189,63 +236,46 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_or_goal_outside_grid")
             return
 
-        # Run Weighted A*
-        include_box_lethal = not self._is_box_goal(goal_xy)
-        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
-        self.pub_planning_grid.publish(planning_map)
-
-        path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
-
-
+        path_idx = self._compute_path(start_idx, goal_idx, include_box_lethal=not self._is_box_goal(goal_xy))
         if path_idx is None or len(path_idx) == 0:
             self.get_logger().warn(f"Planning failed ({reason}). No path found.")
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
-        # For cube goals, cut path at approach radius and face cube
         final_yaw_override = None
-        maybe_path, maybe_yaw = self._apply_cube_approach_if_needed(path_idx)
+        maybe_path, maybe_yaw = self._apply_coarse_object_standoff(path_idx)
         if maybe_path is not None and len(maybe_path) > 0:
             path_idx = maybe_path
             final_yaw_override = maybe_yaw
 
-        # Convert to nav_msgs/Path in map frame
-        path_msg = Path()
-        path_msg.header.stamp = self.get_clock().now().to_msg()
-        path_msg.header.frame_id = self.global_frame
-
-        for (gx, gy) in path_idx:
-            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
-            ps = PoseStamped()
-            ps.header = path_msg.header
-            ps.pose.position.x = wx
-            ps.pose.position.y = wy
-            ps.pose.position.z = 0.0
-            ps.pose.orientation.w = 1.0
-            path_msg.poses.append(ps)
-
-        # Set final pose orientation
-        if len(path_msg.poses) > 0 and final_yaw_override is not None:
-            q = quaternion_from_euler(0.0, 0.0, final_yaw_override)
-            path_msg.poses[-1].pose.orientation.x = q[0]
-            path_msg.poses[-1].pose.orientation.y = q[1]
-            path_msg.poses[-1].pose.orientation.z = q[2]
-            path_msg.poses[-1].pose.orientation.w = q[3]
-        elif len(path_msg.poses) > 0 and self._goal_msg is not None:
+        goal_orientation = None
+        if final_yaw_override is None and self._goal_msg is not None:
             if self._goal_msg.header.frame_id == self.global_frame or self._goal_msg.header.frame_id == "":
-                path_msg.poses[-1].pose.orientation = self._goal_msg.pose.orientation
+                goal_orientation = self._goal_msg.pose.orientation
             else:
                 self.get_logger().warn(
                     f"Goal frame '{self._goal_msg.header.frame_id}' != global_frame '{self.global_frame}'. "
                     "Leaving path end orientation as identity."
                 )
 
+        path_msg = self._build_path_message(
+            path_idx,
+            final_yaw=final_yaw_override,
+            final_orientation=goal_orientation,
+        )
         self.pub_path.publish(path_msg)
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
-    def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
+    def _continue_plan_and_publish_candidates(self, reason: str) -> None:
+        msg = self._pending_goal_candidates
+        self._pending_plan_mode = None
+        self._pending_goal_candidates = None
+
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if msg is None:
+            self.get_logger().warn("No goal candidates yet; cannot plan candidate goals.")
             return
         if len(msg.poses) == 0:
             self.get_logger().warn("Received empty goal candidate list.")
@@ -271,16 +301,15 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
+        best_path_idx = None
+        best_pose = None
+        best_cost = None
         include_box_lethal = not any(
             self._is_box_goal((pose.position.x, pose.position.y))
             for pose in msg.poses
         )
         planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
         self.pub_planning_grid.publish(planning_map)
-
-        best_path_idx = None
-        best_pose = None
-        best_cost = None
 
         for pose in msg.poses:
             goal_idx = self.world_to_grid(pose.position.x, pose.position.y, self._meta)
@@ -302,21 +331,7 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
-        path_msg = Path()
-        path_msg.header.stamp = self.get_clock().now().to_msg()
-        path_msg.header.frame_id = self.global_frame
-
-        for (gx, gy) in best_path_idx:
-            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
-            ps = PoseStamped()
-            ps.header = path_msg.header
-            ps.pose.position.x = wx
-            ps.pose.position.y = wy
-            ps.pose.position.z = 0.0
-            ps.pose.orientation.w = 1.0
-            path_msg.poses.append(ps)
-
-        path_msg.poses[-1].pose.orientation = best_pose.orientation
+        path_msg = self._build_path_message(best_path_idx, final_orientation=best_pose.orientation)
         self.pub_path.publish(path_msg)
         self.get_logger().info(
             f"Published candidate path with {len(path_msg.poses)} poses (reason={reason}, candidates={len(msg.poses)}, cost={best_cost:.2f})."
@@ -336,7 +351,51 @@ class GlobalPlannerNode(Node):
             total += step + self.cell_penalty(x1, y1, occ, meta)
         return total
 
-    def _apply_cube_approach_if_needed(
+    def _compute_path(
+        self,
+        start_idx: GridIndex,
+        goal_idx: GridIndex,
+        include_box_lethal: bool,
+    ) -> Optional[List[GridIndex]]:
+        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
+        self.pub_planning_grid.publish(planning_map)
+        return self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
+
+    def _build_path_message(
+        self,
+        path_idx: List[GridIndex],
+        final_yaw: Optional[float] = None,
+        final_orientation=None,
+    ) -> Path:
+        path_msg = Path()
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = self.global_frame
+
+        for (gx, gy) in path_idx:
+            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
+            ps = PoseStamped()
+            ps.header = path_msg.header
+            ps.pose.position.x = wx
+            ps.pose.position.y = wy
+            ps.pose.position.z = 0.0
+            ps.pose.orientation.w = 1.0
+            path_msg.poses.append(ps)
+
+        if len(path_msg.poses) == 0:
+            return path_msg
+
+        if final_yaw is not None:
+            q = quaternion_from_euler(0.0, 0.0, final_yaw)
+            path_msg.poses[-1].pose.orientation.x = q[0]
+            path_msg.poses[-1].pose.orientation.y = q[1]
+            path_msg.poses[-1].pose.orientation.z = q[2]
+            path_msg.poses[-1].pose.orientation.w = q[3]
+        elif final_orientation is not None:
+            path_msg.poses[-1].pose.orientation = final_orientation
+
+        return path_msg
+
+    def _apply_coarse_object_standoff(
         self, path_idx: List[GridIndex]
     ) -> Tuple[Optional[List[GridIndex]], Optional[float]]:
         if self._goal_msg is None or self._meta is None:
@@ -345,7 +404,7 @@ class GlobalPlannerNode(Node):
         tx = self._goal_msg.pose.position.x
         ty = self._goal_msg.pose.position.y
 
-        radius = self.get_parameter("cube_approach_radius").get_parameter_value().double_value
+        radius = self.get_parameter("coarse_object_standoff").get_parameter_value().double_value
         if radius <= 0.0:
             return (None, None)
 
@@ -357,7 +416,7 @@ class GlobalPlannerNode(Node):
         ax, ay = self.grid_to_world_center(truncated[-1][0], truncated[-1][1], self._meta)
         yaw = math.atan2(ty - ay, tx - ax)
         self.get_logger().info(
-            f"Cube approach applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
+            f"Coarse object standoff applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
         )
         return (truncated, yaw)
 
@@ -431,10 +490,10 @@ class GlobalPlannerNode(Node):
         r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
 
         for (cx, cy) in self._cubes:
-            if self._target_cube is not None:
-                tx, ty = self._target_cube
+            if self._target_object is not None:
+                tx, ty = self._target_object
                 if math.hypot(cx - tx, cy - ty) < 0.10:
-                    continue  # exclude target cube
+                    continue
 
             idx = self.world_to_grid(cx, cy, meta)
             if idx is None:
@@ -442,7 +501,7 @@ class GlobalPlannerNode(Node):
 
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
-        if include_box_lethal:
+        if include_box_lethal:  #TODO: expand to work with several boxes
             box_xy = self._get_box_xy_in_map()
             if box_xy is not None:
                 box_size = self.get_parameter("box_size").get_parameter_value().double_value
@@ -465,12 +524,7 @@ class GlobalPlannerNode(Node):
         return math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= box_goal_radius
 
     def _get_box_xy_in_map(self) -> Optional[Tuple[float, float]]:
-        box_frame = self.get_parameter("box_frame").get_parameter_value().string_value
-        try:
-            tf = self.tf_buffer.lookup_transform(self.global_frame, box_frame, rclpy.time.Time())
-            return (tf.transform.translation.x, tf.transform.translation.y)
-        except Exception:
-            return None
+        return self._box_xy
 
 
     def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):
@@ -571,11 +625,10 @@ class GlobalPlannerNode(Node):
 
     def cell_is_traversable(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> bool:
         lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
-        unknown_is_lethal = self.get_parameter("unknown_is_lethal").get_parameter_value().bool_value
 
         v = occ.data[self.idx_to_flat(gx, gy, meta)]  # -1 unknown, 0..100
         if v < 0:
-            return not unknown_is_lethal
+            return True
         return v < lethal
 
     def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
@@ -602,7 +655,6 @@ class GlobalPlannerNode(Node):
         meta: GridMeta
     ) -> Optional[List[GridIndex]]:
         w = self.get_parameter("w_heuristic").get_parameter_value().double_value
-        allow_diag = self.get_parameter("allow_diagonal").get_parameter_value().bool_value
         max_ms = self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value
 
         if not self.cell_is_traversable(start[0], start[1], occ, meta):
@@ -614,18 +666,13 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn(f"Goal cell is not traversable: idx={goal}, occ={v}")
             return None
 
-        # Neighbor moves: (dx, dy, base_cost)
         moves_4 = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0)]
         moves_8 = moves_4 + [(1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)), (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2))]
-        moves = moves_8 if allow_diag else moves_4
 
         def heuristic(a: GridIndex, b: GridIndex) -> float:
-            # Octile distance works well for 8-connected grids
             dx = abs(a[0] - b[0])
             dy = abs(a[1] - b[1])
-            if allow_diag:
-                return (max(dx, dy) + (math.sqrt(2) - 1.0) * min(dx, dy))
-            return float(dx + dy)
+            return max(dx, dy) + (math.sqrt(2) - 1.0) * min(dx, dy)
 
         # Priority queue: (f, g, node)
         open_heap: List[Tuple[float, float, GridIndex]] = []
@@ -655,7 +702,7 @@ class GlobalPlannerNode(Node):
                 continue
 
             cx, cy = current
-            for dx, dy, step_cost in moves:
+            for dx, dy, step_cost in moves_8:
                 nx, ny = cx + dx, cy + dy
 
                 if nx < 0 or ny < 0 or nx >= meta.width or ny >= meta.height:
@@ -663,8 +710,7 @@ class GlobalPlannerNode(Node):
                 if not self.cell_is_traversable(nx, ny, occ, meta):
                     continue
 
-                # Optional: prevent diagonal "corner cutting"
-                if allow_diag and dx != 0 and dy != 0:
+                if dx != 0 and dy != 0:
                     if not (self.cell_is_traversable(cx + dx, cy, occ, meta) and self.cell_is_traversable(cx, cy + dy, occ, meta)):
                         continue
 

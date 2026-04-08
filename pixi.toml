@@ -6,8 +6,6 @@ channels = [
   "https://prefix.dev/robostack-jazzy",
 ]
 platforms = [
-  "osx-arm64",
-  "win-64",
   "linux-64",
 ]
 version = "1.0.0"

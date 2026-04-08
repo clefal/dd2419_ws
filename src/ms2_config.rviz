@@ -6,12 +6,20 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
+        - /Grid1
+        - /Path1/Topic1
+        - /Map1
         - /TF1
         - /TF1/Frames1
         - /Pose1
         - /PoseArray1
+        - /PointStamped1
+        - /PointStamped2
+        - /PointStamped3
+        - /PointStamped4
+        - /PointStamped5
         - /PointStamped6
-      Splitter Ratio: 0.5
+      Splitter Ratio: 0.5277161598205566
     Tree Height: 1156
   - Class: rviz_common/Selection
     Name: Selection
@@ -137,47 +145,72 @@ Visualization Manager:
       Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
-        All Enabled: true
+        All Enabled: false
         base_link:
           Value: true
         box:
           Value: true
         lidar_link:
-          Value: true
+          Value: false
         map:
+          Value: true
+        object0:
+          Value: true
+        object1:
+          Value: true
+        object2:
+          Value: true
+        object3:
+          Value: true
+        object4:
+          Value: true
+        object5:
           Value: true
         odom:
           Value: true
         realsense_camera_color_frame:
-          Value: true
+          Value: false
         realsense_camera_color_optical_frame:
-          Value: true
+          Value: false
         realsense_camera_depth_frame:
-          Value: true
+          Value: false
         realsense_camera_depth_optical_frame:
-          Value: true
+          Value: false
         realsense_camera_link:
-          Value: true
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
-      Show Names: false
+      Show Names: true
       Tree:
         map:
           box:
             {}
+          object0:
+            {}
+          object1:
+            {}
+          object2:
+            {}
+          object3:
+            {}
+          object4:
+            {}
+          object5:
+            {}
           odom:
             base_link:
               lidar_link:
+                {}
+              realsense_camera_depth_optical_frame:
                 {}
               realsense_camera_link:
                 realsense_camera_color_frame:
                   realsense_camera_color_optical_frame:
                     {}
                 realsense_camera_depth_frame:
-                  realsense_camera_depth_optical_frame:
-                    {}
+                  {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -287,7 +320,7 @@ Visualization Manager:
       Enabled: true
       History Length: 1
       Name: PointStamped
-      Radius: 0.30000001192092896
+      Radius: 0.05000000074505806
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -357,7 +390,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.9200520515441895
+      Distance: 2.977834701538086
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -372,10 +405,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.3847965002059937
+      Pitch: 1.0047969818115234
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.9135639667510986
+      Yaw: 3.7385458946228027
     Saved: ~
 Window Geometry:
   Displays:

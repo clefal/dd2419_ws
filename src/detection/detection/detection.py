@@ -2,8 +2,8 @@
 import numpy as np
 import colour as co
 import rclpy
-import time
 from rclpy.node import Node
+import rclpy.duration
 
 from sklearn.cluster import DBSCAN
 
@@ -19,11 +19,6 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from nav_msgs.msg import OccupancyGrid
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 import math
-
-
-
-import ctypes
-import struct
 
 
 class Detection(Node):
@@ -82,10 +77,9 @@ class Detection(Node):
         # initialize point buffering
         self.point_buffers = {'red': [], 'green':[], 'blue': [], 'wood':[], 'box':[]}
 
-        # initialize TF and DBSCAN for clustering
+        # initialize TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
 
         # Initialize the publisher
         self._pub = self.create_publisher(
@@ -101,7 +95,7 @@ class Detection(Node):
         self.create_subscription(
             PointCloud2, input_cloud_topic, self.cloud_callback, 10, callback_group=ReentrantCallbackGroup())
         
-        # 1. Define the Latched QoS Profile
+        # Define the Latched QoS Profile for the Occupancy Grid Subscription
         latched_qos = QoSProfile(
             depth=1,                                            # Keep only the last message
             history=QoSHistoryPolicy.KEEP_LAST,                 # Standard history policy for latching
@@ -117,8 +111,7 @@ class Detection(Node):
         This function is called for every message that is published on the '/camera/depth/color/points' topic.
         """
 
-        # TODO for the future, if it becomes a bottleneck: merge the messages into onemessage that is published
-        # this is for sure cleaner since we currently have to handle multiple messages at the same time if we detect multiple things at the same time
+        # convert pointcloud to numpy arrays
         gen = pc2.read_points_numpy(msg, skip_nans=True)
         points = gen[:, :3]
         rgb_uint32 = gen[:, 3].view(np.uint32)
@@ -127,14 +120,14 @@ class Detection(Node):
         colors[:, 1] = (rgb_uint32 >> 8) & 255
         colors[:, 2] = rgb_uint32 & 255
 
+
+
         # geometrical filter
+        # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
         max_dist = 2
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
-        # the cleanest solution is to filter the points in the odom/map frame this should be implemented in the future
-        # also it should be checked if the 
-
         points_f = points[geom_mask]
         colors_f = colors[geom_mask]
 
@@ -146,14 +139,16 @@ class Detection(Node):
         colors_f_box = colors[geom_mask_for_box]
 
 
+
         # transform points to map coordinates
         points_map = self.transform_points_to_map(points_f, msg.header)
         points_map_box = self.transform_points_to_map(points_f_box, msg.header)
 
-        # apply the tresholds to the points and return the filter masks
+
+
+        # get masks and check how many hits we have in general 
         red_mask, green_mask, blue_mask, wood_mask, box_mask = self.get_masks(colors_f, colors_f_box) # returns the color masks based on threshold values
 
-        # Chek how many red,green,... points we have
         red_counter = np.sum(red_mask)
         green_counter = np.sum(green_mask)
         blue_counter = np.sum(blue_mask)
@@ -161,6 +156,8 @@ class Detection(Node):
         box_counter = np.sum(box_mask)
 
         general_counter = red_counter + green_counter + blue_counter + wood_counter + box_counter
+
+
 
         # end callback if we have no hits in general
         if general_counter == 0: return 
@@ -175,16 +172,20 @@ class Detection(Node):
             self.point_buffers['box'] = []
             return
 
-        fields = [ # only for visualization in rviz, is actually not relevant
+
+        # needed to publish te pointcloud for rviz
+        fields = [
             PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
             PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
             ]
-        
         centroid_header = Header()
         centroid_header.stamp = msg.header.stamp  #this is a bit sus, since we are buffering the points
         centroid_header.frame_id = 'map'
 
+
+        # If points are converted successfully then add them to buffer, if the buffer is full then run clustering and remove the oldest points in the buffer
+        # repeat tht for every color
         if points_map.shape == points_f.shape:  # this is only the case if the transform_points_to_map actually succeeds
             
             # manage red_points
@@ -198,7 +199,7 @@ class Detection(Node):
             if len(self.point_buffers['red'])>=self.buffer_size:
                 all_red_points = np.vstack(self.point_buffers['red'])
                 red_centroids = self.process_clusters(all_red_points)
-                self.get_logger().info(f'red: {len(all_red_points)}')
+                # self.get_logger().info(f'red: {len(all_red_points)}')
 
                 # only for visualization in rviz
                 msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
@@ -207,8 +208,9 @@ class Detection(Node):
                 for centroid in red_centroids: 
                     self.publish_detection(centroid, centroid_header, 'red')
 
-                self.point_buffers['red'] = [] # after publishing clear the buffer
+                del self.point_buffers['red'][0] # after publishing clear oldes points of the buffer
             
+
             # manage green_points
             if green_counter > 0: # add points to buffer if we have more than a minimum amount of hits
                 green_points = points_map[green_mask]
@@ -220,7 +222,7 @@ class Detection(Node):
             if len(self.point_buffers['green'])>=self.buffer_size:
                 all_green_points = np.vstack(self.point_buffers['green'])
                 green_centroids = self.process_clusters(all_green_points)
-                self.get_logger().info(f'green: {len(all_green_points)}')
+                # self.get_logger().info(f'green: {len(all_green_points)}')
 
                 # only for visualization in rviz
                 msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
@@ -229,7 +231,8 @@ class Detection(Node):
                 for centroid in green_centroids: 
                     self.publish_detection(centroid, centroid_header, 'green')
                     
-                self.point_buffers['green'] = [] # after publishing clear the buffer
+                del self.point_buffers['green'][0] # after publishing clear oldes points of the buffer
+
 
             # manage blue_points
             if blue_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -242,7 +245,7 @@ class Detection(Node):
             if len(self.point_buffers['blue'])>=self.buffer_size:
                 all_blue_points = np.vstack(self.point_buffers['blue'])
                 blue_centroids = self.process_clusters(all_blue_points)
-                self.get_logger().info(f'blue: {len(all_blue_points)}')
+                # self.get_logger().info(f'blue: {len(all_blue_points)}')
 
                 # only for visualization in rviz
                 msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
@@ -251,7 +254,8 @@ class Detection(Node):
                 for centroid in blue_centroids: 
                     self.publish_detection(centroid, centroid_header, 'blue')
                     
-                self.point_buffers['blue'] = [] # after publishing clear the buffer
+                del self.point_buffers['blue'][0] # after publishing clear oldes points of the buffer
+
 
             # manage wood_points
             if wood_counter > 0: # add points to buffer if we have more than a minimum amount of hits
@@ -264,17 +268,18 @@ class Detection(Node):
             if len(self.point_buffers['wood'])>=self.buffer_size:
                 all_wood_points = np.vstack(self.point_buffers['wood'])
                 wood_centroids = self.process_clusters(all_wood_points)
-                self.get_logger().info(f'wood: {len(all_wood_points)}')
+                # self.get_logger().info(f'wood: {len(all_wood_points)}')
 
                 # only for visualization in rviz
                 msg_wood = pc2.create_cloud(centroid_header, fields, all_wood_points)
                 self._pub.publish(msg_wood)
 
-                for centroid in wood_centroids:     # so that marius can experiment with it i will uncomment this line 
-                    self.publish_detection(centroid, centroid_header, 'wood')
+                #for centroid in wood_centroids:    
+                    # self.publish_detection(centroid, centroid_header, 'wood')
                     
-                self.point_buffers['wood'] = [] # after publishing clear the buffer
+                del self.point_buffers['wood'][0] # after publishing clear oldes points of the buffer
                         
+
             # manage box points
             if box_counter > 0: # add points to buffer if we have more than a minimum amount of hits
                 box_points = points_map_box[box_mask]
@@ -286,16 +291,16 @@ class Detection(Node):
             if len(self.point_buffers['box'])>=self.buffer_size:
                 all_box_points = np.vstack(self.point_buffers['box'])
                 box_centroids = self.process_clusters(all_box_points, box=True)
-                self.get_logger().info(f'box: {len(all_box_points)}')
+                # self.get_logger().info(f'box: {len(all_box_points)}')
 
                 # only for visualization in rviz
                 msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
                 self._pub.publish(msg_box)
 
-                for centroid in box_centroids:     # so that marius can experiment with it i will uncomment this line 
+                for centroid in box_centroids:
                     self.publish_detection(centroid, centroid_header, 'box')
                     
-                self.point_buffers['box'] = [] # after publishing clear the buffer
+                del self.point_buffers['box'][0] # after publishing clear oldes points of the buffer
             
     def occupancy_grid_callback(self, msg :OccupancyGrid):
         #self.get_logger().info(f'revieved occupancy grid message')
@@ -312,14 +317,6 @@ class Detection(Node):
         if len(points_np) == 0:
             self.get_logger().warn(f'transform_points_to_map() had an empty point array as input')
             return np.empty((0,3))
-        
-
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            ]
-            
         
         try: 
             timeout = rclpy.duration.Duration(seconds=0.3)
@@ -383,12 +380,14 @@ class Detection(Node):
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
         Output: List of centroids [x, y, z] for valid objects
         """
+        dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+
         if len(points_3d) < self.min_samples:  #TODO use thsi parameter as tuning and define it in the __init__
             return []
 
         # 1. Run Clustering (Very fast on <2000 points)
         # Returns labels like [0, 0, 1, -1, 0, 1...] (-1 is noise)
-        labels = self.dbscan.fit_predict(points_3d)
+        labels = dbscan.fit_predict(points_3d)
         
         valid_centroids = []
         
@@ -416,7 +415,7 @@ class Detection(Node):
                     continue # Skip this cluster, it's too big/small
             if box: 
                 if not (self.box_min_width < np.max(dims)< self.box_max_width):
-                    self.get_logger().info(f'object is not the size of a box')
+                    # self.get_logger().info(f'object is not the size of a box')
                     continue # skip this cluster, its too big/small
                 
             # Check 2: Density Check (Optional but recommended)
@@ -481,7 +480,6 @@ class Detection(Node):
                         # Calculate the 1D index for the flat data array
                         # Index = row * width + col
                         index = check_row * width + check_col
-                        
                         cell_value = self.occupancy_grid.data[index]
 
                         # Check against the tunable threshold
@@ -500,10 +498,10 @@ class Detection(Node):
         msg.point.z = centroid[2]
 
         if self.is_close_to_obstacle(centroid[0],centroid[1]):
-            self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
+            # self.get_logger().info(f'point x={centroid[0]}, y={centroid[1]} is too close to an object')
             return
-        else:
-            self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
+        # else:
+            # self.get_logger().info(f'Point (x,y){(centroid[0],centroid)} will now be published as an object')
 
 
         if color == 'red':
@@ -533,42 +531,40 @@ class Detection(Node):
         self.get_logger().info(f'comp_colors_oklab\n red: {comp_colors_oklab[0,:]} \n green: {comp_colors_oklab[1,:]}\n blue {comp_colors_oklab[2,:]}\n wood{comp_colors_oklab[3,:]}\n box{comp_colors_oklab[4,:]}')
         
         # define tolerances
-        tol_red = 0.04
-        tol_green = 0.02
-        tol_blue = 0.025
-        tol_wood = 0.012
+        # loose thresholds tol_red = 0.04    tol_green = 0.02 tol_blue = 0.025 tol_wood = 0.012 tol_box = 0.02    
+  
+        # medium trehsholds
+        tol_red = 0.03   
+        tol_green = 0.015
+        tol_blue = 0.02
+        tol_wood = 0.011
         tol_box = 0.02  
 
-        # thresh_red_L_low = comp_colors_oklab[0,0] - 0.15
-        # thresh_red_L_high = comp_colors_oklab[0,0] + 0.15
-        thresh_red_L_low = 0.0
-        thresh_red_L_high = 1.0
+        # strict thresholds
+        # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
+
+        thresh_red_L_low = 0.3 # these L thresholds are very very loose
+        thresh_red_L_high = 0.55
         thresh_red_a_low = comp_colors_oklab[0,1] - tol_red
         thresh_red_a_high = comp_colors_oklab[0,1] + tol_red
         thresh_red_b_low = comp_colors_oklab[0,2] - tol_red
         thresh_red_b_high = comp_colors_oklab[0,2] + tol_red
 
-        # thresh_green_L_low = comp_colors_oklab[1,0] - 0.25
-        # thresh_green_L_high = comp_colors_oklab[1,0] + 0.25
-        thresh_green_L_low = 0.0
-        thresh_green_L_high = 1.0
+        thresh_green_L_low = 0.25 # these L thresholds are very very loose
+        thresh_green_L_high = 0.45
         thresh_green_a_low = comp_colors_oklab[1,1] - tol_green
         thresh_green_a_high = comp_colors_oklab[1,1] + tol_green
         thresh_green_b_low = comp_colors_oklab[1,2] - tol_green
         thresh_green_b_high = comp_colors_oklab[1,2] + tol_green
 
-        # thresh_blue_L_low = comp_colors_oklab[2,0] - 0.15
-        # thresh_blue_L_high = comp_colors_oklab[2,0] + 0.15
-        thresh_blue_L_low = 0.0
-        thresh_blue_L_high = 1.0
+        thresh_blue_L_low = 0.3 # these L thresholds are very very loose
+        thresh_blue_L_high = 0.55
         thresh_blue_a_low = comp_colors_oklab[2,1] - tol_blue
         thresh_blue_a_high = comp_colors_oklab[2,1] + tol_blue
         thresh_blue_b_low = comp_colors_oklab[2,2] - tol_blue
         thresh_blue_b_high = comp_colors_oklab[2,2] + tol_blue
 
-        # thresh_wood_L_low = comp_colors_oklab[3,0] - 0.02
-        # thresh_wood_L_high = comp_colors_oklab[3,0] + 0.02
-        thresh_wood_L_low = 0.3
+        thresh_wood_L_low = 0.3 # these L thresholds are very very loose
         thresh_wood_L_high = 0.5
         thresh_wood_a_low = comp_colors_oklab[3,1] - tol_wood
         thresh_wood_a_high = comp_colors_oklab[3,1] + tol_wood
