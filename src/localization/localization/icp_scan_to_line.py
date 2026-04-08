@@ -564,7 +564,7 @@ class IcpScanToLine(Node):
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
-        self.declare_parameter("icp_max_iters", 30)
+        self.declare_parameter("icp_max_iters", 15)
         # Minimum number of valid point-to-line correspondences required for acceptance.
         self.declare_parameter("icp_min_corr", 20)
         # Maximum perpendicular point-to-line distance allowed when building correspondences.
@@ -597,8 +597,6 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_merge_perp_dist", 0.1)
         # Maximum allowed along-line gap (m) between segment intervals for merging.
         self.declare_parameter("map_merge_max_gap", 0.25)
-        # If true, the map stops accepting new lines after the initial seeding stage.
-        self.declare_parameter("freeze_map_after_init", False)
         # Minimum number of stored lines before the node switches from map seeding to ICP tracking.
         self.declare_parameter("init_min_lines", 2)
         # Minimum base translation required before adding more lines to the map.
@@ -648,7 +646,6 @@ class IcpScanToLine(Node):
         self.map_merge_angle_deg = float(self.get_parameter("map_merge_angle_deg").value)
         self.map_merge_perp_dist = float(self.get_parameter("map_merge_perp_dist").value)
         self.map_merge_max_gap = float(self.get_parameter("map_merge_max_gap").value)
-        self.freeze_map_after_init = bool(self.get_parameter("freeze_map_after_init").value)
         self.init_min_lines = int(self.get_parameter("init_min_lines").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
@@ -680,7 +677,6 @@ class IcpScanToLine(Node):
 
         self.get_logger().info(
             f"scan_to_line_slam started | stack_scans={self.stack_scans}, "
-            f"freeze_map_after_init={self.freeze_map_after_init}, "
             f"smoothing_alpha={self.pose_smoothing_alpha:.2f}"
         )
 
@@ -923,9 +919,6 @@ class IcpScanToLine(Node):
         self.insert_lines_into_map(lines_map)
 
     def should_update_map(self, T_map_base: np.ndarray) -> bool:
-        if self.freeze_map_after_init:
-            return False
-
         if self.last_map_update_base_pose is None:
             return True
 
