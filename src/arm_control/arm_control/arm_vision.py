@@ -55,14 +55,21 @@ class ArmVisionNode(Node):
         }
         self.debug_image_pub = self.create_publisher(Image, DEBUG_IMAGE_TOPIC, 10)
 
+        # self.image_subscription = self.create_subscription(
+        #     Image,
+        #     IMAGE_TOPIC,
+        #     self.image_callback_color,
+        #     10,
+        # )
+
         self.image_subscription = self.create_subscription(
             Image,
             IMAGE_TOPIC,
-            self.image_callback,
+            self.image_callback_edges,
             10,
         )
 
-    def image_callback(self, msg: Image):
+    def image_callback_color(self, msg: Image):
         frame = self._ros_image_to_bgr(msg)
         if frame is None:
             return
@@ -71,7 +78,7 @@ class ArmVisionNode(Node):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         for color_name, color_config in COLOR_RANGES.items():
-            detection = self.detect_cube(hsv, color_name, color_config)
+            detection = self.detect_cube_color(hsv, color_name, color_config)
             self.mask_publishers[color_name].publish(
                 self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
             )
@@ -88,7 +95,28 @@ class ArmVisionNode(Node):
 
         self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
-    def detect_cube(self, hsv, color_name, color_config):
+    def image_callback_edges(self, msg: Image):
+        frame = self._ros_image_to_bgr(msg)
+        if frame is None:
+            return
+
+        debug_image = frame.copy()
+
+        detection = self.detect_cube_edges(frame)
+        self.mask_publishers.publish(
+            self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
+        )
+
+        if detection['center'] is not None:
+            self.draw_detection(debug_image, detection, (0, 255, 0))  # single fixed colour for bounding box
+
+            center_msg = Int32MultiArray()
+            center_msg.data = [detection['center'][0], detection['center'][1]]
+            self.center_publisher.publish(center_msg)
+
+        self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
+
+    def detect_cube_color(self, hsv, color_name, color_config):
         if 'ranges' in color_config:
             mask = None
             for r in color_config['ranges']:
@@ -119,6 +147,57 @@ class ArmVisionNode(Node):
             'center': (center_x, center_y),
             'bbox': bbox,
         }
+    
+    def detect_cube_edges(self, frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        edges = cv2.dilate(edges, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        best_contour = None
+        best_score = 0
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < self.min_contour_area:
+                continue
+
+            perimeter = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
+
+            if len(approx) != 4:
+                continue
+
+            _, _, w, h = cv2.boundingRect(approx)
+            aspect_ratio = w / h
+            if not (0.6 < aspect_ratio < 1.6):
+                continue
+
+            #Determine which contour is best by combining how square it is and how well it fills in 
+            squareness = min(w, h) / max(w, h)
+            fill_ratio = area / (w * h)
+            score = squareness * fill_ratio
+
+            if score > best_score:
+                best_score = score
+                best_contour = approx
+
+        if best_contour is None:
+            return {'mask': edges, 'center': None, 'bbox': None}
+
+        moments = cv2.moments(best_contour)
+        if moments['m00'] == 0:
+            return {'mask': edges, 'center': None, 'bbox': None}
+
+        center_x = int(moments['m10'] / moments['m00'])
+        center_y = int(moments['m01'] / moments['m00'])
+        bbox = cv2.boundingRect(best_contour)
+
+        return {'mask': edges, 'center': (center_x, center_y), 'bbox': bbox}
 
     def draw_detection(self, image, color_name, detection, box_color):
         x, y, width, height = detection['bbox']
