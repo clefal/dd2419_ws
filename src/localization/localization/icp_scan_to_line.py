@@ -540,9 +540,9 @@ class IcpScanToLine(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 3.5)
+        self.declare_parameter("range_max_clip", 4.0)
         # Maximum range kept in the published preprocessed scan message.
-        self.declare_parameter("range_max_filter_scan", 3.5)
+        self.declare_parameter("range_max_filter_scan", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
         self.declare_parameter("stack_scans", 3)
         # Median filter size applied to the raw range array.
@@ -560,7 +560,7 @@ class IcpScanToLine(Node):
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
-        self.declare_parameter("line_min_length", 0.80)
+        self.declare_parameter("line_min_length", 0.40)
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
