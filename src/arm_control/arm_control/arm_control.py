@@ -83,6 +83,7 @@ class State(Enum):
     MOVING_TO_DROP = 'moving_to_drop'
     OPENING_FOR_DROP = 'opening_for_drop'
     RETURNING_TO_IDLE = 'returning_to_idle'
+    PICK_UP_TO_IDLE = 'pick_up_to_idle'
     ERROR = 'error'
 
 
@@ -260,6 +261,9 @@ class ArmControlNode(Node):
             self.transition_to(State.IDLE)
             self.publish_result('DROP_SUCCESS')
 
+        if self.state == State.PICK_UP_TO_IDLE:
+            self.command_idle_pose(State.IDLE)
+
     def handle_start_command(self):
         if self.state != State.START or self.is_motion_active():
             self.publish_result('START_FAIL')
@@ -394,7 +398,7 @@ class ArmControlNode(Node):
         detection = self.get_stable_detection()
         if detection is None:
             if self.vision_is_stale():
-                self.transition_to(State.IDLE)
+                self.transition_to(State.PICK_UP_TO_IDLE)
                 self.publish_result('PICK_UP_FAIL_TIMEOUT')
             return
 
