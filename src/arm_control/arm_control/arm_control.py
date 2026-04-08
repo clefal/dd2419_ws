@@ -24,7 +24,8 @@ class Arm_control(Node):
 
     def send_msg_start_position(self):
         msg = ArmControl()
-        msg.position[0] = 40
+        msg.position[0] = 10
+        msg.position[5] = 60
         msg.position[2] = 170
         msg.position[3] = 220
         msg.position[4] = 180
@@ -34,6 +35,7 @@ class Arm_control(Node):
 
         msg = ArmControl()
         msg.position[0] = 10
+        msg.position[5] = 90
         msg.position[2] = 170
         msg.position[3] = 210
         msg.position[4] = 120
@@ -50,6 +52,30 @@ class Arm_control(Node):
         time.sleep(3.0)
 
         self.in_start_position = True
+
+
+    def send_msg_start_position_after_dropoff(self):
+
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 150
+        msg.position[3] = 210
+        msg.position[4] = 120
+        self.pub.publish(msg)
+
+        time.sleep(3.0)
+
+        msg = ArmControl()
+        msg.position[0] = 10
+        msg.position[2] = 50
+        msg.position[3] = 210
+        msg.position[4] = 120
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
+        self.in_start_position = True
+
+
 
     def send_msg_raise_camera(self):
         msg = ArmControl()
@@ -101,6 +127,16 @@ class Arm_control(Node):
         self.pub.publish(msg)
         time.sleep(3.0)
 
+    def send_msg_to_box(self):
+        msg = ArmControl()
+        msg.position[0] = 100
+        msg.position[2] = 150
+        msg.position[3] = 190
+        msg.position[4] = 65
+
+        self.pub.publish(msg)
+        time.sleep(3.0)
+
     def send_msg_raise_arm(self):
         msg = ArmControl()
         msg.position[0] = 100
@@ -147,10 +183,13 @@ class Arm_control(Node):
 
     def drop_object(self):
         if (self.holding_object):
+            self.send_msg_to_box()
+            time.sleep(3.0)
             self.send_msg_open_grip()
             self.holding_object = False
-            self.send_msg_start_position()
             self.publish_res("DROP_SUCCESS")
+            self.send_msg_start_position_after_dropoff()
+            
         else:
             self.publish_res("DROP_FAIL_NO_OBJECT")
             self.get_logger().error(f'Can not drop object: Not holdning an object')

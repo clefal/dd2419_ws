@@ -48,7 +48,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
-        self.declare_parameter("box_goal_radius", 0.30)
+        self.declare_parameter("box_goal_radius", 0.20)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
