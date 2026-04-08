@@ -10,6 +10,7 @@ from std_msgs.msg import Int32MultiArray
 MIN_CONTOUR_AREA = 500.0
 IMAGE_TOPIC = '/arm/camera/image_raw'
 GREEN_CENTER_TOPIC = '/arm/vision/green_cube_center'
+CENTER_TOPIC = '/arm/vision/cube_center'
 DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 
@@ -49,25 +50,29 @@ class ArmVisionNode(Node):
         self.center_publishers = {
             'green': self.create_publisher(Int32MultiArray, GREEN_CENTER_TOPIC, 10),
         }
+        self.center_publisher =  self.create_publisher(Int32MultiArray, CENTER_TOPIC, 10)
         self.mask_publishers = {
             color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color), 10)
             for color in COLOR_RANGES
         }
-        self.debug_image_pub = self.create_publisher(Image, DEBUG_IMAGE_TOPIC, 10)
 
-        # self.image_subscription = self.create_subscription(
-        #     Image,
-        #     IMAGE_TOPIC,
-        #     self.image_callback_color,
-        #     10,
-        # )
+        self.mask_publisher = self.create_publisher(Image, '/arm/vision/edge_mask', 10)
+
+        self.debug_image_pub = self.create_publisher(Image, DEBUG_IMAGE_TOPIC, 10)
 
         self.image_subscription = self.create_subscription(
             Image,
             IMAGE_TOPIC,
-            self.image_callback_edges,
+            self.image_callback_color,
             10,
         )
+
+        # self.image_subscription = self.create_subscription(
+        #     Image,
+        #     IMAGE_TOPIC,
+        #     self.image_callback_edges,
+        #     10,
+        # )
 
     def image_callback_color(self, msg: Image):
         frame = self._ros_image_to_bgr(msg)
@@ -86,7 +91,7 @@ class ArmVisionNode(Node):
             if detection['center'] is None:
                 continue
 
-            self.draw_detection(debug_image, color_name, detection, color_config['box_color'])
+            self.draw_detection(debug_image, detection, color_config['box_color'])
 
             if color_name in self.center_publishers:
                 center_msg = Int32MultiArray()
@@ -103,7 +108,7 @@ class ArmVisionNode(Node):
         debug_image = frame.copy()
 
         detection = self.detect_cube_edges(frame)
-        self.mask_publishers.publish(
+        self.mask_publisher.publish(
             self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
         )
 
@@ -150,11 +155,11 @@ class ArmVisionNode(Node):
     
     def detect_cube_edges(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        blurred = cv2.GaussianBlur(gray, (9, 9), 0)
         edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        edges = cv2.dilate(edges, kernel, iterations=1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        edges = cv2.dilate(edges, kernel, iterations=2)
 
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -199,7 +204,7 @@ class ArmVisionNode(Node):
 
         return {'mask': edges, 'center': (center_x, center_y), 'bbox': bbox}
 
-    def draw_detection(self, image, color_name, detection, box_color):
+    def draw_detection(self, image, detection, box_color):
         x, y, width, height = detection['bbox']
         center_x, center_y = detection['center']
 
@@ -208,7 +213,7 @@ class ArmVisionNode(Node):
         cv2.circle(image, (center_x, center_y), 4, box_color, -1)
         cv2.putText(
             image,
-            f'{color_name} cube ({center_x}, {center_y})',
+            f'cube ({center_x}, {center_y})',
             (x, max(20, y - 10)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
