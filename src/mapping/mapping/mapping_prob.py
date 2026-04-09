@@ -147,7 +147,7 @@ class Mapping(Node):
                 msg.header.stamp,
             )
             # # Spin until transform found or `timeout_sec` seconds has passed
-            rclpy.spin_until_future_complete(self, tf_future, timeout_sec=2)
+            rclpy.spin_until_future_complete(self, tf_future, timeout_sec=1)
         except TransformException as ex:
             self.get_logger().warn(f"Async TF lookup failed: {ex}")
             return
