@@ -13,12 +13,14 @@ echo $ROS_DOMAIN_ID
 run without pixi run:
 (1) A235
 (2) Diego
+(3) Diego new
 
 ```bash
 ssh group3@{ip}
 ssh group3@192.168.1.63
 sshpass -p 'group3' ssh group3@192.168.1.63
 sshpass -p 'group3' ssh group3@10.94.192.242
+sshpass -p 'group3' ssh group3@10.238.43.242 
 ```
 
 1. Run any launch. For example

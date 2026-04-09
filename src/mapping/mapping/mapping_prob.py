@@ -20,10 +20,10 @@ class Mapping(Node):
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
         self.declare_parameter("grid_resolution", 0.02) # m/cell
         self.declare_parameter("lidar_topic", "/lidar/scan")
-        self.declare_parameter("scans_to_skip", 5)
+        self.declare_parameter("scans_to_skip", 2)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_polygon_topic", "/workspace")
-        self.declare_parameter("grid_size", 12) # m
+        self.declare_parameter("grid_size", 15) # m
         self.declare_parameter("grid_origin", [-3.0, -3.0]) # m
 
 
@@ -138,13 +138,25 @@ class Mapping(Node):
             return
 
         self.skipped_scans = 0
-        
-        #self.get_logger().info(f"{msg.header.frame_id}")
+
+        # Wait for the transform asynchronously
+        try:
+            tf_future = self.tf_buffer.wait_for_transform_async(
+                "map",
+                msg.header.frame_id,
+                msg.header.stamp,
+            )
+            # # Spin until transform found or `timeout_sec` seconds has passed
+            rclpy.spin_until_future_complete(self, tf_future, timeout_sec=2)
+        except TransformException as ex:
+            self.get_logger().warn(f"Async TF lookup failed: {ex}")
+            return
         try:
             tf = self.tf_buffer.lookup_transform(
                 "map",
                 msg.header.frame_id,
                 msg.header.stamp,
+                timeout=rclpy.time.Duration(seconds=1)
             )
         except TransformException as ex:
             self.get_logger().warn(f"TF lookup failed: {ex}")

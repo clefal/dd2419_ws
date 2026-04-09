@@ -9,7 +9,7 @@ from std_msgs.msg import Bool
 from robp_interfaces.msg import Encoders
 
 
-class MockIsTurning(Node):
+class IsTurning(Node):
     def __init__(self):
         super().__init__('mock_is_turning')
 
