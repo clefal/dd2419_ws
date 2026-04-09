@@ -41,8 +41,8 @@ class Odometry(Node):
         self.declare_parameter('ticks_per_rev', 48 * 64) # measured: 3200, not 3074
         self.declare_parameter('wheel_radius', 0.04921)
         self.declare_parameter('base', 0.308)
-        self.declare_parameter('fix_tilt', True)
-        self.declare_parameter('gyro_bias_duration', 5.0)
+        self.declare_parameter('fix_tilt', False)
+        self.declare_parameter('gyro_bias_duration', 0.0)
 
         # -------------------------
         # Robot model constants
