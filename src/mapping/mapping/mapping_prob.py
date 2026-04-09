@@ -139,18 +139,18 @@ class Mapping(Node):
 
         self.skipped_scans = 0
 
-        # Wait for the transform asynchronously
-        try:
-            tf_future = self.tf_buffer.wait_for_transform_async(
-                "map",
-                msg.header.frame_id,
-                msg.header.stamp,
-            )
-            # # Spin until transform found or `timeout_sec` seconds has passed
-            rclpy.spin_until_future_complete(self, tf_future, timeout_sec=1)
-        except TransformException as ex:
-            self.get_logger().warn(f"Async TF lookup failed: {ex}")
-            return
+        # # Wait for the transform asynchronously
+        # try:
+        #     tf_future = self.tf_buffer.wait_for_transform_async(
+        #         "map",
+        #         msg.header.frame_id,
+        #         msg.header.stamp,
+        #     )
+        #     # # Spin until transform found or `timeout_sec` seconds has passed
+        #     rclpy.spin_until_future_complete(self, tf_future, timeout_sec=1)
+        # except TransformException as ex:
+        #     self.get_logger().warn(f"Async TF lookup failed: {ex}")
+        #     return
         try:
             tf = self.tf_buffer.lookup_transform(
                 "map",
