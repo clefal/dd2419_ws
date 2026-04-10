@@ -18,11 +18,13 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.02) # m/cell
+        self.declare_parameter("grid_resolution", 0.05) # m/cell
         self.declare_parameter("lidar_topic", "/lidar/scan")
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
+        self.declare_parameter("grid_size", 12)
+        self.declare_parameter("grid_origin", [-1.0, -1.0])
 
 
         # ------------------- CONFIG PARAMS ---------------
@@ -70,13 +72,19 @@ class Mapping(Node):
         self.lidar_subscription  # prevent unused variable warning
         self.skipped_scans = 0
 
-        # Workspace subscriber
+        # Workspace subscriber (get last published polygon)
+        qos_workspace = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         workspace_topic = self.get_parameter("workspace_topic").value
         self.workspace_subscription = self.create_subscription(
             PolygonStamped,
             workspace_topic,
             self.workspace_callback,
-            10)
+            qos_workspace)
         self.workspace_subscription  # prevent unused variable warning
 
         # Is turning subscriber
@@ -89,22 +97,10 @@ class Mapping(Node):
         self.is_turning_subscription  # prevent unused variable warning
         self.is_turning = False
 
-        # Grid
-        self.grid = OcupancyGridData(self.grid_size, self.grid_resolution, self.grid_origin, self.log_odds_increse_occ, self.log_odds_decrease_free, self.log_odds_min, self.log_odds_max)
-
-        # Publish init grid
-        occupancy_grid_msg = OccupancyGrid()
-        occupancy_grid_msg.header.stamp = self.get_clock().now().to_msg()
-        occupancy_grid_msg.header.frame_id = "map"
-        occupancy_grid_msg.info.resolution = self.grid.resolution
-        occupancy_grid_msg.info.width = self.grid.width
-        occupancy_grid_msg.info.height = self.grid.height
-        occupancy_grid_msg.info.origin.position.x = self.grid.origin[0]
-        occupancy_grid_msg.info.origin.position.y = self.grid.origin[1]
-        occupancy_grid_msg.info.origin.position.z = 0
-        occupancy_grid_msg.data = self.grid.get_data()
-
-        self.ocuppancy_grid_publisher.publish(occupancy_grid_msg)
+        # Grid (initialized once we receive the workspace polygon)
+        self.grid = None
+        self.workspace_received = False
+        self.workspace_polygon_xy = None
         
 
         self.get_logger().info("Mapping node started")
@@ -114,11 +110,72 @@ class Mapping(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
     def workspace_callback(self, msg: PolygonStamped):
-        
-        pass
+        if not msg.polygon.points:
+            self.get_logger().warn("Received workspace polygon with no points")
+            return
+
+        self.workspace_polygon_xy = [(float(p.x), float(p.y)) for p in msg.polygon.points]
+        xs = [p[0] for p in self.workspace_polygon_xy]
+        ys = [p[1] for p in self.workspace_polygon_xy]
+        min_x, max_x = float(min(xs)), float(max(xs))
+        min_y, max_y = float(min(ys)), float(max(ys))
+
+        res = float(self.grid_resolution)
+        if res <= 0.0:
+            self.get_logger().error(f"Invalid grid_resolution={res}")
+            return
+
+        # Align bounds to resolution and ensure the max boundary is included.
+        origin_x = math.floor(min_x / res) * res
+        origin_y = math.floor(min_y / res) * res
+        max_x_bound = math.ceil(max_x / res) * res
+        max_y_bound = math.ceil(max_y / res) * res
+
+        width = int(round((max_x_bound - origin_x) / res)) + 1
+        height = int(round((max_y_bound - origin_y) / res)) + 1
+        if width <= 0 or height <= 0:
+            self.get_logger().error(f"Computed invalid grid size: width={width}, height={height}")
+            return
+
+        needs_reinit = (
+            (self.grid is None)
+            or (self.grid.width != width)
+            or (self.grid.height != height)
+            or (abs(self.grid.origin[0] - origin_x) > 1e-9)
+            or (abs(self.grid.origin[1] - origin_y) > 1e-9)
+        )
+        if not needs_reinit:
+            return
+
+        if not self.workspace_received:
+            self.get_logger().info(
+                "Initializing occupancy grid from workspace polygon "
+                f"(width={width}, height={height}, res={res}, origin=({origin_x:.3f},{origin_y:.3f}))"
+            )
+        else:
+            self.get_logger().warn(
+                "Workspace polygon changed; reinitializing occupancy grid "
+                f"(width={width}, height={height}, res={res}, origin=({origin_x:.3f},{origin_y:.3f}))"
+            )
+
+        self.grid = OcupancyGridData(
+            width=width,
+            height=height,
+            resolution=res,
+            origin=[origin_x, origin_y],
+            l_occ=self.log_odds_increse_occ,
+            l_free=self.log_odds_decrease_free,
+            l_min=self.log_odds_min,
+            l_max=self.log_odds_max,
+        )
+        self.grid.set_workspace_polygon(self.workspace_polygon_xy)
+        self.workspace_received = True
+        self.publish_grid(self.get_clock().now().to_msg())
 
     def lidar_callback(self, msg: LaserScan):
         if self.is_turning:
+            return
+        if self.grid is None:
             return
         
         if self.skipped_scans < self.scans_to_skip:
@@ -170,18 +227,7 @@ class Mapping(Node):
             # self.grid.update(x, y, occupied=True)
             self.grid.update_ray(x_robot, y_robot, x, y, last_cell_occupied)
 
-        occupancy_grid_msg = OccupancyGrid()
-        occupancy_grid_msg.header.stamp = msg.header.stamp
-        occupancy_grid_msg.header.frame_id = "map"
-        occupancy_grid_msg.info.resolution = self.grid.resolution
-        occupancy_grid_msg.info.width = self.grid.width
-        occupancy_grid_msg.info.height = self.grid.height
-        occupancy_grid_msg.info.origin.position.x = self.grid.origin[0]
-        occupancy_grid_msg.info.origin.position.y = self.grid.origin[1]
-        occupancy_grid_msg.info.origin.position.z = 0
-        occupancy_grid_msg.data = self.grid.get_data()
-
-        self.ocuppancy_grid_publisher.publish(occupancy_grid_msg)
+        self.publish_grid(msg.header.stamp)
 
     def is_turning_callback(self, msg: Bool):
         self.is_turning = msg.data
@@ -207,6 +253,23 @@ class Mapping(Node):
 
         return filtered
 
+    def publish_grid(self, stamp):
+        if self.grid is None:
+            return
+
+        occupancy_grid_msg = OccupancyGrid()
+        occupancy_grid_msg.header.stamp = stamp
+        occupancy_grid_msg.header.frame_id = "map"
+        occupancy_grid_msg.info.resolution = self.grid.resolution
+        occupancy_grid_msg.info.width = self.grid.width
+        occupancy_grid_msg.info.height = self.grid.height
+        occupancy_grid_msg.info.origin.position.x = self.grid.origin[0]
+        occupancy_grid_msg.info.origin.position.y = self.grid.origin[1]
+        occupancy_grid_msg.info.origin.position.z = 0.0
+        occupancy_grid_msg.data = self.grid.get_data()
+
+        self.ocuppancy_grid_publisher.publish(occupancy_grid_msg)
+
 def main():
     rclpy.init()
     node = Mapping()
@@ -220,15 +283,17 @@ if __name__ == '__main__':
 
 
 class OcupancyGridData:
-    def __init__(self, size, resolution, origin, l_occ=0.85, l_free=-0.4, l_min=-5, l_max=5):
-        self.size = size
+    def __init__(self, width, height, resolution, origin, l_occ=0.85, l_free=-0.4, l_min=-5, l_max=5):
         self.resolution = resolution
-        self.width = int(size // resolution)
-        self.height = int(size // resolution)
+        self.width = int(width)
+        self.height = int(height)
         self.origin = origin
+        self.size_x = float(self.width) * float(self.resolution)
+        self.size_y = float(self.height) * float(self.resolution)
 
         # Log-odds grid (float)
         self.log_odds = np.zeros((self.height, self.width), dtype=np.float32)
+        self.inside_workspace_mask = None
 
         # Parameters
         self.l_occ = l_occ    # log odds increase for occupied
@@ -236,15 +301,70 @@ class OcupancyGridData:
         self.l_min = l_min
         self.l_max = l_max
 
+    def set_workspace_polygon(self, pts_xy):
+        """
+        pts_xy: list of (x,y) points in world/map frame.
+        Creates a boolean mask of which grid cells are inside the polygon.
+        All cells outside are forced to occupied (log odds = l_max).
+        """
+        if not pts_xy or len(pts_xy) < 3:
+            self.inside_workspace_mask = None
+            return
+
+        poly = [(float(x), float(y)) for (x, y) in pts_xy]
+
+        def _point_on_segment(px, py, ax, ay, bx, by, eps=1e-9):
+            abx = bx - ax
+            aby = by - ay
+            apx = px - ax
+            apy = py - ay
+            cross = abx * apy - aby * apx
+            if abs(cross) > eps:
+                return False
+            dot = apx * abx + apy * aby
+            if dot < -eps:
+                return False
+            sq_len = abx * abx + aby * aby
+            if dot - sq_len > eps:
+                return False
+            return True
+
+        def _point_in_poly(px, py, polygon):
+            inside = False
+            n = len(polygon)
+            for i in range(n):
+                x1, y1 = polygon[i]
+                x2, y2 = polygon[(i + 1) % n]
+
+                if _point_on_segment(px, py, x1, y1, x2, y2):
+                    return True
+
+                intersects = ((y1 > py) != (y2 > py)) and (
+                    px < (x2 - x1) * (py - y1) / ((y2 - y1) if (y2 - y1) != 0.0 else 1e-12) + x1
+                )
+                if intersects:
+                    inside = not inside
+            return inside
+
+        mask = np.zeros((self.height, self.width), dtype=bool)
+        for gy in range(self.height):
+            cy = self.origin[1] + (gy + 0.5) * self.resolution
+            for gx in range(self.width):
+                cx = self.origin[0] + (gx + 0.5) * self.resolution
+                mask[gy, gx] = _point_in_poly(cx, cy, poly)
+
+        self.inside_workspace_mask = mask
+        self.log_odds[~self.inside_workspace_mask] = self.l_max
+
     def world_to_grid(self, x, y):
         x_index = int((x - self.origin[0]) // self.resolution)
         y_index = int((y - self.origin[1]) // self.resolution)
         return x_index, y_index
 
     def update(self, x, y, occupied=True):
-        if x < self.origin[0] or x > self.origin[0] + self.size:
+        if x < self.origin[0] or x >= self.origin[0] + self.size_x:
             return
-        if y < self.origin[1] or y > self.origin[1] + self.size:
+        if y < self.origin[1] or y >= self.origin[1] + self.size_y:
             return
 
         x_index, y_index = self.world_to_grid(x, y)
@@ -252,6 +372,8 @@ class OcupancyGridData:
         if x_index < 0 or x_index >= self.width:
             return
         if y_index < 0 or y_index >= self.height:
+            return
+        if self.inside_workspace_mask is not None and not self.inside_workspace_mask[y_index, x_index]:
             return
 
         if occupied:
@@ -270,6 +392,8 @@ class OcupancyGridData:
         probs = 1 - 1 / (1 + np.exp(self.log_odds))  # sigmoid
 
         occupancy = (probs * 100).astype(np.int8)
+        if self.inside_workspace_mask is not None:
+            occupancy[~self.inside_workspace_mask] = 100
 
         return occupancy.reshape(-1).tolist()
     
@@ -312,6 +436,8 @@ class OcupancyGridData:
 
         for i, (x, y) in enumerate(cells):
             if x < 0 or x >= self.width or y < 0 or y >= self.height:
+                continue
+            if self.inside_workspace_mask is not None and not self.inside_workspace_mask[y, x]:
                 continue
 
             if last_occupied:
