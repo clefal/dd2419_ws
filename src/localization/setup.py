@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'localization = localization.icp_scan_to_line:main'
+            'localization = localization.icp_scan_to_line:main',
+            'filter_scan = localization.filter_scan:main',
         ],
     },
 )

@@ -34,6 +34,7 @@ mapping = { cmd = "ros2 run mapping mapping" }
 full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
 detection = { cmd = "ros2 run detection detection" }
 is_turning = { cmd = "ros2 run controller is_turning" }
+filter_scan = { cmd = "ros2 run localization filter_scan" }
 
 [tasks.install_udev_rules]
 cmd = '''
