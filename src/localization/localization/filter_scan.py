@@ -1,19 +1,14 @@
 import rclpy
 import math
 from rclpy.node import Node
-from typing import List, Optional, Tuple
-from sensor_msgs.msg import LaserScan, PointCloud2, PointField
+from sensor_msgs.msg import LaserScan
 import numpy as np
-import open3d as o3d
-from scipy.ndimage import median_filter
 
 class ScanPreprocessor(Node):
     def __init__(self):
         super().__init__('scan_preprocessor')
 
         self.declare_parameter('input_topic', '/lidar/scan')
-        # self.declare_parameter('output_topic', '/lidar/scan_processed')
-
         self.declare_parameter('output_topic', '/localization/preprocessed_scan')
         
 

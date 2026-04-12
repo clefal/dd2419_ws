@@ -205,49 +205,6 @@ def scan_to_points(
 
     return np.array(pts, dtype=float)
 
-
-def median_filter_ranges(ranges, kernel_size: int = 5) -> np.ndarray:
-    kernel_size = max(1, int(kernel_size))
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-
-    half = kernel_size // 2
-    arr = np.array(ranges, dtype=float)
-    out = arr.copy()
-
-    for i in range(arr.shape[0]):
-        vals = []
-        for j in range(max(0, i - half), min(arr.shape[0], i + half + 1)):
-            v = arr[j]
-            if math.isfinite(v):
-                vals.append(v)
-        out[i] = float(np.median(vals)) if vals else np.nan
-
-    return out
-
-
-def reject_range_spikes(ranges, jump_thresh: float = 0.25) -> np.ndarray:
-    arr = np.array(ranges, dtype=float)
-    out = arr.copy()
-
-    if arr.shape[0] < 3 or jump_thresh <= 0.0:
-        return out
-
-    for i in range(1, arr.shape[0] - 1):
-        cur = arr[i]
-        prev = arr[i - 1]
-        nxt = arr[i + 1]
-
-        if not math.isfinite(cur):
-            continue
-
-        if math.isfinite(prev) and math.isfinite(nxt):
-            if abs(cur - prev) > jump_thresh and abs(cur - nxt) > jump_thresh:
-                out[i] = np.nan
-
-    return out
-
-
 def remove_isolated_points_ordered(points: np.ndarray, neighbor_dist_thresh: float = 0.12) -> np.ndarray:
     if points.shape[0] < 3:
         return points
@@ -523,12 +480,10 @@ class IcpScanToLine(Node):
         super().__init__("scan_to_line_slam")
 
         # Topics / frames
-        # LaserScan input topic.
-        self.declare_parameter("scan_topic", "/lidar/scan")
+        # LaserScan input topic. Default assumes an upstream scan preprocessor node.
+        self.declare_parameter("scan_topic", "/localization/preprocessed_scan")
         # Boolean topic indicating when the platform is turning; scans are skipped while true.
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
-        # Debug topic for publishing the filtered scan after preprocessing.
-        self.declare_parameter("preprocessed_scan_topic", "/localization/preprocessed_scan")
         # Debug visualization topic for publishing the current map lines.
         self.declare_parameter("map_lines_topic", "/localization/map_lines")
         # Robot base frame used when composing poses.
@@ -541,14 +496,8 @@ class IcpScanToLine(Node):
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 4.0)
-        # Maximum range kept in the published preprocessed scan message.
-        self.declare_parameter("range_max_filter_scan", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
         self.declare_parameter("stack_scans", 3)
-        # Median filter size applied to the raw range array.
-        self.declare_parameter("median_kernel_size", 5)
-        # Reject a beam if it differs from both adjacent beams by more than this range jump.
-        self.declare_parameter("range_jump_thresh", 0.20)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.
         self.declare_parameter("neighbor_dist_thresh", 0.10)
 
@@ -611,17 +560,13 @@ class IcpScanToLine(Node):
         # Read params
         self.scan_topic = self.get_parameter("scan_topic").value
         self.is_turning_topic = self.get_parameter("is_turning_topic").value
-        self.preprocessed_scan_topic = self.get_parameter("preprocessed_scan_topic").value
         self.map_lines_topic = self.get_parameter("map_lines_topic").value
         self.base_frame = self.get_parameter("base_frame").value
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
 
         self.range_max_clip = float(self.get_parameter("range_max_clip").value)
-        self.range_max_filter_scan = float(self.get_parameter("range_max_filter_scan").value)
         self.stack_scans = max(1, int(self.get_parameter("stack_scans").value))
-        self.median_kernel_size = int(self.get_parameter("median_kernel_size").value)
-        self.range_jump_thresh = float(self.get_parameter("range_jump_thresh").value)
         self.neighbor_dist_thresh = float(self.get_parameter("neighbor_dist_thresh").value)
 
         self.cluster_jump_thresh = float(self.get_parameter("cluster_jump_thresh").value)
@@ -672,11 +617,11 @@ class IcpScanToLine(Node):
         # IO
         self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
         self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
-        self.preprocessed_scan_pub = self.create_publisher(LaserScan, self.preprocessed_scan_topic, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 10)
 
         self.get_logger().info(
-            f"scan_to_line_slam started | stack_scans={self.stack_scans}, "
+            f"scan_to_line_slam started | scan_topic={self.scan_topic}, "
+            f"stack_scans={self.stack_scans}, "
             f"smoothing_alpha={self.pose_smoothing_alpha:.2f}"
         )
 
@@ -719,34 +664,15 @@ class IcpScanToLine(Node):
             return None
 
     def preprocess_scan(self, scan: LaserScan) -> Tuple[LaserScan, np.ndarray]:
-        filtered_scan = LaserScan()
-        filtered_scan.header = scan.header
-        filtered_scan.angle_min = scan.angle_min
-        filtered_scan.angle_max = scan.angle_max
-        filtered_scan.angle_increment = scan.angle_increment
-        filtered_scan.time_increment = scan.time_increment
-        filtered_scan.scan_time = scan.scan_time
-        filtered_scan.range_min = scan.range_min
-        filtered_scan.range_max = min(scan.range_max, self.range_max_filter_scan)
-        filtered_scan.intensities = scan.intensities
-
-        filtered_ranges = median_filter_ranges(scan.ranges, kernel_size=self.median_kernel_size)
-        filtered_ranges = reject_range_spikes(filtered_ranges, jump_thresh=self.range_jump_thresh)
-
-        filtered_ranges[
-            np.logical_and(np.isfinite(filtered_ranges), filtered_ranges > self.range_max_filter_scan)
-        ] = np.inf
-
-        filtered_scan.ranges = filtered_ranges.tolist()
-        self.preprocessed_scan_pub.publish(filtered_scan)
-
+        # Scan-level filtering is done upstream (see `filter_scan` node). Here we only
+        # convert to points and apply the point-neighborhood filter.
         points = scan_to_points(
-            filtered_scan,
-            range_max_clip=min(self.range_max_clip, self.range_max_filter_scan),
+            scan,
+            range_max_clip=self.range_max_clip,
         )
 
         points = remove_isolated_points_ordered(points, neighbor_dist_thresh=self.neighbor_dist_thresh)
-        return filtered_scan, points
+        return scan, points
 
     def build_stacked_points(self, current_points_laser: np.ndarray, T_odom_laser_current: np.ndarray) -> np.ndarray:
         stacked = [current_points_laser]

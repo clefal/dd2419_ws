@@ -18,8 +18,12 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.05) # m/cell
-        self.declare_parameter("lidar_topic", "/lidar/scan")
+        self.declare_parameter("grid_resolution", 0.04) # m/cell
+        # LaserScan input topic. Default assumes an upstream scan preprocessor node.
+        self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
+        # If true, the incoming LaserScan is assumed to already be filtered upstream.
+        # If false, this node will filter ranges using `median_filter_scan()` before mapping.
+        self.declare_parameter("input_is_preprocessed", True)
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
@@ -36,6 +40,7 @@ class Mapping(Node):
 
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
+        self.input_is_preprocessed = bool(self.get_parameter("input_is_preprocessed").value)
         self.range_min = 0.1
         self.range_max = 5.0
         self.range_max_free_update = 3.0
@@ -103,7 +108,10 @@ class Mapping(Node):
         self.workspace_polygon_xy = None
         
 
-        self.get_logger().info("Mapping node started")
+        self.get_logger().info(
+            f"Mapping node started | lidar_topic={lidar_topic}, "
+            f"input_is_preprocessed={self.input_is_preprocessed}"
+        )
 
         # TF listener
         self.tf_buffer = Buffer()
@@ -217,18 +225,24 @@ class Mapping(Node):
 
         #self.get_logger().info(f"X: {x_robot}, Y: {y_robot}")
 
-        filtered_ranges = self.median_filter_scan(msg.ranges, kernel_size=self.median_filter_kernel_size)
+        filtered_ranges = (
+            np.array(msg.ranges, dtype=float)
+            if self.input_is_preprocessed
+            else self.median_filter_scan(msg.ranges, kernel_size=self.median_filter_kernel_size)
+        )
         last_cell_occupied = True
 
         for i in range(len(filtered_ranges)):
             r = filtered_ranges[i]
             last_cell_occupied = True
 
-            if not math.isfinite(r) or r < self.range_min:
-                continue
-            if r > self.range_max:
+            if math.isinf(r) or math.isnan(r) or r > self.range_max :
                 r = self.range_max_free_update
                 last_cell_occupied = False
+            
+            if r < self.range_min:
+                continue
+
             ang = msg.angle_min + i * msg.angle_increment
             x_scan = r * math.cos(ang)
             y_scan = r * math.sin(ang)
