@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import math
-import heapq
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
@@ -14,17 +12,7 @@ from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from robp_interfaces.srv import GetAllObjects
 from robp_interfaces.msg import ObjPose
 
-GridIndex = Tuple[int, int]  # (gx, gy)
-
-
-@dataclass(frozen=True)
-class GridMeta:
-    width: int
-    height: int
-    resolution: float
-    origin_x: float
-    origin_y: float
-    origin_yaw: float  #  assume ~0 
+from .path_manager import GridIndex, GridMeta, PathManager, PlannerConfig
 
 
 class GlobalPlannerNode(Node):
@@ -49,6 +37,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
+        self.declare_parameter("replan_check_period_s", 0.5)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -99,13 +88,13 @@ class GlobalPlannerNode(Node):
             planning_qos,
         )
 
+        self.path_manager = PathManager(self._planner_config(), logger=self.get_logger())
+
         # TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
         # State
-        self._map: Optional[OccupancyGrid] = None
-        self._meta: Optional[GridMeta] = None
         self._goal_msg: Optional[PoseStamped] = None
         self._cubes: List[Tuple[float, float]] = []   # in map frame
         self._target_object: Optional[Tuple[float, float]] = None
@@ -113,7 +102,16 @@ class GlobalPlannerNode(Node):
         self.goal_x = None  # initialize this with None, value will be assigned during first goal callback
         self.goal_y = None
         self._pending_plan_mode: Optional[str] = None
+        self._pending_plan_reason: str = "unknown"
         self._pending_goal_candidates: Optional[PoseArray] = None
+        self._active_plan_mode: Optional[str] = None
+        self._active_goal_candidates: Optional[PoseArray] = None
+        self._current_path_idx: Optional[List[GridIndex]] = None
+        self._current_include_box_lethal = True
+        self._replan_in_progress = False
+
+        replan_period = self.get_parameter("replan_check_period_s").get_parameter_value().double_value
+        self._replan_timer = self.create_timer(replan_period, self._check_replan)
 
 
         self.get_logger().info(
@@ -123,9 +121,25 @@ class GlobalPlannerNode(Node):
     # -------------------------
     # ROS callbacks
     # -------------------------
+    def _planner_config(self) -> PlannerConfig:
+        return PlannerConfig(
+            w_heuristic=self.get_parameter("w_heuristic").get_parameter_value().double_value,
+            occ_lethal=self.get_parameter("occ_lethal").get_parameter_value().integer_value,
+            occ_cost_scale=self.get_parameter("occ_cost_scale").get_parameter_value().double_value,
+            max_planning_time_ms=self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value,
+            robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
+            inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
+            cube_size=self.get_parameter("cube_size").get_parameter_value().double_value,
+            box_size=self.get_parameter("box_size").get_parameter_value().double_value,
+            box_goal_radius=self.get_parameter("box_goal_radius").get_parameter_value().double_value,
+        )
+
     def on_map(self, msg: OccupancyGrid) -> None:
-        self._map = msg
-        self._meta = self._extract_meta(msg)
+        self.path_manager.set_config(self._planner_config())
+        self.path_manager.update_map(msg)
+        planning_grid = self.path_manager.planning_grid
+        if planning_grid is not None:
+            self.pub_planning_grid.publish(planning_grid)
 
     def on_goal(self, msg: PoseStamped) -> None:
         self._goal_msg = msg
@@ -144,7 +158,7 @@ class GlobalPlannerNode(Node):
     # Planning orchestration
     # -------------------------
     def _plan_and_publish(self, reason: str) -> None:
-        if self._map is None or self._meta is None:
+        if self.path_manager.raw_map is None or self.path_manager.meta is None:
             self.get_logger().warn("No map yet; cannot plan.")
             return
         if self._goal_msg is None:
@@ -159,6 +173,8 @@ class GlobalPlannerNode(Node):
         self.goal_x = goal_xy[0]
         self.goal_y = goal_xy[1]
         self._pending_plan_mode = "single"
+        self._pending_plan_reason = reason
+        self._current_path_idx = None
 
         self.update_object_list()
         return
@@ -177,18 +193,26 @@ class GlobalPlannerNode(Node):
             for obj in obj_poses:
                 self._cubes.append((obj.obj_x, obj.obj_y))
 
+            self.path_manager.set_config(self._planner_config())
+            self.path_manager.update_objects(
+                cubes=self._cubes,
+                target_object=self._target_object,
+                box_xy=self._box_xy,
+            )
+
             if self._pending_plan_mode == "single":
-                self._continue_plan_and_publish(reason="new_goal")
+                self._continue_plan_and_publish(reason=self._pending_plan_reason)
             elif self._pending_plan_mode == "candidates":
-                self._continue_plan_and_publish_candidates(reason="goal_candidates")
+                self._continue_plan_and_publish_candidates(reason=self._pending_plan_reason)
 
         except Exception as e:
+            self._replan_in_progress = False
             self.get_logger().info(f'get_all_objects service call failed {e}')
         
         
 
     def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
-        if self._map is None or self._meta is None:
+        if self.path_manager.raw_map is None or self.path_manager.meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")
             return
         if len(msg.poses) == 0:
@@ -196,20 +220,23 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="empty_goal_candidates")
             return
     
-        goal_box_avg_x = (msg.poses[0].position.x + msg.poses[1].position.x)/2
-        goal_box_avg_y = (msg.poses[0].position.y + msg.poses[1].position.y)/2
-        # since we have 2 find the average value in order to make it work with the update_list function
+        goal_box_avg_x = sum(pose.position.x for pose in msg.poses) / len(msg.poses)
+        goal_box_avg_y = sum(pose.position.y for pose in msg.poses) / len(msg.poses)
+        # Use the candidate centroid for the object-list exclusion bookkeeping.
         
         self.goal_x = goal_box_avg_x
         self.goal_y = goal_box_avg_y
         self._pending_goal_candidates = msg
         self._pending_plan_mode = "candidates"
+        self._pending_plan_reason = reason
+        self._current_path_idx = None
 
         self.update_object_list()   
         return
 
     def _continue_plan_and_publish(self, reason: str) -> None:
-        if self._map is None or self._meta is None:
+        meta = self.path_manager.meta
+        if self.path_manager.raw_map is None or meta is None:
             self.get_logger().warn("No map yet; cannot plan.")
             return
         if self._goal_msg is None:
@@ -218,14 +245,16 @@ class GlobalPlannerNode(Node):
 
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
         self._pending_plan_mode = None
+        self._pending_plan_reason = "unknown"
+        self._replan_in_progress = False
 
         start_xy = self._get_robot_xy_in_map()
         if start_xy is None:
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan.")
             return
 
-        start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
-        goal_idx = self.world_to_grid(goal_xy[0], goal_xy[1], self._meta)
+        start_idx = self.path_manager.world_to_grid(start_xy[0], start_xy[1], meta)
+        goal_idx = self.path_manager.world_to_grid(goal_xy[0], goal_xy[1], meta)
         self.get_logger().info(
             f"Planning inputs: start_xy=({start_xy[0]:.2f},{start_xy[1]:.2f}) -> {start_idx}, "
             f"goal_xy=({goal_xy[0]:.2f},{goal_xy[1]:.2f}) -> {goal_idx}"
@@ -236,12 +265,18 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_or_goal_outside_grid")
             return
 
-        path_idx = self._compute_path(start_idx, goal_idx, include_box_lethal=not self._is_box_goal(goal_xy))
-        if path_idx is None or len(path_idx) == 0:
+        include_box_lethal = not self._is_box_goal(goal_xy)
+        plan = self.path_manager.plan_to_goal(start_xy, goal_xy, include_box_lethal=include_box_lethal)
+        planning_grid = self.path_manager.planning_grid
+        if planning_grid is not None:
+            self.pub_planning_grid.publish(planning_grid)
+
+        if plan is None:
             self.get_logger().warn(f"Planning failed ({reason}). No path found.")
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
+        path_idx = plan.path_idx
         final_yaw_override = None
         maybe_path, maybe_yaw = self._apply_coarse_object_standoff(path_idx)
         if maybe_path is not None and len(maybe_path) > 0:
@@ -264,14 +299,22 @@ class GlobalPlannerNode(Node):
             final_orientation=goal_orientation,
         )
         self.pub_path.publish(path_msg)
+        self._current_path_idx = path_idx
+        self._current_include_box_lethal = include_box_lethal
+        self._active_plan_mode = "single"
+        self._active_goal_candidates = None
+        self._replan_in_progress = False
         self.get_logger().info(f"Published path with {len(path_msg.poses)} poses (reason={reason}).")
 
     def _continue_plan_and_publish_candidates(self, reason: str) -> None:
         msg = self._pending_goal_candidates
         self._pending_plan_mode = None
+        self._pending_plan_reason = "unknown"
         self._pending_goal_candidates = None
+        self._replan_in_progress = False
 
-        if self._map is None or self._meta is None:
+        meta = self.path_manager.meta
+        if self.path_manager.raw_map is None or meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")
             return
         if msg is None:
@@ -295,71 +338,42 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("TF unavailable (map->base_link); cannot plan candidate goals.")
             return
 
-        start_idx = self.world_to_grid(start_xy[0], start_xy[1], self._meta)
+        start_idx = self.path_manager.world_to_grid(start_xy[0], start_xy[1], meta)
         if start_idx is None:
             self.get_logger().warn("Start is outside the grid bounds; cannot plan candidate goals.")
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
-        best_path_idx = None
-        best_pose = None
-        best_cost = None
         include_box_lethal = not any(
             self._is_box_goal((pose.position.x, pose.position.y))
             for pose in msg.poses
         )
-        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
-        self.pub_planning_grid.publish(planning_map)
+        candidate_xy = [(pose.position.x, pose.position.y) for pose in msg.poses]
+        plan = self.path_manager.plan_to_best_candidate(
+            start_xy,
+            candidate_xy,
+            include_box_lethal=include_box_lethal,
+        )
+        planning_grid = self.path_manager.planning_grid
+        if planning_grid is not None:
+            self.pub_planning_grid.publish(planning_grid)
 
-        for pose in msg.poses:
-            goal_idx = self.world_to_grid(pose.position.x, pose.position.y, self._meta)
-            if goal_idx is None:
-                continue
-
-            path_idx = self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
-            if path_idx is None or len(path_idx) == 0:
-                continue
-
-            pcost = self._path_total_cost(path_idx, planning_map, self._meta)
-            if best_cost is None or pcost < best_cost:
-                best_cost = pcost
-                best_path_idx = path_idx
-                best_pose = pose
-
-        if best_path_idx is None or best_pose is None:
+        if plan is None:
             self.get_logger().warn(f"Planning failed ({reason}). No feasible candidate path.")
             self._publish_empty_path(reason=f"planning_failed_{reason}")
             return
 
-        path_msg = self._build_path_message(best_path_idx, final_orientation=best_pose.orientation)
+        best_pose = msg.poses[plan.best_pose_index]
+        path_msg = self._build_path_message(plan.path_idx, final_orientation=best_pose.orientation)
         self.pub_path.publish(path_msg)
+        self._current_path_idx = plan.path_idx
+        self._current_include_box_lethal = include_box_lethal
+        self._active_plan_mode = "candidates"
+        self._active_goal_candidates = msg
+        self._replan_in_progress = False
         self.get_logger().info(
-            f"Published candidate path with {len(path_msg.poses)} poses (reason={reason}, candidates={len(msg.poses)}, cost={best_cost:.2f})."
+            f"Published candidate path with {len(path_msg.poses)} poses (reason={reason}, candidates={len(msg.poses)}, cost={plan.cost:.2f})."
         )
-
-    def _path_total_cost(self, path_idx: List[GridIndex], occ: OccupancyGrid, meta: GridMeta) -> float:
-        if len(path_idx) <= 1:
-            return 0.0
-
-        total = 0.0
-        for i in range(1, len(path_idx)):
-            x0, y0 = path_idx[i - 1]
-            x1, y1 = path_idx[i]
-            dx = abs(x1 - x0)
-            dy = abs(y1 - y0)
-            step = math.sqrt(2.0) if (dx == 1 and dy == 1) else 1.0
-            total += step + self.cell_penalty(x1, y1, occ, meta)
-        return total
-
-    def _compute_path(
-        self,
-        start_idx: GridIndex,
-        goal_idx: GridIndex,
-        include_box_lethal: bool,
-    ) -> Optional[List[GridIndex]]:
-        planning_map = self.build_planning_grid(self._map, self._meta, include_box_lethal=include_box_lethal)
-        self.pub_planning_grid.publish(planning_map)
-        return self.weighted_a_star(start_idx, goal_idx, planning_map, self._meta)
 
     def _build_path_message(
         self,
@@ -367,12 +381,15 @@ class GlobalPlannerNode(Node):
         final_yaw: Optional[float] = None,
         final_orientation=None,
     ) -> Path:
+        meta = self.path_manager.meta
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = self.global_frame
+        if meta is None:
+            return path_msg
 
         for (gx, gy) in path_idx:
-            wx, wy = self.grid_to_world_center(gx, gy, self._meta)
+            wx, wy = self.path_manager.grid_to_world_center(gx, gy, meta)
             ps = PoseStamped()
             ps.header = path_msg.header
             ps.pose.position.x = wx
@@ -398,7 +415,8 @@ class GlobalPlannerNode(Node):
     def _apply_coarse_object_standoff(
         self, path_idx: List[GridIndex]
     ) -> Tuple[Optional[List[GridIndex]], Optional[float]]:
-        if self._goal_msg is None or self._meta is None:
+        meta = self.path_manager.meta
+        if self._goal_msg is None or meta is None:
             return (None, None)
 
         tx = self._goal_msg.pose.position.x
@@ -408,12 +426,12 @@ class GlobalPlannerNode(Node):
         if radius <= 0.0:
             return (None, None)
 
-        cut_idx = self._path_index_at_radius(path_idx, tx, ty, radius, self._meta)
+        cut_idx = self._path_index_at_radius(path_idx, tx, ty, radius, meta)
         if cut_idx is None:
             return (None, None)
 
         truncated = path_idx[:cut_idx + 1]
-        ax, ay = self.grid_to_world_center(truncated[-1][0], truncated[-1][1], self._meta)
+        ax, ay = self.path_manager.grid_to_world_center(truncated[-1][0], truncated[-1][1], meta)
         yaw = math.atan2(ty - ay, tx - ax)
         self.get_logger().info(
             f"Coarse object standoff applied: radius={radius:.2f}, cut_idx={cut_idx}, path_len={len(path_idx)}->{len(truncated)}"
@@ -429,7 +447,7 @@ class GlobalPlannerNode(Node):
 
         prev_dist = None
         for i, (gx, gy) in enumerate(path_idx):
-            wx, wy = GlobalPlannerNode.grid_to_world_center(gx, gy, meta)
+            wx, wy = PathManager.grid_to_world_center(gx, gy, meta)
             d = math.hypot(wx - tx, wy - ty)
             if d <= radius:
                 if i == 0:
@@ -446,6 +464,8 @@ class GlobalPlannerNode(Node):
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = self.global_frame
         self.pub_path.publish(path_msg)
+        self._current_path_idx = None
+        self._replan_in_progress = False
         self.get_logger().warn(f"Published EMPTY path (reason={reason}).")
 
     def _get_robot_xy_in_map(self) -> Optional[Tuple[float, float]]:
@@ -456,287 +476,38 @@ class GlobalPlannerNode(Node):
         except Exception:
             return None
 
-
-    def build_planning_grid(
-        self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
-    ) -> OccupancyGrid:
-        # Copy raw map
-        planning = OccupancyGrid()
-        planning.header = raw.header
-        planning.info = raw.info
-        lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
-        robot_radius = self.get_parameter("robot_radius").get_parameter_value().double_value
-        margin = self.get_parameter("inflation_margin").get_parameter_value().double_value
-
-        r_lethal_cells = int(math.ceil((robot_radius + margin) / meta.resolution))
-
-        # soft halo thickness outside the hard core
-        soft_halo_m = 0.10
-        r_soft_cells = r_lethal_cells + int(math.ceil(soft_halo_m / meta.resolution))
-
-        planning.data = self.inflate_static_obstacles(
-            raw.data,
-            meta,
-            r_lethal_cells,
-            r_soft_cells,
-            lethal,
-)
-
-
-
-        cube_size = self.get_parameter("cube_size").get_parameter_value().double_value
-        cube_half_diagonal = 0.5 * cube_size * math.sqrt(2.0)
-        cube_keepout_radius = robot_radius + cube_half_diagonal + margin
-        r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
-
-        for (cx, cy) in self._cubes:
-            if self._target_object is not None:
-                tx, ty = self._target_object
-                if math.hypot(cx - tx, cy - ty) < 0.10:
-                    continue
-
-            idx = self.world_to_grid(cx, cy, meta)
-            if idx is None:
-                continue
-
-            self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
-
-        if include_box_lethal:  #TODO: expand to work with several boxes
-            box_xy = self._get_box_xy_in_map()
-            if box_xy is not None:
-                box_size = self.get_parameter("box_size").get_parameter_value().double_value
-                box_half_diagonal = 0.5 * box_size * math.sqrt(2.0)
-                box_keepout_radius = robot_radius + box_half_diagonal + margin
-                box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
-
-                box_idx = self.world_to_grid(box_xy[0], box_xy[1], meta)
-                if box_idx is not None:
-                    self.mark_disk_lethal(planning.data, box_idx[0], box_idx[1], box_r_cells, meta)
-
-        return planning
-
     def _is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        box_xy = self._get_box_xy_in_map()
-        if box_xy is None:
-            return False
+        return self.path_manager.is_box_goal(goal_xy)
 
-        box_goal_radius = self.get_parameter("box_goal_radius").get_parameter_value().double_value
-        return math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= box_goal_radius
+    def _check_replan(self) -> None:
+        if self._current_path_idx is None or self._replan_in_progress:
+            return
+        if self._active_plan_mode not in ("single", "candidates"):
+            return
 
-    def _get_box_xy_in_map(self) -> Optional[Tuple[float, float]]:
-        return self._box_xy
-
-
-    def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):
-        """
-        Hard constraint: within r_lethal -> 100 (lethal)
-        Soft halo: r_lethal < dist <= r_soft -> descending cost
-        """
-        inflated = list(data)
-
-        for gy in range(meta.height):
-            for gx in range(meta.width):
-                v = data[gx + gy * meta.width]
-
-                if v < 0:
-                    continue
-
-                if v >= lethal_thresh:
-                    for dy in range(-r_soft, r_soft + 1):
-                        for dx in range(-r_soft, r_soft + 1):
-                            dist2 = dx * dx + dy * dy
-                            if dist2 > r_soft * r_soft:
-                                continue
-
-                            nx = gx + dx
-                            ny = gy + dy
-                            if not (0 <= nx < meta.width and 0 <= ny < meta.height):
-                                continue
-
-                            if dist2 <= r_lethal * r_lethal:
-                                # Hard inflated core
-                                inflated[nx + ny * meta.width] = 100
-                            else:
-                                # Soft cost halo (declines to 0 at r_soft)
-                                d = math.sqrt(dist2)
-                                t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))  # 0..1
-                                penalty = int(99 * (1.0 - t))  # 99..0
-                                idx = nx + ny * meta.width
-                                if penalty > inflated[idx]:
-                                    inflated[idx] = penalty
-
-        return inflated
-
-
-
-    def mark_disk_lethal(self, data, cx, cy, r, meta):
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                if dx * dx + dy * dy > r * r:
-                    continue
-
-                gx = cx + dx
-                gy = cy + dy
-
-                if 0 <= gx < meta.width and 0 <= gy < meta.height:
-                    data[gx + gy * meta.width] = 100
-
-    # -------------------------
-    # Occupancy grid helpers
-    # -------------------------
-
-
-
-    @staticmethod
-    def _extract_meta(msg: OccupancyGrid) -> GridMeta:
-        ox = msg.info.origin.position.x
-        oy = msg.info.origin.position.y
-        q = msg.info.origin.orientation
-        _, _, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
-        return GridMeta(
-            width=msg.info.width,
-            height=msg.info.height,
-            resolution=msg.info.resolution,
-            origin_x=ox,
-            origin_y=oy,
-            origin_yaw=yaw,
+        planning_grid = self.path_manager.rebuild_planning_grid(
+            include_box_lethal=self._current_include_box_lethal
         )
+        if planning_grid is not None:
+            self.pub_planning_grid.publish(planning_grid)
 
-    @staticmethod
-    def world_to_grid(x: float, y: float, meta: GridMeta) -> Optional[GridIndex]:
-        # If origin yaw is non-zero, you should rotate (x,y) into grid frame.
-        # Your current mapping publishes yaw ~ 0, so we keep it simple.
-        gx = int(math.floor((x - meta.origin_x) / meta.resolution))
-        gy = int(math.floor((y - meta.origin_y) / meta.resolution))
-        if gx < 0 or gy < 0 or gx >= meta.width or gy >= meta.height:
-            return None
-        return (gx, gy)
+        robot_xy = self._get_robot_xy_in_map()
+        if self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy):
+            return
 
-    @staticmethod
-    def grid_to_world_center(gx: int, gy: int, meta: GridMeta) -> Tuple[float, float]:
-        x = meta.origin_x + (gx + 0.5) * meta.resolution
-        y = meta.origin_y + (gy + 0.5) * meta.resolution
-        return (x, y)
-
-    @staticmethod
-    def idx_to_flat(gx: int, gy: int, meta: GridMeta) -> int:
-        # OccupancyGrid data is row-major: index = x + y*width
-        return gx + gy * meta.width
-
-    def cell_is_traversable(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> bool:
-        lethal = self.get_parameter("occ_lethal").get_parameter_value().integer_value
-
-        v = occ.data[self.idx_to_flat(gx, gy, meta)]  # -1 unknown, 0..100
-        if v < 0:
-            return True
-        return v < lethal
-
-    def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
-        """
-        Soft cost for A* to prefer lower occupancy probability.
-        Returns >= 0.0
-        """
-        scale = self.get_parameter("occ_cost_scale").get_parameter_value().double_value
-        v = occ.data[self.idx_to_flat(gx, gy, meta)]
-        if v < 0:
-            # Unknown: treat as moderate penalty if not lethal
-            return 0.5 * scale
-        # Map 0..100 to 0..scale
-        return (float(v) / 100.0) * scale
-
-    # -------------------------
-    # Weighted A* implementation
-    # -------------------------
-    def weighted_a_star(
-        self,
-        start: GridIndex,
-        goal: GridIndex,
-        occ: OccupancyGrid,
-        meta: GridMeta
-    ) -> Optional[List[GridIndex]]:
-        w = self.get_parameter("w_heuristic").get_parameter_value().double_value
-        max_ms = self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value
-
-        if not self.cell_is_traversable(start[0], start[1], occ, meta):
-            v = occ.data[self.idx_to_flat(start[0], start[1], meta)]
-            self.get_logger().warn(f"Start cell is not traversable: idx={start}, occ={v}")
-            return None
-        if not self.cell_is_traversable(goal[0], goal[1], occ, meta):
-            v = occ.data[self.idx_to_flat(goal[0], goal[1], meta)]
-            self.get_logger().warn(f"Goal cell is not traversable: idx={goal}, occ={v}")
-            return None
-
-        moves_4 = [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0)]
-        moves_8 = moves_4 + [(1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)), (-1, 1, math.sqrt(2)), (-1, -1, math.sqrt(2))]
-
-        def heuristic(a: GridIndex, b: GridIndex) -> float:
-            dx = abs(a[0] - b[0])
-            dy = abs(a[1] - b[1])
-            return max(dx, dy) + (math.sqrt(2) - 1.0) * min(dx, dy)
-
-        # Priority queue: (f, g, node)
-        open_heap: List[Tuple[float, float, GridIndex]] = []
-        heapq.heappush(open_heap, (0.0, 0.0, start))
-
-        came_from: Dict[GridIndex, GridIndex] = {}
-        g_score: Dict[GridIndex, float] = {start: 0.0}
-
-        start_time = self.get_clock().now()
-
-        while open_heap:
-            # soft time guard
-            elapsed = (self.get_clock().now() - start_time).nanoseconds / 1e6
-            if elapsed > float(max_ms):
-                self.get_logger().warn(
-                    f"Planning exceeded {max_ms} ms; aborting. expanded={len(g_score)}, open_set={len(open_heap)}"
-                )
-                return None
-
-            _, g_curr, current = heapq.heappop(open_heap)
-
-            if current == goal:
-                return self._reconstruct_path(came_from, current)
-
-            # If this popped entry is stale, skip
-            if g_curr > g_score.get(current, float("inf")):
-                continue
-
-            cx, cy = current
-            for dx, dy, step_cost in moves_8:
-                nx, ny = cx + dx, cy + dy
-
-                if nx < 0 or ny < 0 or nx >= meta.width or ny >= meta.height:
-                    continue
-                if not self.cell_is_traversable(nx, ny, occ, meta):
-                    continue
-
-                if dx != 0 and dy != 0:
-                    if not (self.cell_is_traversable(cx + dx, cy, occ, meta) and self.cell_is_traversable(cx, cy + dy, occ, meta)):
-                        continue
-
-                penalty = self.cell_penalty(nx, ny, occ, meta)
-                tentative_g = g_score[current] + step_cost + penalty
-
-                neighbor = (nx, ny)
-                if tentative_g < g_score.get(neighbor, float("inf")):
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    f = tentative_g + w * heuristic(neighbor, goal)
-                    heapq.heappush(open_heap, (f, tentative_g, neighbor))
-
-        self.get_logger().warn(
-            f"Weighted A* exhausted search space without reaching goal. expanded={len(g_score)}"
-        )
-        return None
-
-    @staticmethod
-    def _reconstruct_path(came_from: Dict[GridIndex, GridIndex], current: GridIndex) -> List[GridIndex]:
-        path = [current]
-        while current in came_from:
-            current = came_from[current]
-            path.append(current)
-        path.reverse()
-        return path
+        self.get_logger().warn("Current global path is blocked. Replanning.")
+        self._replan_in_progress = True
+        if self._active_plan_mode == "single":
+            self._pending_plan_mode = "single"
+            self._pending_plan_reason = "path_blocked"
+            self.update_object_list()
+        elif self._active_plan_mode == "candidates" and self._active_goal_candidates is not None:
+            self._pending_goal_candidates = self._active_goal_candidates
+            self._pending_plan_mode = "candidates"
+            self._pending_plan_reason = "path_blocked"
+            self.update_object_list()
+        else:
+            self._replan_in_progress = False
 
 
 def main() -> None:

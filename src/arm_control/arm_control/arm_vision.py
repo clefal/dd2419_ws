@@ -6,6 +6,18 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32MultiArray
 
+#TODO OPENCV EDGE DETECTION
+#TODO CAMERA CALIBRATION
+
+# TODO ISTURNING ON CONTROLLER; HIGH W DELTAS
+
+# TODO NO OBJECTS IN 
+#TODO: Replanning:
+# PATHMANAGER: checks live planning grid against planned path
+# on interception replan. on new object detected replan
+
+#TODO EXPLORATION PHASE (GO INTO SMALL PART OF WORKSPACE!)
+
 
 MIN_CONTOUR_AREA = 500.0
 IMAGE_TOPIC = '/arm/camera/image_raw'
