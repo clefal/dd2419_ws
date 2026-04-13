@@ -97,8 +97,8 @@ class GlobalPlannerNode(Node):
         # State
         self._goal_msg: Optional[PoseStamped] = None
         self._cubes: List[Tuple[float, float]] = []   # in map frame
+        self._boxes: List[Tuple[float, float]] = []   # in map frame
         self._target_object: Optional[Tuple[float, float]] = None
-        self._box_xy: Optional[Tuple[float, float]] = None
         self.goal_x = None  # initialize this with None, value will be assigned during first goal callback
         self.goal_y = None
         self._pending_plan_mode: Optional[str] = None
@@ -190,14 +190,18 @@ class GlobalPlannerNode(Node):
             res :GetAllObjects.Response = future.result()
             obj_poses :List[ObjPose] = res.obj_poses
             self._cubes: List[Tuple[float, float]] = []   # in map frame
+            self._boxes: List[Tuple[float, float]] = []   # in map frame
             for obj in obj_poses:
-                self._cubes.append((obj.obj_x, obj.obj_y))
+                if obj.obj_type == 'box':
+                    self._boxes.append((obj.obj_x, obj.obj_y))
+                else:
+                    self._cubes.append((obj.obj_x, obj.obj_y))
 
             self.path_manager.set_config(self._planner_config())
             self.path_manager.update_objects(
                 cubes=self._cubes,
+                boxes=self._boxes,
                 target_object=self._target_object,
-                box_xy=self._box_xy,
             )
 
             if self._pending_plan_mode == "single":
@@ -265,7 +269,7 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_or_goal_outside_grid")
             return
 
-        include_box_lethal = not self._is_box_goal(goal_xy)
+        include_box_lethal = True
         plan = self.path_manager.plan_to_goal(start_xy, goal_xy, include_box_lethal=include_box_lethal)
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
@@ -344,10 +348,7 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="start_outside_grid_candidates")
             return
 
-        include_box_lethal = not any(
-            self._is_box_goal((pose.position.x, pose.position.y))
-            for pose in msg.poses
-        )
+        include_box_lethal = True
         candidate_xy = [(pose.position.x, pose.position.y) for pose in msg.poses]
         plan = self.path_manager.plan_to_best_candidate(
             start_xy,
@@ -475,9 +476,6 @@ class GlobalPlannerNode(Node):
             return (tf.transform.translation.x, tf.transform.translation.y)
         except Exception:
             return None
-
-    def _is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        return self.path_manager.is_box_goal(goal_xy)
 
     def _check_replan(self) -> None:
         if self._current_path_idx is None or self._replan_in_progress:

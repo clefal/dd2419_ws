@@ -519,15 +519,14 @@ class GoalManager(Node):
             self.publish_next_search_goal()
             return
 
-        bx, by, byaw = self._box_pose
-
-        axis_yaw = byaw + math.pi / 2.0
-        ux = math.cos(axis_yaw)
-        uy = math.sin(axis_yaw)
+        bx, by, _ = self._box_pose
+        d = self._box_side_offset
 
         cands = [
-            (bx + self._box_side_offset * ux, by + self._box_side_offset * uy),
-            (bx - self._box_side_offset * ux, by - self._box_side_offset * uy),
+            (bx + d, by),
+            (bx - d, by),
+            (bx, by + d),
+            (bx, by - d),
         ]
 
         pa = PoseArray()
@@ -553,7 +552,9 @@ class GoalManager(Node):
         self.get_logger().info(
             f'Box goal candidates sent: '
             f'c0=({cands[0][0]:.2f},{cands[0][1]:.2f}), '
-            f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f})'
+            f'c1=({cands[1][0]:.2f},{cands[1][1]:.2f}), '
+            f'c2=({cands[2][0]:.2f},{cands[2][1]:.2f}), '
+            f'c3=({cands[3][0]:.2f},{cands[3][1]:.2f})'
         )
 
     # ----------------------------

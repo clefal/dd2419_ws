@@ -61,8 +61,8 @@ class PathManager:
         self._planning_grid: Optional[OccupancyGrid] = None
         self._last_include_box_lethal = True
         self._cubes: List[Tuple[float, float]] = []
+        self._boxes: List[Tuple[float, float]] = []
         self._target_object: Optional[Tuple[float, float]] = None
-        self._box_xy: Optional[Tuple[float, float]] = None
 
     @property
     def raw_map(self) -> Optional[OccupancyGrid]:
@@ -87,12 +87,12 @@ class PathManager:
     def update_objects(
         self,
         cubes: List[Tuple[float, float]],
+        boxes: List[Tuple[float, float]],
         target_object: Optional[Tuple[float, float]],
-        box_xy: Optional[Tuple[float, float]],
     ) -> None:
         self._cubes = list(cubes)
+        self._boxes = list(boxes)
         self._target_object = target_object
-        self._box_xy = box_xy
 
     def rebuild_planning_grid(self, include_box_lethal: bool = True) -> Optional[OccupancyGrid]:
         self._last_include_box_lethal = include_box_lethal
@@ -214,13 +214,10 @@ class PathManager:
         return True
 
     def is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        if self._box_xy is None:
-            return False
-
-        return (
-            math.hypot(goal_xy[0] - self._box_xy[0], goal_xy[1] - self._box_xy[1])
-            <= self._config.box_goal_radius
-        )
+        for box_xy in self._boxes:
+            if math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= self._config.box_goal_radius:
+                return True
+        return False
 
     def build_planning_grid(
         self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
@@ -263,18 +260,25 @@ class PathManager:
             self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
 
         if include_box_lethal:
-            if self._box_xy is not None:
-                box_half_diagonal = 0.5 * self._config.box_size * math.sqrt(2.0)
-                box_keepout_radius = (
-                    self._config.robot_radius
-                    + box_half_diagonal
-                    + self._config.inflation_margin
-                )
-                box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
+            box_keepout_radius = (
+                self._config.robot_radius
+                + self._config.box_size
+                + self._config.inflation_margin
+            )
+            box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
 
-                box_idx = self.world_to_grid(self._box_xy[0], self._box_xy[1], meta)
-                if box_idx is not None:
-                    self.mark_disk_lethal(planning.data, box_idx[0], box_idx[1], box_r_cells, meta)
+            for (bx, by) in self._boxes:
+                box_idx = self.world_to_grid(bx, by, meta)
+                if box_idx is None:
+                    continue
+
+                self.mark_disk_lethal(
+                    planning.data,
+                    box_idx[0],
+                    box_idx[1],
+                    box_r_cells,
+                    meta,
+                )
 
         return planning
 
