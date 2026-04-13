@@ -34,7 +34,7 @@ class IsTurning(Node):
         self.prev_time = None
         self.prev_state = None
 
-        self.get_logger().info('mock_is_turning started')
+        self.get_logger().info('is_turning started')
 
     def _stamp_to_sec(self, stamp) -> float:
         return float(stamp.sec) + float(stamp.nanosec) * 1e-9
@@ -88,7 +88,6 @@ class IsTurning(Node):
 
         out_msg = Bool()
         out_msg.data = is_turning
-        self.get_logger().info(f"is_turning: {is_turning}")
         self.pub.publish(out_msg)
 
         self.get_logger().debug(
