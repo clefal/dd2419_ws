@@ -6,7 +6,7 @@ launch:
       exec: "usb_cam_node_exe"
       name: "arm_camera"
       namespace: "arm/camera"
-      output: "screen"
+      output: "log"
       emulate_tty: true
       param:
         - name: "video_device"

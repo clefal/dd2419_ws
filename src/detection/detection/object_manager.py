@@ -51,6 +51,7 @@ class ObjectManager(Node):
         self.sub_box = self.create_subscription(PointStamped,'/detection/objects/box', self.box_callback, 10)
 
         self.object_list = list()
+        self._last_logged_object_count = 0
 
         # services 
         self.srv_goals_available = self.create_service(GoalsAvailable,'object_manager/goals_available', self.goals_available_callback)
@@ -121,7 +122,9 @@ class ObjectManager(Node):
 
     def publish_objects(self):
         '''publishes all objects from the object_list'''
-        self.get_logger().info(f'Publishing {len(self.object_list)} objects')
+        if len(self.object_list) != self._last_logged_object_count:
+            self.get_logger().info(f'Publishing {len(self.object_list)} objects')
+            self._last_logged_object_count = len(self.object_list)
         parent_frame = self._fixed_frame
         for obj in self.object_list:
             frame_name = f'{self._object_frame_prefix}{obj.id}'
@@ -199,6 +202,9 @@ class ObjectManager(Node):
 
         if self.check_similarity(obj) == 0:  # if object is similar to zero objects then add it to the list
             self.object_list.append(obj)
+            self.get_logger().info(
+                f'New {obj.type} detected: id={obj.id}, x={obj.last_x:.2f}, y={obj.last_y:.2f}'
+            )
         
 # -------------------------
         

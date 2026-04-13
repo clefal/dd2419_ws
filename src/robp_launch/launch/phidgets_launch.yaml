@@ -6,7 +6,7 @@ launch:
       exec: "robp_phidgets"
       name: "robp_phidgets"
       namespace: "phidgets"
-      output: "screen"
+      output: "log"
       emulate_tty: true
       param:
         - name: "motors_acceleration"

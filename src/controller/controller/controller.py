@@ -182,7 +182,7 @@ class Controller(Node):
 
     def path_callback(self, msg: Path):
         frame = (msg.header.frame_id or '').strip()
-        self.get_logger().info(f"/nav/global_path received: frame='{frame}', poses={len(msg.poses)}")
+        #self.get_logger().info(f"/nav/global_path received: frame='{frame}', poses={len(msg.poses)}")
         if frame != self._fixed_frame:
             self.get_logger().warn(
                 f'Received /nav/global_path in frame "{frame}", expected "{self._fixed_frame}". Ignoring.'
