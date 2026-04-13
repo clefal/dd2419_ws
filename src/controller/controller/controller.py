@@ -590,10 +590,8 @@ class Controller(Node):
         # Steering
         w_raw = k_steer * kappa
         w = clamp(w_raw, -wmax, wmax)
-        if abs(w_raw) > wmax:
-            self.get_logger().info(
-                f'Angular speed saturated: w_raw={w_raw:.3f}, w_clamped={w:.3f}, wmax={wmax:.3f}'
-            )
+        #if abs(w_raw) > wmax:
+            #self.get_logger().info(f'Angular speed saturated: w_raw={w_raw:.3f}, w_clamped={w:.3f}, wmax={wmax:.3f}')
 
         # Convert to wheel duties
         left = v - w

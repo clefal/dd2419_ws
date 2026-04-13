@@ -511,7 +511,7 @@ class GoalManager(Node):
 
         self._box_id = res.obj_id
         self._box_pose = (res.obj_x, res.obj_y, res.obj_yaw)
-        self.get_logger().info(f'Closest box position received at: {self._box_pose}')
+        #self.get_logger().info(f'Closest box position received at: {self._box_pose}')
 
         if self._box_pose is None or self._box_id is None:
             self.get_logger().warn('No live box pose available after service response.')
@@ -576,7 +576,7 @@ class GoalManager(Node):
         msg = Bool()
         msg.data = bool(enabled)
         self._final_approach_enable_pub.publish(msg)
-        self.get_logger().info(f'Final approach enable sent: {enabled}')
+        #self.get_logger().info(f'Final approach enable sent: {enabled}')
 
     def publish_final_approach_target_id(self, object_id):
         msg = Int64()
