@@ -171,7 +171,8 @@ class Controller(Node):
     def get_pose_2d(self):
         try:
             t = self._tf_buffer.lookup_transform(self._fixed_frame, self._base_frame, rclpy.time.Time())
-        except Exception:
+        except Exception as ex:
+            self.get_logger().warn(f'TF lookup failed ({self._fixed_frame}->{self._base_frame}): {ex}')
             return None
 
         x = t.transform.translation.x
