@@ -9,7 +9,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray
-from tf2_ros import Buffer, TransformListener
+from tf2_ros import Buffer, TransformListener, TransformBroadcaster
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from robp_interfaces.srv import GetAllObjects
 from robp_interfaces.msg import ObjPose
@@ -102,6 +102,7 @@ class GlobalPlannerNode(Node):
         # TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        self.tf_broadcaster = TransformBroadcaster(self)
 
         # State
         self._map: Optional[OccupancyGrid] = None
@@ -153,7 +154,7 @@ class GlobalPlannerNode(Node):
 
         # now call the GetAllObj Service and update the List accordingly 
         # make sure to exclude the goal position from the Object List, otherwise we will black the goal out
-
+        self.update_odom_frame()
         # updateobject_list needs goal pose in the future callback that is why we need it as a global variable
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y) # moved up since it is needed for the Obj_List_update
         self.goal_x = goal_xy[0]
@@ -162,6 +163,11 @@ class GlobalPlannerNode(Node):
 
         self.update_object_list()
         return
+
+    def update_odom_frame(self):
+        t = self.tf_buffer.lookup_transform('odom_temp', self.global_frame, timeout=rclpy.time.Duration(seconds=0.1))
+        t.child_frame_id = 'odom'
+        self.tf_broadcaster.sendTransform(t)
 
     def update_object_list(self):
         req = GetAllObjects.Request()
@@ -186,7 +192,6 @@ class GlobalPlannerNode(Node):
             self.get_logger().info(f'get_all_objects service call failed {e}')
         
         
-
     def _plan_and_publish_candidates(self, msg: PoseArray, reason: str) -> None:
         if self._map is None or self._meta is None:
             self.get_logger().warn("No map yet; cannot plan candidate goals.")

@@ -628,7 +628,7 @@ class IcpScanToLine(Node):
         # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link")
         # Odometry frame used as the short-term motion prior.
-        self.declare_parameter("odom_frame", "odom")
+        self.declare_parameter("odom_frame", "odom_temp")  # changed to odom_temp
         # Global frame where the line map is expressed.
         self.declare_parameter("map_frame", "map")
 
