@@ -160,10 +160,10 @@ class Controller(Node):
         self._last_left_cmd = out_left
         self._last_right_cmd = out_right
 
-        # True when turning on the spot (opposite directions)
-        turning_msg = Bool()
-        turning_msg.data = (out_left * out_right < 0.0)
-        self._turn_pub.publish(turning_msg)
+        # # True when turning on the spot (opposite directions)
+        # turning_msg = Bool()
+        # turning_msg.data = (out_left * out_right < 0.0)
+        # self._turn_pub.publish(turning_msg)
 
     def stop(self):
         self.send_duty(0.0, 0.0)
