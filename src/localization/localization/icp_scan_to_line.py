@@ -1041,7 +1041,7 @@ class IcpScanToLine(Node):
             return
 
         laser_frame = scan.header.frame_id
-        T_base_laser = self.lookup_T(self.base_frame, laser_frame, stamp)
+        T_base_laser = self.lookup_T("base_link", laser_frame, stamp)
         if T_base_laser is None:
             return
 
