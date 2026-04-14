@@ -653,8 +653,8 @@ class IcpScanToLine(Node):
 
     def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
-            future = self.tf_buffer.wait_for_transform_async(target, source, stamp)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+            # future = self.tf_buffer.wait_for_transform_async(target, source, stamp)
+            # rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
             tf_msg = self.tf_buffer.lookup_transform(
                 target, source, stamp, timeout=rclpy.time.Duration(seconds=1)
             )
