@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import math
+import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from collections import deque
@@ -142,6 +143,7 @@ class IcpResult:
     median_abs_residual: float
     converged: bool
     iterations: int
+    time: float
 
 
 # =========================
@@ -367,6 +369,7 @@ def icp_point_to_line_robust(
     max_step_translation: float = 0.05,
     max_step_rotation_deg: float = 2.0
 ) -> IcpResult:
+    init_time = time.time()
     if points_laser.shape[0] == 0 or len(map_lines) == 0:
         return IcpResult(
             T=T_init.copy(),
@@ -467,8 +470,144 @@ def icp_point_to_line_robust(
         mean_abs_residual=final_mean_abs,
         median_abs_residual=final_median_abs,
         converged=converged,
-        iterations=it + 1 if max_iters > 0 else 0
+        iterations=it + 1 if max_iters > 0 else 0,
+        time=(time.time() - init_time) * 1000
     )
+
+# def icp_point_to_line_robust(
+#     points_laser: np.ndarray,
+#     map_lines: List[LineSegment],
+#     T_init: np.ndarray,
+#     max_iters: int = 15,
+#     min_corr: int = 20,
+#     max_perp_dist: float = 0.12,
+#     huber_delta: float = 0.05,
+#     max_step_translation: float = 0.05,
+#     max_step_rotation_deg: float = 2.0
+# ) -> IcpResult:
+#     init_time = time.time()
+#     if points_laser.shape[0] == 0 or len(map_lines) == 0:
+#         return IcpResult(
+#             T=T_init.copy(),
+#             num_corr=0,
+#             mean_abs_residual=float("inf"),
+#             median_abs_residual=float("inf"),
+#             converged=False,
+#             iterations=0
+#         )
+
+#     x, y, th = matrix_to_pose(T_init)
+
+#     final_num_corr = 0
+#     final_mean_abs = float("inf")
+#     final_median_abs = float("inf")
+#     converged = False
+#     max_step_rot = math.radians(max_step_rotation_deg)
+
+#     # Pre-allocate
+#     I3 = np.eye(3, dtype=float)
+
+#     for it in range(max_iters):
+#         c = math.cos(th)
+#         s = math.sin(th)
+
+#         # Avoid recreating full matrices when possible
+#         R = np.array([[c, -s], [s, c]], dtype=float)
+#         t = np.array([x, y], dtype=float)
+
+#         # Vectorized transform
+#         Rp_all = (R @ points_laser.T).T
+#         p_map_all = Rp_all + t
+
+#         J_rows = []
+#         e_rows = []
+
+#         for i in range(points_laser.shape[0]):
+#             Rp = Rp_all[i]
+#             p_map = p_map_all[i]
+
+#             line = closest_line_for_point(
+#                 p_map,
+#                 map_lines,
+#                 max_perp_dist=max_perp_dist
+#             )
+#             if line is None:
+#                 continue
+
+#             # residual
+#             e = float(line.n @ (p_map - line.q))
+
+#             # Jacobian
+#             dtheta = np.array([-Rp[1], Rp[0]], dtype=float)
+#             J = np.array([
+#                 line.n[0],
+#                 line.n[1],
+#                 float(line.n @ dtheta)
+#             ], dtype=float)
+
+#             J_rows.append(J)
+#             e_rows.append(e)
+
+#         final_num_corr = len(J_rows)
+#         if final_num_corr < min_corr:
+#             break
+
+#         J = np.vstack(J_rows)
+#         e = np.array(e_rows, dtype=float)
+
+#         abs_e = np.abs(e)
+#         final_mean_abs = float(np.mean(abs_e))
+#         final_median_abs = float(np.median(abs_e))
+
+#         # Vectorized Huber weights
+#         W = np.where(
+#             abs_e <= huber_delta,
+#             1.0,
+#             huber_delta / np.maximum(abs_e, 1e-12)
+#         )
+#         sqrtW = np.sqrt(W)
+
+#         # Weighted least squares
+#         Jw = J * sqrtW[:, None]
+#         ew = e * sqrtW
+
+#         H = Jw.T @ Jw
+#         g = Jw.T @ ew
+#         H += 1e-6 * I3  # reuse identity
+
+#         try:
+#             dx = -np.linalg.solve(H, g)
+#         except np.linalg.LinAlgError:
+#             break
+
+#         # Step clamp
+#         trans_step = float(np.linalg.norm(dx[:2]))
+#         rot_step = abs(float(dx[2]))
+
+#         if trans_step > max_step_translation:
+#             dx[:2] *= max_step_translation / max(trans_step, 1e-12)
+
+#         if rot_step > max_step_rot:
+#             dx[2] *= max_step_rot / max(rot_step, 1e-12)
+
+#         x += float(dx[0])
+#         y += float(dx[1])
+#         th = wrap_angle(th + float(dx[2]))
+
+#         # Convergence check
+#         if trans_step < 1e-4 and rot_step < math.radians(0.05):
+#             converged = True
+#             break
+
+#     return IcpResult(
+#         T=pose_to_matrix(x, y, th),
+#         num_corr=final_num_corr,
+#         mean_abs_residual=final_mean_abs,
+#         median_abs_residual=final_median_abs,
+#         converged=converged,
+#         iterations=it + 1 if max_iters > 0 else 0,
+#         time=(time.time() - init_time) * 1000
+#     )
 
 
 # =========================
@@ -956,6 +1095,7 @@ class IcpScanToLine(Node):
                 f"mean={result.mean_abs_residual:.4f} "
                 f"median={result.median_abs_residual:.4f} "
                 f"dx={dx:.3f} dy={dy:.3f} dth_deg={math.degrees(dth):.2f} "
+                f"time={result.time:.3f}ms "
                 f"accepted={accepted}"
             )
 
