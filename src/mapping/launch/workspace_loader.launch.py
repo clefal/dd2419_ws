@@ -80,25 +80,26 @@ def generate_launch_description():
                 '--frame-id', 'base_link',
                 '--child-frame-id', 'realsense_camera_link'
             ]
-        ),       
-        
-        # Static TF: base_link -> realsense_camera_depth_optical_frame
-        # this is only used for testing the detection_manager as it will not work if this transform is not put in place manually.
-        # When running things on the robot this transform is not needed as a transform from realsense_camera_link -> realsense...depth_optical_frame is put in place when launching the camera
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_camera',
-            arguments=[
-                '--x', '0.08987',
-                '--y', '0.0175',
-                '--z', '0.10456',
-                '--qx', '0.5',
-                '--qy', '-0.5',
-                '--qz', '0.5',
-                '--qw', '-0.5',
-                '--frame-id', 'base_link',
-                '--child-frame-id', 'realsense_camera_depth_optical_frame'
-            ]
         )
+        
+        # ,       
+        #         # Static TF: base_link -> realsense_camera_depth_optical_frame
+        # # this is only used for testing the detection_manager as it will not work if this transform is not put in place manually.
+        # # When running things on the robot this transform is not needed as a transform from realsense_camera_link -> realsense...depth_optical_frame is put in place when launching the camera
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='base_to_camera',
+        #     arguments=[
+        #         '--x', '0.08987',
+        #         '--y', '0.0175',
+        #         '--z', '0.10456',
+        #         '--qx', '0.5',
+        #         '--qy', '-0.5',
+        #         '--qz', '0.5',
+        #         '--qw', '-0.5',
+        #         '--frame-id', 'base_link',
+        #         '--child-frame-id', 'realsense_camera_depth_optical_frame'
+        #     ]
+        # )
     ])

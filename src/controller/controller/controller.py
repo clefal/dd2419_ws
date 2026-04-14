@@ -84,14 +84,14 @@ class Controller(Node):
         self.declare_parameter('lookahead_distance', 0.15)        # m
         self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
         self.declare_parameter('max_angular_speed', 0.15)        # cap turning a bit more conservatively
-        self.declare_parameter('goal_tolerance', 0.08)  #0.05         # m
+        self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.06) #0.35
 
 
         self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
-        self.declare_parameter('turn_gain', 0.2)                 # duty-per-rad for in-place turning
-        self.declare_parameter('control_period', 0.05)           # s (0.05=20Hz, 0.1=10Hz)
+        self.declare_parameter('turn_gain', 0.2)                # duty-per-rad for in-place turning
+        self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
 
         self.declare_parameter('final_nominal_speed', 0.1)                # duty-equivalent for close approach
@@ -108,7 +108,7 @@ class Controller(Node):
 
         # Start-of-path heading error threshold for turn-in-place alignment
         self._turn_in_place_yaw_thresh = 0.2  # rad
-        self._yaw_tol = 0.05  # rad for final alignment
+        self._yaw_tol = 0.1  # rad for final alignment 0.05 gold
 
         # Control loop
               

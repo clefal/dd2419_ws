@@ -47,7 +47,6 @@ class ObjectManager(Node):
         self.sub_red_cube = self.create_subscription(PointStamped,'/detection/objects/red_cube', self.red_callback, 10)
         self.sub_green_cube = self.create_subscription(PointStamped,'/detection/objects/green_cube', self.green_callback, 10)
         self.sub_blue_cube = self.create_subscription(PointStamped,'/detection/objects/blue_cube', self.blue_callback, 10)
-        self.sub_wood_cube = self.create_subscription(PointStamped,'/detection/objects/wood_cube', self.wood_callback, 10)
         self.sub_box = self.create_subscription(PointStamped,'/detection/objects/box', self.box_callback, 10)
 
         self.object_list = list()
@@ -68,8 +67,8 @@ class ObjectManager(Node):
         self._max_static_objects = 50
 
         self._static_loaded = False
-        self.create_timer(0.5, self.get_points_from_csv_once)
-
+        self.create_timer(5, self.get_points_from_csv_once)
+        self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
 
 # ----------------------------------
@@ -106,6 +105,9 @@ class ObjectManager(Node):
             for idx, o in enumerate(self.object_list):
                 if o.type == obj.type or o.type == 'map_cube':
                     # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
+                    if o.type == 'map_cube' and obj.type == 'box':
+                        continue
+                        
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
                         # if the object is similar (=close to another object and of same type)
                         updated_obj = o.copy()
@@ -113,6 +115,7 @@ class ObjectManager(Node):
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         self.object_list[idx] = updated_obj
+                        updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
 
                         similarity_counter += 1
             
@@ -127,7 +130,13 @@ class ObjectManager(Node):
             self._last_logged_object_count = len(self.object_list)
         parent_frame = self._fixed_frame
         for obj in self.object_list:
-            frame_name = f'{self._object_frame_prefix}{obj.id}'
+
+            if obj.type == 'box':
+                frame_name = f'det_{self._box_frame}{obj.id}'
+
+            else:
+                frame_name = f'det_{self._object_frame_prefix}{obj.id}'
+
             t = TransformStamped()
             t.header.stamp = self.get_clock().now().to_msg()    # maybe change this and actually take the timestamp from when the objects were published for that we need to save the stamp in the object list
             t.header.frame_id = parent_frame
@@ -207,6 +216,9 @@ class ObjectManager(Node):
             )
         
 # -------------------------
+
+    def debugging_msg(self):
+        self.get_logger().info(f'currently there are {len(self.object_list)} objects in the object_list')
         
 ############ Object-Topic- Callbacks #############
 
@@ -226,12 +238,6 @@ class ObjectManager(Node):
     def blue_callback(self, msg  : PointStamped):
         yaw = 0
         obj_type = 'blue_cube'
-        self.process_object(msg.point.x, msg.point.y, yaw, obj_type)
-        self.publish_objects()
-
-    def wood_callback(self, msg  : PointStamped):
-        yaw = 0
-        obj_type = 'wood_cube'
         self.process_object(msg.point.x, msg.point.y, yaw, obj_type)
         self.publish_objects()
 
@@ -362,6 +368,7 @@ class ObjectManager(Node):
                 res.obj_x = obj.last_x
                 res.obj_y = obj.last_y
                 res.obj_yaw = obj.last_yaw
+                self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
                 return res
 
         self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')
