@@ -251,7 +251,7 @@ class Odometry(Node):
         t_temp = TransformStamped()
         t_temp.header.stamp = stamp
         t_temp.header.frame_id = 'odom_temp'
-        t_temp.child_frame_id = 'base_link'
+        t_temp.child_frame_id = 'base_link_temp'
 
         t_temp.transform.translation.x = x
         t_temp.transform.translation.y = y
