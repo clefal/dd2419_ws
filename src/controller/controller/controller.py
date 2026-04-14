@@ -248,13 +248,13 @@ class Controller(Node):
             self._final_target_request_pending = False
             self._final_target_request_last_wall = 0.0
             self.publish_status('RUNNING')
-            self.get_logger().info('Final approach enabled.')
+            #self.get_logger().info('Final approach enabled.')
         else:
             self.stop()
             self._start_alignment_pending = False
             self._start_turn_logged = False
             self._final_target_request_pending = False
-            self.get_logger().info('Final approach disabled.')
+            #self.get_logger().info('Final approach disabled.')
 
     def final_approach_target_id_callback(self, msg: Int64):
         self._final_target_id = int(msg.data)
