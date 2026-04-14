@@ -253,6 +253,7 @@ class PathManager:
         static_data = list(raw.data)
         workspace_inside, workspace_border = self._workspace_masks(meta)
         if workspace_inside is not None:
+            # Ignore the filled outside-workspace region as an inflation source.
             for i, is_inside in enumerate(workspace_inside):
                 if not is_inside:
                     static_data[i] = 0
@@ -268,6 +269,11 @@ class PathManager:
             r_soft_cells,
             self._config.occ_lethal,
         )
+        if workspace_inside is not None:
+            # Keep the published planning grid visually and semantically non-traversable outside.
+            for i, is_inside in enumerate(workspace_inside):
+                if not is_inside:
+                    planning.data[i] = 100
 
         cube_half_diagonal = 0.5 * self._config.cube_size * math.sqrt(2.0)
         cube_keepout_radius = (
