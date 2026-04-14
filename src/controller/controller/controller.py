@@ -107,7 +107,7 @@ class Controller(Node):
         self._dc_min = 0.08
 
         # Start-of-path heading error threshold for turn-in-place alignment
-        self._turn_in_place_yaw_thresh = 0.2  # rad
+        self._turn_in_place_yaw_thresh = 0.6  # rad
         self._yaw_tol = 0.1  # rad for final alignment 0.05 gold
 
         # Control loop
