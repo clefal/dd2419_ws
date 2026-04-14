@@ -21,9 +21,9 @@
   <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
   <node pkg="arm_control" exec="arm_vision" name="arm_vision" output="log"/>
   <node pkg="controller" exec="controller" name="controller" output="log"/>
-  <node pkg="controller" exec="is_turning" name="is_turning" output="None"/>
+  <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>
   <node pkg="global_planner" exec="global_planner" name="global_planner" output="log"/>
-  <node pkg="detection" exec="detection" name="detection" output="None"/>
+  <node pkg="detection" exec="detection" name="detection" output="log"/>
 
 
 </launch>

@@ -34,7 +34,7 @@ class IsTurning(Node):
         self.prev_time = None
         self.prev_state = None
 
-        self.get_logger().info('is_turning started')
+        #self.get_logger().info('is_turning started')
 
     def _stamp_to_sec(self, stamp) -> float:
         return float(stamp.sec) + float(stamp.nanosec) * 1e-9
@@ -59,9 +59,11 @@ class IsTurning(Node):
         dt = current_time - self.prev_time
         self.prev_time = current_time
 
+        """
         if dt <= 1e-6:
             self.get_logger().warn('dt too small, skipping encoder sample')
             return
+        """
 
         wheel_radius = float(self.get_parameter('wheel_radius').value)
         wheel_base = float(self.get_parameter('wheel_base').value)
@@ -81,20 +83,21 @@ class IsTurning(Node):
         omega = (v_right - v_left) / wheel_base
 
         is_turning = abs(omega) > omega_threshold
-        if self.prev_state is not None:
-            if self.prev_state != is_turning:
-                self.get_logger().info(f"Turning state changed from {self.prev_state} to {is_turning}")
+        #if self.prev_state is not None:
+           # if self.prev_state != is_turning:
+               # self.get_logger().info(f"Turning state changed from {self.prev_state} to {is_turning}")
         self.prev_state = is_turning
 
         out_msg = Bool()
         out_msg.data = is_turning
         self.pub.publish(out_msg)
-
+        """
         self.get_logger().debug(
             f"dt={dt:.4f}, dl={delta_left:.2f}, dr={delta_right:.2f}, "
             f"vl={v_left:.3f}, vr={v_right:.3f}, omega={omega:.3f}, "
             f"threshold={omega_threshold:.3f}, turning={is_turning}"
         )
+        """
 
 
 def main(args=None):
