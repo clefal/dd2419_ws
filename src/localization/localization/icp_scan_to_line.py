@@ -626,7 +626,7 @@ class IcpScanToLine(Node):
         # Debug visualization topic for publishing the current map lines.
         self.declare_parameter("map_lines_topic", "/localization/map_lines")
         # Robot base frame used when composing poses.
-        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("base_frame", "base_link_temp")
         # Odometry frame used as the short-term motion prior.
         self.declare_parameter("odom_frame", "odom_temp")  # changed to odom_temp
         # Global frame where the line map is expressed.
