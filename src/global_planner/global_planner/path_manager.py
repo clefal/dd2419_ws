@@ -428,10 +428,15 @@ class PathManager:
         g_score: Dict[GridIndex, float] = {start: 0.0}
 
         start_time = time.monotonic()
+        self._info(f"Starting A*: start={start}, goal={goal}")
 
         while open_heap:
             elapsed_ms = (time.monotonic() - start_time) * 1000.0
             if elapsed_ms > float(self._config.max_planning_time_ms):
+                self._info(
+                    f"Finished A*: status=timeout, elapsed_ms={elapsed_ms:.1f}, "
+                    f"expanded={len(g_score)}, open_set={len(open_heap)}"
+                )
                 self._warn(
                     f"Planning exceeded {self._config.max_planning_time_ms} ms; "
                     f"aborting. expanded={len(g_score)}, open_set={len(open_heap)}"
@@ -441,7 +446,13 @@ class PathManager:
             _, g_curr, current = heapq.heappop(open_heap)
 
             if current == goal:
-                return self._reconstruct_path(came_from, current)
+                path = self._reconstruct_path(came_from, current)
+                elapsed_ms = (time.monotonic() - start_time) * 1000.0
+                self._info(
+                    f"Finished A*: status=success, elapsed_ms={elapsed_ms:.1f}, "
+                    f"expanded={len(g_score)}, open_set={len(open_heap)}, path_len={len(path)}"
+                )
+                return path
 
             if g_curr > g_score.get(current, float("inf")):
                 continue
@@ -472,6 +483,11 @@ class PathManager:
                     f = tentative_g + self._config.w_heuristic * heuristic(neighbor, goal)
                     heapq.heappush(open_heap, (f, tentative_g, neighbor))
 
+        elapsed_ms = (time.monotonic() - start_time) * 1000.0
+        self._info(
+            f"Finished A*: status=exhausted, elapsed_ms={elapsed_ms:.1f}, "
+            f"expanded={len(g_score)}, open_set={len(open_heap)}"
+        )
         self._warn(f"Weighted A* exhausted search space without reaching goal. expanded={len(g_score)}")
         return None
 
@@ -499,3 +515,7 @@ class PathManager:
     def _warn(self, msg: str) -> None:
         if self._logger is not None:
             self._logger.warn(msg)
+
+    def _info(self, msg: str) -> None:
+        if self._logger is not None:
+            self._logger.info(msg)
