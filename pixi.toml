@@ -30,9 +30,12 @@ callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper"
 localization =  { cmd = "ros2 run localization localization" }
 static_transforms = { cmd = "ros2 launch robp_launch frames_launch.xml" }
 workspace = { cmd = "ros2 launch src/mapping/launch/workspace_loader.launch.py workspace_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/workspace_1.csv map_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/map_1_1.csv" }
-mapping = { cmd = "ros2 run mapping mapping_prob" }
+mapping = { cmd = "ros2 run mapping mapping" }
 full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
 detection = { cmd = "ros2 run detection detection" }
+object_manager = { cmd = "ros2 run detection object_manager" }
+is_turning = { cmd = "ros2 run controller is_turning" }
+filter_scan = { cmd = "ros2 run localization filter_scan" }
 
 [tasks.install_udev_rules]
 cmd = '''
@@ -103,9 +106,11 @@ ros-jazzy-detection = { path = "src/detection" }
 argcomplete = ">=3.6.3,<4"
 colcon-common-extensions = ">=0.3.0,<0.4"
 pynput = ">=1.8.1,<2"
+scipy = "*"
 ros-jazzy-std-msgs = ">=5.3.6,<6"
 colour-science = ">=0.4.7,<0.5"
 scikit-learn = ">=1.8.0,<2"
+open3d = "*"
 
 [target.linux-64.dependencies]
 # ROS

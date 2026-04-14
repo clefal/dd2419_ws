@@ -107,7 +107,7 @@ class Controller(Node):
         self._dc_min = 0.08
 
         # Start-of-path heading error threshold for turn-in-place alignment
-        self._turn_in_place_yaw_thresh = 0.2  # rad
+        self._turn_in_place_yaw_thresh = 0.6  # rad
         self._yaw_tol = 0.1  # rad for final alignment 0.05 gold
 
         # Control loop
@@ -160,10 +160,10 @@ class Controller(Node):
         self._last_left_cmd = out_left
         self._last_right_cmd = out_right
 
-        # True when turning on the spot (opposite directions)
-        turning_msg = Bool()
-        turning_msg.data = (out_left * out_right < 0.0)
-        self._turn_pub.publish(turning_msg)
+        # # True when turning on the spot (opposite directions)
+        # turning_msg = Bool()
+        # turning_msg.data = (out_left * out_right < 0.0)
+        # self._turn_pub.publish(turning_msg)
 
     def stop(self):
         self.send_duty(0.0, 0.0)

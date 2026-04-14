@@ -183,6 +183,20 @@ class WorkspaceAndFrames(Node):
         tf_map_odom.transform.rotation.w = qw
         tfs.append(tf_map_odom)
 
+        # map -> start
+        tf_map_start = TransformStamped()
+        tf_map_start.header.stamp = now
+        tf_map_start.header.frame_id = self.frame_map
+        tf_map_start.child_frame_id = "start"
+        tf_map_start.transform.translation.x = float(sx)
+        tf_map_start.transform.translation.y = float(sy)
+        tf_map_start.transform.translation.z = 0.0
+        tf_map_start.transform.rotation.x = qx
+        tf_map_start.transform.rotation.y = qy
+        tf_map_start.transform.rotation.z = qz
+        tf_map_start.transform.rotation.w = qw
+        tfs.append(tf_map_start)
+
         # map -> objectN
         for i, (ox, oy, odeg) in enumerate(objects):
             qx, qy, qz, qw = yaw_to_quat(math.radians(odeg))
