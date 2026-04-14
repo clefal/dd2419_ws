@@ -246,7 +246,24 @@ class Odometry(Node):
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
 
+
+        # Temporary odom frame
+        t_temp = TransformStamped()
+        t_temp.header.stamp = stamp
+        t_temp.header.frame_id = 'odom_temp'
+        t_temp.child_frame_id = 'base_link'
+
+        t_temp.transform.translation.x = x
+        t_temp.transform.translation.y = y
+        t_temp.transform.translation.z = 0.0
+
+        t_temp.transform.rotation.x = q[0]
+        t_temp.transform.rotation.y = q[1]
+        t_temp.transform.rotation.z = q[2]
+        t_temp.transform.rotation.w = q[3]
+
         self._tf_broadcaster.sendTransform(t)
+        self._tf_broadcaster.sendTransform(t_temp)
 
     def publish_path(self, stamp, x, y, yaw):
         self._path.header.stamp = stamp
