@@ -181,9 +181,12 @@ class GlobalPlannerNode(Node):
         return
 
     def update_odom_frame(self):
-        t = self.tf_buffer.lookup_transform('odom_temp', self.global_frame, timeout=rclpy.time.Duration(seconds=0.1))
-        t.child_frame_id = 'odom'
-        self.tf_broadcaster.sendTransform(t)
+        try:
+            t = self.tf_buffer.lookup_transform('odom_temp', self.global_frame, timeout=rclpy.time.Duration(seconds=0.1))
+            t.child_frame_id = 'odom'
+            self.tf_broadcaster.sendTransform(t)
+        except:
+            self.get_logger().warn("no odom_temp after replaning.")
 
     def update_object_list(self):
         req = GetAllObjects.Request()

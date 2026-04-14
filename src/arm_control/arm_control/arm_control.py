@@ -209,11 +209,14 @@ class ArmControlNode(Node):
         self.latest_detection_time = self.get_clock().now()
         self.detection_history.append(detection)
         if DEBUG_VISION_UPDATES and self.should_log_detection(detection):
+            """
             self.get_logger().info(
                 f'Vision update: x={detection.center_x} y={detection.center_y} '
                 f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
                 f'z={self.current_target_z:.1f}'
             )
+            """
+
             self.last_logged_detection = detection
             self.last_vision_log_time = self.latest_detection_time
 
@@ -312,12 +315,15 @@ class ArmControlNode(Node):
                 z=test_z,
             )
             joint_target = planar_to_joint_target(planar_target)
+            """
             self.get_logger().info(
                 f'{label}: commanding rho={planar_target.rho:.1f} '
                 f'alpha={planar_target.alpha_deg:.1f} z={planar_target.z:.1f} '
                 f'-> p2={joint_target.wrist:.1f} p3={joint_target.elbow:.1f} '
                 f'p4={joint_target.shoulder:.1f} p5={joint_target.base:.1f}'
             )
+            """
+            
             self.command_planar_target(
                 rho=rho,
                 alpha_deg=alpha_deg,
