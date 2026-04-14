@@ -196,9 +196,8 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("No goal yet; cannot plan.")
             return
 
-        # now call the GetAllObj Service and update the List accordingly 
+        # now call the GetAllObj Service and update the List accordingly
         # make sure to exclude the goal position from the Object List, otherwise we will black the goal out
-        self.update_odom_frame()
         # updateobject_list needs goal pose in the future callback that is why we need it as a global variable
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y) # moved up since it is needed for the Obj_List_update
         self.goal_x = goal_xy[0]
@@ -210,13 +209,27 @@ class GlobalPlannerNode(Node):
         self.update_object_list()
         return
 
-    def update_odom_frame(self):
+    def update_odom_frame(self) -> bool:
+        """Freeze the continuously corrected odom_temp frame into odom.
+
+        TF lookup_transform(target, source) returns target <- source.  To make
+        controller consumers use the current corrected pose through map -> odom,
+        copy map <- odom_temp and only rename the child frame to odom.
+        """
         try:
-            t = self.tf_buffer.lookup_transform('odom_temp', self.global_frame, timeout=rclpy.time.Duration(seconds=0.1))
+            t = self.tf_buffer.lookup_transform(
+                self.global_frame,
+                'odom_temp',
+                rclpy.time.Time(),
+                timeout=rclpy.time.Duration(seconds=0.1),
+            )
+            t.header.stamp = self.get_clock().now().to_msg()
             t.child_frame_id = 'odom'
             self.tf_broadcaster.sendTransform(t)
-        except:
-            self.get_logger().warn("no odom_temp after replaning.")
+            return True
+        except Exception as ex:
+            self.get_logger().warn(f"Could not freeze odom from odom_temp before replanning: {ex}")
+            return False
 
     def update_object_list(self):
         req = GetAllObjects.Request()
@@ -284,6 +297,8 @@ class GlobalPlannerNode(Node):
         if self._goal_msg is None:
             self.get_logger().warn("No goal yet; cannot plan.")
             return
+
+        self.update_odom_frame()
 
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
         self._pending_plan_mode = None
@@ -366,6 +381,8 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("Received empty goal candidate list.")
             self._publish_empty_path(reason="empty_goal_candidates")
             return
+
+        self.update_odom_frame()
 
         frame = (msg.header.frame_id or "").strip()
         if frame not in ("", self.global_frame):
