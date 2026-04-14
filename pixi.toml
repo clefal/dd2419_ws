@@ -33,6 +33,7 @@ workspace = { cmd = "ros2 launch src/mapping/launch/workspace_loader.launch.py w
 mapping = { cmd = "ros2 run mapping mapping" }
 full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
 detection = { cmd = "ros2 run detection detection" }
+object_manager = { cmd = "ros2 run detection object_manager" }
 is_turning = { cmd = "ros2 run controller is_turning" }
 filter_scan = { cmd = "ros2 run localization filter_scan" }
 
