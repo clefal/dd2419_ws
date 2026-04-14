@@ -776,7 +776,7 @@ class IcpScanToLine(Node):
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
-                self.odom_frame,
+                'start',
                 rclpy.time.Time(seconds=0),
                 timeout=rclpy.time.Duration(seconds=1)
             )
