@@ -27,7 +27,6 @@ class Mapping(Node):
         self.declare_parameter("scans_to_skip", 5)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
-        self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("grid_size", 12)
         self.declare_parameter("grid_origin", [-1.0, -1.0])
 
@@ -38,7 +37,6 @@ class Mapping(Node):
         self.grid_origin = self.get_parameter("grid_origin").value
         self.grid_resolution = self.get_parameter("grid_resolution").value
         self.worspace_topic = self.get_parameter("workspace_topic").value
-        self.workspace_border_width = self.get_parameter("workspace_border_width").value
 
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
@@ -177,7 +175,6 @@ class Mapping(Node):
             l_free=self.log_odds_decrease_free,
             l_min=self.log_odds_min,
             l_max=self.log_odds_max,
-            workspace_border_width=self.workspace_border_width,
         )
         self.grid.set_workspace_polygon(self.workspace_polygon_xy)
         self.workspace_received = True
@@ -313,30 +310,17 @@ if __name__ == '__main__':
 
 
 class OcupancyGridData:
-    def __init__(
-        self,
-        width,
-        height,
-        resolution,
-        origin,
-        l_occ=0.85,
-        l_free=-0.4,
-        l_min=-5,
-        l_max=5,
-        workspace_border_width=0.05,
-    ):
+    def __init__(self, width, height, resolution, origin, l_occ=0.85, l_free=-0.4, l_min=-5, l_max=5):
         self.resolution = resolution
         self.width = int(width)
         self.height = int(height)
         self.origin = origin
         self.size_x = float(self.width) * float(self.resolution)
         self.size_y = float(self.height) * float(self.resolution)
-        self.workspace_border_width = float(workspace_border_width)
 
         # Log-odds grid (float)
         self.log_odds = np.zeros((self.height, self.width), dtype=np.float32)
         self.inside_workspace_mask = None
-        self.workspace_border_mask = None
 
         # Parameters
         self.l_occ = l_occ    # log odds increase for occupied
@@ -348,11 +332,10 @@ class OcupancyGridData:
         """
         pts_xy: list of (x,y) points in world/map frame.
         Creates a boolean mask of which grid cells are inside the polygon.
-        Cells near the polygon edge are forced to occupied as a workspace border.
+        All cells outside are forced to occupied (log odds = l_max).
         """
         if not pts_xy or len(pts_xy) < 3:
             self.inside_workspace_mask = None
-            self.workspace_border_mask = None
             return
 
         poly = [(float(x), float(y)) for (x, y) in pts_xy]
@@ -390,46 +373,15 @@ class OcupancyGridData:
                     inside = not inside
             return inside
 
-        def _point_segment_distance(px, py, ax, ay, bx, by):
-            abx = bx - ax
-            aby = by - ay
-            apx = px - ax
-            apy = py - ay
-            sq_len = abx * abx + aby * aby
-            if sq_len <= 1e-12:
-                return math.hypot(px - ax, py - ay)
-            t = (apx * abx + apy * aby) / sq_len
-            t = max(0.0, min(1.0, t))
-            closest_x = ax + t * abx
-            closest_y = ay + t * aby
-            return math.hypot(px - closest_x, py - closest_y)
-
-        def _point_near_polygon_edge(px, py, polygon, max_dist):
-            n = len(polygon)
-            for i in range(n):
-                x1, y1 = polygon[i]
-                x2, y2 = polygon[(i + 1) % n]
-                if _point_segment_distance(px, py, x1, y1, x2, y2) <= max_dist:
-                    return True
-            return False
-
         mask = np.zeros((self.height, self.width), dtype=bool)
-        border_mask = np.zeros((self.height, self.width), dtype=bool)
         for gy in range(self.height):
             cy = self.origin[1] + (gy + 0.5) * self.resolution
             for gx in range(self.width):
                 cx = self.origin[0] + (gx + 0.5) * self.resolution
                 mask[gy, gx] = _point_in_poly(cx, cy, poly)
-                border_mask[gy, gx] = _point_near_polygon_edge(
-                    cx,
-                    cy,
-                    poly,
-                    self.workspace_border_width,
-                )
 
         self.inside_workspace_mask = mask
-        self.workspace_border_mask = border_mask
-        self.log_odds[self.workspace_border_mask] = self.l_max
+        self.log_odds[~self.inside_workspace_mask] = self.l_max
 
     def world_to_grid(self, x, y):
         x_index = int((x - self.origin[0]) // self.resolution)
@@ -467,8 +419,8 @@ class OcupancyGridData:
         probs = 1 - 1 / (1 + np.exp(self.log_odds))  # sigmoid
 
         occupancy = (probs * 100).astype(np.int8)
-        if self.workspace_border_mask is not None:
-            occupancy[self.workspace_border_mask] = 100
+        if self.inside_workspace_mask is not None:
+            occupancy[~self.inside_workspace_mask] = 100
 
         return occupancy.reshape(-1).tolist()
     

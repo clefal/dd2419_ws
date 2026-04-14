@@ -27,6 +27,7 @@ class PlannerConfig:
     occ_lethal: int
     occ_cost_scale: float
     max_planning_time_ms: int
+    workspace_border_width: float
     robot_radius: float
     inflation_margin: float
     cube_size: float
@@ -63,6 +64,10 @@ class PathManager:
         self._cubes: List[Tuple[float, float]] = []
         self._boxes: List[Tuple[float, float]] = []
         self._target_object: Optional[Tuple[float, float]] = None
+        self._workspace_polygon: List[Tuple[float, float]] = []
+        self._workspace_mask_meta_key = None
+        self._workspace_inside_mask: Optional[List[bool]] = None
+        self._workspace_border_mask: Optional[List[bool]] = None
 
     @property
     def raw_map(self) -> Optional[OccupancyGrid]:
@@ -77,6 +82,10 @@ class PathManager:
         return self._planning_grid
 
     def set_config(self, config: PlannerConfig) -> None:
+        if config.workspace_border_width != self._config.workspace_border_width:
+            self._workspace_mask_meta_key = None
+            self._workspace_inside_mask = None
+            self._workspace_border_mask = None
         self._config = config
 
     def update_map(self, msg: OccupancyGrid) -> None:
@@ -93,6 +102,14 @@ class PathManager:
         self._cubes = list(cubes)
         self._boxes = list(boxes)
         self._target_object = target_object
+
+    def set_workspace_polygon(self, polygon_xy: List[Tuple[float, float]]) -> None:
+        self._workspace_polygon = list(polygon_xy)
+        self._workspace_mask_meta_key = None
+        self._workspace_inside_mask = None
+        self._workspace_border_mask = None
+        if self._raw_map is not None and self._meta is not None:
+            self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
 
     def rebuild_planning_grid(self, include_box_lethal: bool = True) -> Optional[OccupancyGrid]:
         self._last_include_box_lethal = include_box_lethal
@@ -233,8 +250,19 @@ class PathManager:
         soft_halo_m = 0.10
         r_soft_cells = r_lethal_cells + int(math.ceil(soft_halo_m / meta.resolution))
 
+        static_data = list(raw.data)
+        workspace_inside, workspace_border = self._workspace_masks(meta)
+        if workspace_inside is not None:
+            for i, is_inside in enumerate(workspace_inside):
+                if not is_inside:
+                    static_data[i] = 0
+        if workspace_border is not None:
+            for i, is_border in enumerate(workspace_border):
+                if is_border:
+                    static_data[i] = 100
+
         planning.data = self.inflate_static_obstacles(
-            raw.data,
+            static_data,
             meta,
             r_lethal_cells,
             r_soft_cells,
@@ -333,6 +361,113 @@ class PathManager:
                 if 0 <= gx < meta.width and 0 <= gy < meta.height:
                     data[gx + gy * meta.width] = 100
 
+    def _workspace_masks(
+        self,
+        meta: GridMeta,
+    ) -> Tuple[Optional[List[bool]], Optional[List[bool]]]:
+        if len(self._workspace_polygon) < 3:
+            return (None, None)
+
+        meta_key = (
+            meta.width,
+            meta.height,
+            meta.resolution,
+            meta.origin_x,
+            meta.origin_y,
+            self._config.workspace_border_width,
+            tuple(self._workspace_polygon),
+        )
+        if self._workspace_mask_meta_key == meta_key:
+            return (self._workspace_inside_mask, self._workspace_border_mask)
+
+        inside_mask = [False] * (meta.width * meta.height)
+        border_mask = [False] * (meta.width * meta.height)
+        border_width = max(0.0, float(self._config.workspace_border_width))
+
+        for gy in range(meta.height):
+            wy = meta.origin_y + (gy + 0.5) * meta.resolution
+            for gx in range(meta.width):
+                wx = meta.origin_x + (gx + 0.5) * meta.resolution
+                idx = gx + gy * meta.width
+                inside_mask[idx] = self._point_in_polygon(wx, wy, self._workspace_polygon)
+                border_mask[idx] = self._point_near_polygon_edge(
+                    wx,
+                    wy,
+                    self._workspace_polygon,
+                    border_width,
+                )
+
+        self._workspace_mask_meta_key = meta_key
+        self._workspace_inside_mask = inside_mask
+        self._workspace_border_mask = border_mask
+        return (inside_mask, border_mask)
+
+    @staticmethod
+    def _point_on_segment(px, py, ax, ay, bx, by, eps=1e-9) -> bool:
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
+        cross = abx * apy - aby * apx
+        if abs(cross) > eps:
+            return False
+        dot = apx * abx + apy * aby
+        if dot < -eps:
+            return False
+        sq_len = abx * abx + aby * aby
+        if dot - sq_len > eps:
+            return False
+        return True
+
+    @classmethod
+    def _point_in_polygon(cls, px, py, polygon: List[Tuple[float, float]]) -> bool:
+        inside = False
+        n = len(polygon)
+        for i in range(n):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n]
+
+            if cls._point_on_segment(px, py, x1, y1, x2, y2):
+                return True
+
+            intersects = ((y1 > py) != (y2 > py)) and (
+                px < (x2 - x1) * (py - y1) / ((y2 - y1) if (y2 - y1) != 0.0 else 1e-12) + x1
+            )
+            if intersects:
+                inside = not inside
+        return inside
+
+    @staticmethod
+    def _point_segment_distance(px, py, ax, ay, bx, by) -> float:
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
+        sq_len = abx * abx + aby * aby
+        if sq_len <= 1e-12:
+            return math.hypot(px - ax, py - ay)
+        t = (apx * abx + apy * aby) / sq_len
+        t = max(0.0, min(1.0, t))
+        closest_x = ax + t * abx
+        closest_y = ay + t * aby
+        return math.hypot(px - closest_x, py - closest_y)
+
+    @classmethod
+    def _point_near_polygon_edge(
+        cls,
+        px,
+        py,
+        polygon: List[Tuple[float, float]],
+        max_dist: float,
+    ) -> bool:
+        n = len(polygon)
+        for i in range(n):
+            x1, y1 = polygon[i]
+            x2, y2 = polygon[(i + 1) % n]
+            if cls._point_segment_distance(px, py, x1, y1, x2, y2) <= max_dist:
+                return True
+        return False
+
     @staticmethod
     def extract_meta(msg: OccupancyGrid) -> GridMeta:
         ox = msg.info.origin.position.x
@@ -367,6 +502,14 @@ class PathManager:
         return gx + gy * meta.width
 
     def cell_is_traversable(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> bool:
+        if len(self._workspace_polygon) >= 3 and self._workspace_inside_mask is None:
+            self._workspace_masks(meta)
+        if (
+            self._workspace_inside_mask is not None
+            and not self._workspace_inside_mask[self.idx_to_flat(gx, gy, meta)]
+        ):
+            return False
+
         v = occ.data[self.idx_to_flat(gx, gy, meta)]
         if v < 0:
             return True

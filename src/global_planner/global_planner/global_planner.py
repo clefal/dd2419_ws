@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped, PoseArray
+from geometry_msgs.msg import PoseStamped, PoseArray, PolygonStamped
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from robp_interfaces.srv import GetAllObjects
@@ -24,6 +24,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("goal_topic", "/nav/goal")
         self.declare_parameter("goal_candidates_topic", "/nav/goal_candidates")
         self.declare_parameter("path_topic", "/nav/global_path")
+        self.declare_parameter("workspace_topic", "/workspace")
 
 
         # Planning knobs
@@ -31,6 +32,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
         self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
         self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
+        self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("coarse_object_standoff", 0.5)
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
@@ -43,6 +45,7 @@ class GlobalPlannerNode(Node):
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
         self.goal_candidates_topic = self.get_parameter("goal_candidates_topic").get_parameter_value().string_value
         self.path_topic = self.get_parameter("path_topic").get_parameter_value().string_value
+        self.workspace_topic = self.get_parameter("workspace_topic").get_parameter_value().string_value
         
         self.global_frame = "map"
         self.robot_frame = "base_link"
@@ -55,6 +58,12 @@ class GlobalPlannerNode(Node):
         )
 
         self.sub_map = self.create_subscription(OccupancyGrid, self.map_topic, self.on_map, map_qos)
+        self.sub_workspace = self.create_subscription(
+            PolygonStamped,
+            self.workspace_topic,
+            self.on_workspace,
+            map_qos,
+        )
         self.sub_goal = self.create_subscription(PoseStamped, self.goal_topic, self.on_goal, 10) 
         # TODO we could change this to a message type that includes x,y and obj_id of the goal, that could make the list update cleaner
         self.sub_goal_candidates = self.create_subscription(
@@ -128,6 +137,7 @@ class GlobalPlannerNode(Node):
             occ_lethal=self.get_parameter("occ_lethal").get_parameter_value().integer_value,
             occ_cost_scale=self.get_parameter("occ_cost_scale").get_parameter_value().double_value,
             max_planning_time_ms=self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value,
+            workspace_border_width=self.get_parameter("workspace_border_width").get_parameter_value().double_value,
             robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
             inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
             cube_size=self.get_parameter("cube_size").get_parameter_value().double_value,
@@ -141,6 +151,26 @@ class GlobalPlannerNode(Node):
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
             self.pub_planning_grid.publish(planning_grid)
+
+    def on_workspace(self, msg: PolygonStamped) -> None:
+        frame = (msg.header.frame_id or "").strip()
+        if frame not in ("", self.global_frame):
+            self.get_logger().warn(
+                f"Workspace frame '{frame}' != global_frame '{self.global_frame}'. Ignoring."
+            )
+            return
+
+        polygon_xy = [(float(p.x), float(p.y)) for p in msg.polygon.points]
+        if len(polygon_xy) < 3:
+            self.get_logger().warn("Workspace polygon has fewer than 3 points. Ignoring.")
+            return
+
+        self.path_manager.set_config(self._planner_config())
+        self.path_manager.set_workspace_polygon(polygon_xy)
+        planning_grid = self.path_manager.planning_grid
+        if planning_grid is not None:
+            self.pub_planning_grid.publish(planning_grid)
+        self.get_logger().info(f"Workspace polygon loaded for planner ({len(polygon_xy)} points).")
 
     def on_goal(self, msg: PoseStamped) -> None:
         self._goal_msg = msg
