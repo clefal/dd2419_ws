@@ -200,19 +200,19 @@ class WorkspaceAndFrames(Node):
         tf_map_start.transform.rotation.w = qw
         tfs.append(tf_map_start)
 
-        if self.publish_odom_frames:
-            tf_map_odom_temp = TransformStamped()
-            tf_map_odom_temp.header.stamp = now
-            tf_map_odom_temp.header.frame_id = self.frame_map
-            tf_map_odom_temp.child_frame_id = "odom_temp"
-            tf_map_odom_temp.transform.translation.x = float(sx)
-            tf_map_odom_temp.transform.translation.y = float(sy)
-            tf_map_odom_temp.transform.translation.z = 0.0
-            tf_map_odom_temp.transform.rotation.x = qx
-            tf_map_odom_temp.transform.rotation.y = qy
-            tf_map_odom_temp.transform.rotation.z = qz
-            tf_map_odom_temp.transform.rotation.w = qw
-            tfs.append(tf_map_odom_temp)
+
+        tf_map_odom_temp = TransformStamped()
+        tf_map_odom_temp.header.stamp = now
+        tf_map_odom_temp.header.frame_id = self.frame_map
+        tf_map_odom_temp.child_frame_id = "odom_temp"
+        tf_map_odom_temp.transform.translation.x = float(sx)
+        tf_map_odom_temp.transform.translation.y = float(sy)
+        tf_map_odom_temp.transform.translation.z = 0.0
+        tf_map_odom_temp.transform.rotation.x = qx
+        tf_map_odom_temp.transform.rotation.y = qy
+        tf_map_odom_temp.transform.rotation.z = qz
+        tf_map_odom_temp.transform.rotation.w = qw
+        tfs.append(tf_map_odom_temp)
 
         # map -> objectN
         for i, (ox, oy, odeg) in enumerate(objects):
