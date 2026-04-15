@@ -234,6 +234,7 @@ class GlobalPlannerNode(Node):
             done_callback(False)
             return
 
+        self.get_logger().info(f"Requesting map->odom freeze before planning via {self.freeze_odom_service}")
         future = self.cli_freeze_odom.call_async(Trigger.Request())
         future.add_done_callback(
             lambda freeze_future: self.freeze_odom_done_callback(freeze_future, done_callback)

@@ -59,11 +59,9 @@ class IsTurning(Node):
         dt = current_time - self.prev_time
         self.prev_time = current_time
 
-        """
         if dt <= 1e-6:
-            self.get_logger().warn('dt too small, skipping encoder sample')
+            #self.get_logger().warn('dt too small, skipping encoder sample')
             return
-        """
 
         wheel_radius = float(self.get_parameter('wheel_radius').value)
         wheel_base = float(self.get_parameter('wheel_base').value)
