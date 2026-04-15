@@ -9,7 +9,6 @@ from std_msgs.msg import Int32MultiArray
 
 MIN_CONTOUR_AREA = 500.0
 IMAGE_TOPIC = '/arm/camera/image_raw'
-GREEN_CENTER_TOPIC = '/arm/vision/green_cube_center'
 CENTER_TOPIC = '/arm/vision/cube_center'
 DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
@@ -47,9 +46,6 @@ class ArmVisionNode(Node):
 
         self.bridge = CvBridge()
         self.min_contour_area = MIN_CONTOUR_AREA
-        self.center_publishers = {
-            'green': self.create_publisher(Int32MultiArray, GREEN_CENTER_TOPIC, 10),
-        }
         self.center_publisher =  self.create_publisher(Int32MultiArray, CENTER_TOPIC, 10)
         self.mask_publishers = {
             color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color), 10)
@@ -93,10 +89,9 @@ class ArmVisionNode(Node):
 
             self.draw_detection(debug_image, detection, color_config['box_color'])
 
-            if color_name in self.center_publishers:
-                center_msg = Int32MultiArray()
-                center_msg.data = [detection['center'][0], detection['center'][1]]
-                self.center_publishers[color_name].publish(center_msg)
+            center_msg = Int32MultiArray()
+            center_msg.data = [detection['center'][0], detection['center'][1]]
+            self.center_publisher.publish(center_msg)
 
         self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
