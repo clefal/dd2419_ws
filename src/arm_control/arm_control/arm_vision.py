@@ -5,6 +5,7 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32MultiArray
+import colour as co
 
 
 MIN_CONTOUR_AREA = 500.0
@@ -13,30 +14,22 @@ CENTER_TOPIC = '/arm/vision/cube_center'
 DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 
-COLOR_RANGES = {
-    'green': {
-        'lower': np.array([40, 40, 20], dtype=np.uint8),  # Lowered V from 40 to 20 to allow darker greens
-        'upper': np.array([80, 255, 255], dtype=np.uint8),
-        'box_color': (0, 255, 0),
-    },
-    'red': {
-        'ranges': [
-            {
-                'lower': np.array([0, 120, 70], dtype=np.uint8),
-                'upper': np.array([7, 255, 255], dtype=np.uint8),
-            },
-            {
-                'lower': np.array([170, 120, 70], dtype=np.uint8),
-                'upper': np.array([180, 255, 255], dtype=np.uint8),
-            }
-        ],
-        'box_color': (0, 0, 255),
-    },
-    'blue': {
-        'lower': np.array([90, 60, 30], dtype=np.uint8),
-        'upper': np.array([140, 255, 255], dtype=np.uint8),
-        'box_color': (255, 0, 0),
-    }
+ARM_COLORS_RGB = {
+    'green': np.array([0, 70, 57]),
+    'red': np.array([140, 45, 35]),
+    'blue': np.array([0, 83, 125])
+}
+
+TOLERANCES = {
+    'green': 0.015,
+    'red': 0.03,
+    'blue': 0.02
+}
+
+BOX_COLORS = {
+    'green': (0, 255, 0),
+    'red': (0, 0, 255),
+    'blue': (255, 0, 0)
 }
 
 
@@ -45,11 +38,21 @@ class ArmVisionNode(Node):
         super().__init__('arm_vision')
 
         self.bridge = CvBridge()
+
+        # Compute Oklab references
+        self.oklab_refs = {}
+        for color, rgb in ARM_COLORS_RGB.items():
+            rgb_norm = rgb / 255.0
+            xyz = co.sRGB_to_XYZ(rgb_norm)
+            self.oklab_refs[color] = co.XYZ_to_Oklab(xyz)
+        self.tolerances = TOLERANCES
+        self.box_colors = BOX_COLORS
+
         self.min_contour_area = MIN_CONTOUR_AREA
         self.center_publisher =  self.create_publisher(Int32MultiArray, CENTER_TOPIC, 10)
         self.mask_publishers = {
             color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color), 10)
-            for color in COLOR_RANGES
+            for color in ARM_COLORS_RGB
         }
 
         self.mask_publisher = self.create_publisher(Image, '/arm/vision/edge_mask', 10)
@@ -76,10 +79,14 @@ class ArmVisionNode(Node):
             return
 
         debug_image = frame.copy()
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        for color_name, color_config in COLOR_RANGES.items():
-            detection = self.detect_cube_color(hsv, color_name, color_config)
+        # Convert to Oklab
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) / 255.0
+        xyz = co.sRGB_to_XYZ(rgb)
+        oklab = co.XYZ_to_Oklab(xyz)
+
+        for color_name in ARM_COLORS_RGB.keys():
+            detection = self.detect_cube_color(oklab, color_name)
             self.mask_publishers[color_name].publish(
                 self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
             )
@@ -87,7 +94,7 @@ class ArmVisionNode(Node):
             if detection['center'] is None:
                 continue
 
-            self.draw_detection(debug_image, detection, color_config['box_color'])
+            self.draw_detection(debug_image, detection, self.box_colors[color_name])
 
             center_msg = Int32MultiArray()
             center_msg.data = [detection['center'][0], detection['center'][1]]
@@ -116,14 +123,17 @@ class ArmVisionNode(Node):
 
         self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
-    def detect_cube_color(self, hsv, color_name, color_config):
-        if 'ranges' in color_config:
-            mask = None
-            for r in color_config['ranges']:
-                m = cv2.inRange(hsv, r['lower'], r['upper'])
-                mask = m if mask is None else (mask | m)
-        else:
-            mask = cv2.inRange(hsv, color_config['lower'], color_config['upper'])
+    def detect_cube_color(self, oklab, color_name):
+        ref = self.oklab_refs[color_name]
+        tol = self.tolerances[color_name]
+        
+        # Create mask using Oklab thresholds
+        mask = (
+            (ref[1] - tol < oklab[:, :, 1]) & (oklab[:, :, 1] < ref[1] + tol) &
+            (ref[2] - tol < oklab[:, :, 2]) & (oklab[:, :, 2] < ref[2] + tol) &
+            (0.2 < oklab[:, :, 0]) & (oklab[:, :, 0] < 0.6)  # Loose lightness bounds
+        ).astype(np.uint8) * 255
+        
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if not contours:
