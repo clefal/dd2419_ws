@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'localization = localization.icp_scan_to_line:main',
             'filter_scan = localization.filter_scan:main',
+            'map_odom_freezer = localization.map_odom_freezer:main',
         ],
     },
 )

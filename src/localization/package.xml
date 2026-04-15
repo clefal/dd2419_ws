@@ -12,6 +12,7 @@
   <depend>python3-numpy</depend>
   <exec_depend>robp_interfaces</exec_depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>rclpy</depend>
   <depend>tf_transformations</depend>
   <depend>tf2_ros</depend>

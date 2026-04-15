@@ -118,6 +118,7 @@ class WorkspaceAndFrames(Node):
         self.declare_parameter("box_frame", "box")
         self.declare_parameter("workspace_polygon_topic", "/workspace")
         self.declare_parameter("line_width", 0.05)
+        self.declare_parameter("publish_odom_frames", True)
 
         workspace_csv = self.get_parameter("workspace_csv").value
         map_csv = self.get_parameter("map_csv").value
@@ -134,6 +135,7 @@ class WorkspaceAndFrames(Node):
         self.box_frame = self.get_parameter("box_frame").value
         self.workspace_polygon_topic = self.get_parameter("workspace_polygon_topic").value
         self.line_width = float(self.get_parameter("line_width").value)
+        self.publish_odom_frames = self.get_parameter("publish_odom_frames").value
 
         scale = unit_scale_to_meters(units)
 
@@ -166,22 +168,23 @@ class WorkspaceAndFrames(Node):
         now = self.get_clock().now().to_msg()
         tfs: List[TransformStamped] = []
 
-        # map -> odom at start pose
         sx, sy, sdeg = start
         qx, qy, qz, qw = yaw_to_quat(math.radians(sdeg))
 
-        tf_map_odom = TransformStamped()
-        tf_map_odom.header.stamp = now
-        tf_map_odom.header.frame_id = self.frame_map
-        tf_map_odom.child_frame_id = self.frame_odom
-        tf_map_odom.transform.translation.x = float(sx)
-        tf_map_odom.transform.translation.y = float(sy)
-        tf_map_odom.transform.translation.z = 0.0
-        tf_map_odom.transform.rotation.x = qx
-        tf_map_odom.transform.rotation.y = qy
-        tf_map_odom.transform.rotation.z = qz
-        tf_map_odom.transform.rotation.w = qw
-        tfs.append(tf_map_odom)
+        if self.publish_odom_frames:
+            # map -> odom at start pose
+            tf_map_odom = TransformStamped()
+            tf_map_odom.header.stamp = now
+            tf_map_odom.header.frame_id = self.frame_map
+            tf_map_odom.child_frame_id = self.frame_odom
+            tf_map_odom.transform.translation.x = float(sx)
+            tf_map_odom.transform.translation.y = float(sy)
+            tf_map_odom.transform.translation.z = 0.0
+            tf_map_odom.transform.rotation.x = qx
+            tf_map_odom.transform.rotation.y = qy
+            tf_map_odom.transform.rotation.z = qz
+            tf_map_odom.transform.rotation.w = qw
+            tfs.append(tf_map_odom)
 
         # map -> start
         tf_map_start = TransformStamped()
@@ -197,18 +200,19 @@ class WorkspaceAndFrames(Node):
         tf_map_start.transform.rotation.w = qw
         tfs.append(tf_map_start)
 
-        tf_map_odom_temp = TransformStamped()
-        tf_map_odom_temp.header.stamp = now
-        tf_map_odom_temp.header.frame_id = self.frame_map
-        tf_map_odom_temp.child_frame_id = "odom_temp"
-        tf_map_odom_temp.transform.translation.x = float(sx)
-        tf_map_odom_temp.transform.translation.y = float(sy)
-        tf_map_odom_temp.transform.translation.z = 0.0
-        tf_map_odom_temp.transform.rotation.x = qx
-        tf_map_odom_temp.transform.rotation.y = qy
-        tf_map_odom_temp.transform.rotation.z = qz
-        tf_map_odom_temp.transform.rotation.w = qw
-        tfs.append(tf_map_odom_temp)
+        if self.publish_odom_frames:
+            tf_map_odom_temp = TransformStamped()
+            tf_map_odom_temp.header.stamp = now
+            tf_map_odom_temp.header.frame_id = self.frame_map
+            tf_map_odom_temp.child_frame_id = "odom_temp"
+            tf_map_odom_temp.transform.translation.x = float(sx)
+            tf_map_odom_temp.transform.translation.y = float(sy)
+            tf_map_odom_temp.transform.translation.z = 0.0
+            tf_map_odom_temp.transform.rotation.x = qx
+            tf_map_odom_temp.transform.rotation.y = qy
+            tf_map_odom_temp.transform.rotation.z = qz
+            tf_map_odom_temp.transform.rotation.w = qw
+            tfs.append(tf_map_odom_temp)
 
         # map -> objectN
         for i, (ox, oy, odeg) in enumerate(objects):

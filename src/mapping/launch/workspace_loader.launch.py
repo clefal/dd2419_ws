@@ -1,6 +1,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -37,6 +38,11 @@ def generate_launch_description():
             default_value='cm',
             description='Units used in CSV files: m, cm, or mm',
         ),
+        DeclareLaunchArgument(
+            'publish_odom_frames',
+            default_value='true',
+            description='Publish static map->odom and map->odom_temp start-pose frames',
+        ),
 
         # --- Mapping node ---
         Node(
@@ -45,7 +51,11 @@ def generate_launch_description():
             parameters=[{
                 'workspace_csv': LaunchConfiguration('workspace_csv'),
                 'map_csv': LaunchConfiguration('map_csv'),
-                'input_units': LaunchConfiguration('input_units')
+                'input_units': LaunchConfiguration('input_units'),
+                'publish_odom_frames': ParameterValue(
+                    LaunchConfiguration('publish_odom_frames'),
+                    value_type=bool,
+                ),
             }]
         ),
 

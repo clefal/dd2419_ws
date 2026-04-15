@@ -7,10 +7,11 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray, PolygonStamped
-from tf2_ros import Buffer, TransformListener, TransformBroadcaster
+from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from robp_interfaces.srv import GetAllObjects
 from robp_interfaces.msg import ObjPose
+from std_srvs.srv import Trigger
 
 from .path_manager import GridIndex, GridMeta, PathManager, PlannerConfig
 
@@ -40,6 +41,9 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
         self.declare_parameter("replan_check_period_s", 5)
+        self.declare_parameter("freeze_odom_before_planning", False)
+        self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")
+        self.declare_parameter("freeze_odom_timeout_s", 0.5)
 
         self.map_topic = self.get_parameter("map_topic").get_parameter_value().string_value
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
@@ -102,7 +106,13 @@ class GlobalPlannerNode(Node):
         # TF
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
-        self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.freeze_odom_before_planning = self.get_parameter("freeze_odom_before_planning").value
+        self.freeze_odom_service = self.get_parameter("freeze_odom_service").value
+        self.freeze_odom_timeout_s = float(self.get_parameter("freeze_odom_timeout_s").value)
+        self.cli_freeze_odom = None
+        if self.freeze_odom_before_planning:
+            self.cli_freeze_odom = self.create_client(Trigger, self.freeze_odom_service)
 
         # State
         self._goal_msg: Optional[PoseStamped] = None
@@ -209,27 +219,41 @@ class GlobalPlannerNode(Node):
         self.update_object_list()
         return
 
-    def update_odom_frame(self) -> bool:
-        """Freeze the continuously corrected odom_temp frame into odom.
+    def freeze_odom_for_planning(self, done_callback) -> None:
+        if not self.freeze_odom_before_planning:
+            done_callback(True)
+            return
 
-        TF lookup_transform(target, source) returns target <- source.  To make
-        controller consumers use the current corrected pose through map -> odom,
-        copy map <- odom_temp and only rename the child frame to odom.
-        """
+        if self.cli_freeze_odom is None:
+            self.get_logger().warn("freeze_odom_before_planning is enabled, but service client is missing.")
+            done_callback(False)
+            return
+
+        if not self.cli_freeze_odom.wait_for_service(timeout_sec=self.freeze_odom_timeout_s):
+            self.get_logger().warn(f"Freeze odom service unavailable: {self.freeze_odom_service}")
+            done_callback(False)
+            return
+
+        future = self.cli_freeze_odom.call_async(Trigger.Request())
+        future.add_done_callback(
+            lambda freeze_future: self.freeze_odom_done_callback(freeze_future, done_callback)
+        )
+
+    def freeze_odom_done_callback(self, future, done_callback) -> None:
         try:
-            t = self.tf_buffer.lookup_transform(
-                self.global_frame,
-                'odom_temp',
-                rclpy.time.Time(),
-                timeout=rclpy.time.Duration(seconds=0.1),
-            )
-            t.header.stamp = self.get_clock().now().to_msg()
-            t.child_frame_id = 'odom'
-            self.tf_broadcaster.sendTransform(t)
-            return True
+            res = future.result()
         except Exception as ex:
-            self.get_logger().warn(f"Could not freeze odom from odom_temp before replanning: {ex}")
-            return False
+            self.get_logger().warn(f"Freeze odom service call failed: {ex}")
+            done_callback(False)
+            return
+
+        if not res.success:
+            self.get_logger().warn(f"Freeze odom service rejected request: {res.message}")
+            done_callback(False)
+            return
+
+        self.get_logger().info(res.message)
+        done_callback(True)
 
     def update_object_list(self):
         req = GetAllObjects.Request()
@@ -298,7 +322,23 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("No goal yet; cannot plan.")
             return
 
-        #self.update_odom_frame()
+        self.freeze_odom_for_planning(
+            lambda ok: self._continue_plan_and_publish_after_freeze(reason, ok)
+        )
+        return
+
+    def _continue_plan_and_publish_after_freeze(self, reason: str, freeze_ok: bool) -> None:
+        if not freeze_ok:
+            self._publish_empty_path(reason="freeze_odom_failed")
+            return
+
+        meta = self.path_manager.meta
+        if self.path_manager.raw_map is None or meta is None:
+            self.get_logger().warn("No map yet; cannot plan.")
+            return
+        if self._goal_msg is None:
+            self.get_logger().warn("No goal yet; cannot plan.")
+            return
 
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
         self._pending_plan_mode = None
@@ -382,7 +422,28 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="empty_goal_candidates")
             return
 
-        #self.update_odom_frame()
+        self.freeze_odom_for_planning(
+            lambda ok: self._continue_plan_and_publish_candidates_after_freeze(reason, msg, ok)
+        )
+        return
+
+    def _continue_plan_and_publish_candidates_after_freeze(
+        self,
+        reason: str,
+        msg: PoseArray,
+        freeze_ok: bool,
+    ) -> None:
+        if not freeze_ok:
+            self._publish_empty_path(reason="freeze_odom_failed_candidates")
+            return
+
+        meta = self.path_manager.meta
+        if self.path_manager.raw_map is None or meta is None:
+            self.get_logger().warn("No map yet; cannot plan candidate goals.")
+            return
+        if msg is None:
+            self.get_logger().warn("No goal candidates yet; cannot plan candidate goals.")
+            return
 
         frame = (msg.header.frame_id or "").strip()
         if frame not in ("", self.global_frame):
