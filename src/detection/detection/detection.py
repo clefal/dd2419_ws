@@ -419,7 +419,7 @@ class Detection(Node):
 
         # Quick check: is the point even inside the map?
         if not (0 <= center_col < width and 0 <= center_row < height):
-            self.get_logger().warn("Point is outside the map bounds.")
+            # self.get_logger().warn("Point is outside the map bounds.")
             return True # Often safer to treat out-of-bounds as an obstacle
 
         # 4. Convert search radius from meters to cells
