@@ -280,7 +280,7 @@ class Detection(Node):
         target_frame = 'map'
         stamp = header.stamp
         if len(points_np) == 0:
-            self.get_logger().warn(f'transform_points_to_map() had an empty point array as input')
+            # self.get_logger().warn(f'transform_points_to_map() had an empty point array as input')
             return np.empty((0,3))
         
         try: 
