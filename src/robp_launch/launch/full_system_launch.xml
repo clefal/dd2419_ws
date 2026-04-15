@@ -2,7 +2,7 @@
 <launch>
 
   <arg name="publish_workspace_odom_frames" default="true"/>
-  <arg name="use_odom_freezer" default="true"/>
+  <arg name="use_odom_freezer" default="false"/>
 
 
   <!-- Workspace/mapfile TF frames -->

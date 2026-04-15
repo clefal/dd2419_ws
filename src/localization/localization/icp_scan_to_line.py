@@ -776,13 +776,20 @@ class IcpScanToLine(Node):
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
-                self.odom_frame,
+                "start",
                 rclpy.time.Time(seconds=0),
                 timeout=rclpy.time.Duration(seconds=1)
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
             self.mto_initialized = True
-            self.get_logger().info("Initialized map->odom from TF")
+            self.get_logger().info(f"Initialized {self.map_frame}->{self.odom_frame} from {self.map_frame}->start")
+
+            tf_map_odom = TransformStamped()
+            tf_map_odom.header.stamp = self.get_clock().now().to_msg()
+            tf_map_odom.header.frame_id = self.map_frame
+            tf_map_odom.child_frame_id = self.odom_frame
+            tf_map_odom.transform = tf.transform
+            self.tf_broadcaster.sendTransform(tf_map_odom)
             return True
         except TransformException as ex:
             self.T_map_odom = np.eye(3, dtype=float)

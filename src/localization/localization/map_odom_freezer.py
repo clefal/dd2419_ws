@@ -19,6 +19,8 @@ class MapOdomFreezer(Node):
         self.declare_parameter('publish_rate_hz', 20.0)
         self.declare_parameter('lookup_timeout_s', 0.2)
         self.declare_parameter('service_name', '/localization/freeze_odom')
+        self.declare_parameter('auto_initial_freeze', True)
+        self.declare_parameter('initial_freeze_rate_hz', 2.0)
 
         self.map_frame = self.get_parameter('map_frame').value
         self.source_odom_frame = self.get_parameter('source_odom_frame').value
@@ -31,10 +33,20 @@ class MapOdomFreezer(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
 
         self.committed_tf = None
+        self.initial_freeze_done = False
 
         publish_rate_hz = float(self.get_parameter('publish_rate_hz').value)
         publish_period = 1.0 / max(1.0, publish_rate_hz)
         self.publish_timer = self.create_timer(publish_period, self.publish_committed_tf)
+
+        self.initial_freeze_timer = None
+        if self.get_parameter('auto_initial_freeze').value:
+            initial_freeze_rate_hz = float(self.get_parameter('initial_freeze_rate_hz').value)
+            initial_freeze_period = 1.0 / max(0.1, initial_freeze_rate_hz)
+            self.initial_freeze_timer = self.create_timer(
+                initial_freeze_period,
+                self.try_initial_freeze,
+            )
 
         self.srv_freeze_odom = self.create_service(
             Trigger,
@@ -49,9 +61,7 @@ class MapOdomFreezer(Node):
             f'publish_rate={1.0 / publish_period:.1f} Hz.'
         )
 
-    def freeze_odom_callback(self, req, res):
-        del req
-
+    def commit_from_source(self):
         try:
             source_tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
@@ -60,13 +70,10 @@ class MapOdomFreezer(Node):
                 timeout=Duration(seconds=self.lookup_timeout_s),
             )
         except Exception as ex:
-            res.success = False
-            res.message = (
+            return False, (
                 f'Could not freeze {self.map_frame}->{self.target_odom_frame}: '
                 f'lookup {self.map_frame}->{self.source_odom_frame} failed: {ex}'
             )
-            self.get_logger().warn(res.message)
-            return res
 
         committed = TransformStamped()
         committed.header.stamp = self.get_clock().now().to_msg()
@@ -76,11 +83,38 @@ class MapOdomFreezer(Node):
         self.committed_tf = committed
         self.tf_broadcaster.sendTransform(committed)
 
-        res.success = True
-        res.message = (
+        return True, (
             f'Froze {self.map_frame}->{self.source_odom_frame} as '
             f'{self.map_frame}->{self.target_odom_frame}.'
         )
+
+    def try_initial_freeze(self):
+        if self.initial_freeze_done:
+            return
+
+        ok, message = self.commit_from_source()
+        if not ok:
+            return
+
+        self.initial_freeze_done = True
+        self.get_logger().info(f'Initial {message}')
+        if self.initial_freeze_timer is not None:
+            self.initial_freeze_timer.cancel()
+            self.initial_freeze_timer = None
+
+    def freeze_odom_callback(self, req, res):
+        del req
+
+        ok, message = self.commit_from_source()
+        if not ok:
+            res.success = False
+            res.message = message
+            self.get_logger().warn(res.message)
+            return res
+
+        self.initial_freeze_done = True
+        res.success = True
+        res.message = message
         self.get_logger().info(res.message)
         return res
 
