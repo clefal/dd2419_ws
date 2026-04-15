@@ -298,7 +298,7 @@ class GlobalPlannerNode(Node):
             self.get_logger().warn("No goal yet; cannot plan.")
             return
 
-        self.update_odom_frame()
+        #self.update_odom_frame()
 
         goal_xy = (self._goal_msg.pose.position.x, self._goal_msg.pose.position.y)
         self._pending_plan_mode = None
@@ -382,7 +382,7 @@ class GlobalPlannerNode(Node):
             self._publish_empty_path(reason="empty_goal_candidates")
             return
 
-        self.update_odom_frame()
+        #self.update_odom_frame()
 
         frame = (msg.header.frame_id or "").strip()
         if frame not in ("", self.global_frame):
