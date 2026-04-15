@@ -574,7 +574,7 @@ class ArmControlNode(Node):
 
     def transition_to(self, new_state: State):
         self.state = new_state
-        self.get_logger().info(f'Arm state -> {new_state.value}')
+        #self.get_logger().info(f'Arm state -> {new_state.value}')
 
     def publish_result(self, text: str):
         msg = String()
