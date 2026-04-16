@@ -108,7 +108,7 @@ class GoalManager(Node):
             self.get_logger().info('get_closest_box service not available, waiting again...')
 
 
-        self.cli_create_mapfile = self.create_client(OutputMapFile, 'object_manager/create_mapfile')
+        self.cli_create_mapfile = self.create_client(OutputMapFile, 'object_manager/output_map_file')
         while not self.cli_create_mapfile.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('create_mapfile service not available, waiting again...')
 
