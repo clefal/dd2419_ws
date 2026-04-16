@@ -129,6 +129,7 @@ class GlobalPlannerNode(Node):
         self._current_path_idx: Optional[List[GridIndex]] = None
         self._current_include_box_lethal = True
         self._replan_in_progress = False
+        self._replan_check_pending = False
 
         replan_period = self.get_parameter("replan_check_period_s").get_parameter_value().double_value
         self._replan_timer = self.create_timer(replan_period, self._check_replan)
@@ -281,12 +282,15 @@ class GlobalPlannerNode(Node):
                 target_object=self._target_object,
             )
 
-            if self._pending_plan_mode == "single":
+            if self._replan_check_pending:
+                self._continue_replan_check()
+            elif self._pending_plan_mode == "single":
                 self._continue_plan_and_publish(reason=self._pending_plan_reason)
             elif self._pending_plan_mode == "candidates":
                 self._continue_plan_and_publish_candidates(reason=self._pending_plan_reason)
 
         except Exception as e:
+            self._replan_check_pending = False
             self._replan_in_progress = False
             self.get_logger().info(f'get_all_objects service call failed {e}')
         
@@ -594,10 +598,14 @@ class GlobalPlannerNode(Node):
         except Exception:
             return None
 
-    def _check_replan(self) -> None:
-        if self._current_path_idx is None or self._replan_in_progress:
+    def _continue_replan_check(self) -> None:
+        self._replan_check_pending = False
+
+        if self._current_path_idx is None:
+            self._replan_in_progress = False
             return
         if self._active_plan_mode not in ("single", "candidates"):
+            self._replan_in_progress = False
             return
 
         planning_grid = self.path_manager.rebuild_planning_grid(
@@ -609,21 +617,31 @@ class GlobalPlannerNode(Node):
         robot_xy = self._get_robot_xy_in_map()
         if self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy):
             self.get_logger().info("Current global path is valid. --> no replanning")
+            self._replan_in_progress = False
             return
 
         self.get_logger().warn("Current global path is blocked. Replanning.")
-        self._replan_in_progress = True
         if self._active_plan_mode == "single":
             self._pending_plan_mode = "single"
             self._pending_plan_reason = "path_blocked"
-            self.update_object_list()
+            self._continue_plan_and_publish(reason=self._pending_plan_reason)
         elif self._active_plan_mode == "candidates" and self._active_goal_candidates is not None:
             self._pending_goal_candidates = self._active_goal_candidates
             self._pending_plan_mode = "candidates"
             self._pending_plan_reason = "path_blocked"
-            self.update_object_list()
+            self._continue_plan_and_publish_candidates(reason=self._pending_plan_reason)
         else:
             self._replan_in_progress = False
+
+    def _check_replan(self) -> None:
+        if self._current_path_idx is None or self._replan_in_progress:
+            return
+        if self._active_plan_mode not in ("single", "candidates"):
+            return
+
+        self._replan_in_progress = True
+        self._replan_check_pending = True
+        self.update_object_list()
 
 
 def main() -> None:
