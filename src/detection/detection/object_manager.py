@@ -394,7 +394,7 @@ class ObjectManager(Node):
 
     def output_map_file_callback(self, req, res):
         self.get_logger().info(f'output_map_file_callback entered in object_manager')
-        output_path = Path(self.get_parameter_or('output_map_csv', str(Path.cwd() / 'src' / 'output_map.csv')).value)
+        output_path = Path(self.get_parameter_or('output_map_csv', str(Path.cwd() / 'src' / 'output_map.csv')))
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         def object_confidence(obj: Obj):
