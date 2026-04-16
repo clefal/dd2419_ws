@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import csv
+from pathlib import Path
 import rclpy 
 import math
 import numpy as np
@@ -6,13 +8,13 @@ from rclpy.node import Node
 from geometry_msgs.msg import PointStamped, TransformStamped
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster, StaticTransformBroadcaster
-from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetAllObjects, GetClosestBox, GetPosOfObj
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetAllObjects, GetClosestBox, GetPosOfObj, OutputMapFile
 from robp_interfaces.msg import ObjPose
 
 
 ## RENAME THIS NODE TO OBJECT MANAGER!!###
 class Obj: 
-    def __init__(self, id, x, y,  yaw=0 ,status = 'available', type='cube'):
+    def __init__(self, id, x, y,  yaw=0 ,status = 'available', type='cube', confidence=0):
         self.id = id
         self.first_x = x
         self.first_y = y
@@ -22,6 +24,7 @@ class Obj:
         self.last_yaw = yaw
         self.status = status
         self.type = type
+        self.conidence = confidence
 
     def copy(self):
         return Obj(self.id, self.first_x, self.first_y, self.first_yaw, self.status, self.type)
@@ -59,6 +62,7 @@ class ObjectManager(Node):
         self.srv_set_status = self.create_service(SetStatus,'object_manager/set_status', self.set_status_callback)
         self.srv_get_all_objects = self.create_service(GetAllObjects,'object_manager/get_all_objects', self.get_all_objects_callback)
         self.srv_get_pos_of_obj = self.create_service(GetPosOfObj,'object_manager/get_pos_of_obj', self.get_pos_of_obj_callback)
+        self.srv_output_map_file = self.create_service(OutputMapFile,'object_manager/output_map_file', self.output_map_file_callback)
 
         # load objects from the workspace file into the list
         self._fixed_frame = 'map'
@@ -105,7 +109,7 @@ class ObjectManager(Node):
             for idx, o in enumerate(self.object_list):
                 if o.type == obj.type or o.type == 'map_cube':
                     # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
-                    if o.type == 'map_cube' and obj.type == 'box':
+                    if o.type == 'map_cube' and (obj.type == 'box' or obj.type == 'map_box'):
                         continue
                         
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
@@ -114,6 +118,7 @@ class ObjectManager(Node):
                         updated_obj.last_x = obj.last_x
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
+                        updated_obj.confidence = updated_obj.confidence + 1 # increase confidence by 1 every time we spot an object                         
                         self.object_list[idx] = updated_obj
                         updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
 
@@ -159,25 +164,34 @@ class ObjectManager(Node):
 # ---------------------------------
 
     def get_points_from_csv_once(self):
+
+        # TODO implement that we can load multiple boxes from the map file as well
+
         if self._static_loaded:
             return
 
+        seeded_box = 0
         # get box position
-        box_pose = self.lookup_xy_yaw(self._fixed_frame, self._box_frame)
-        if box_pose is None:
-            # workspace_loader not ready yet
-            return
-        bx, by, byaw = box_pose
+        for i in range(self._max_static_objects):
+            child = f'{self._box_frame}{i}'
+            box_pose = self.lookup_xy_yaw(self._fixed_frame, child)
+            if box_pose is None:
+                # workspace_loader not ready yet
+                break
+            bx, by, byaw = box_pose
 
-        static_box_idx = self.get_new_obj_idx()
-        static_box_obj = Obj(static_box_idx, bx, by, byaw, status='available', type ='box')
+            static_box_idx = self.get_new_obj_idx()
+            static_box_obj = Obj(static_box_idx, bx, by, byaw, status='available', type ='map_box', confidence=1000)
 
-        if self.check_similarity(static_box_obj) == 0: # that means that 0 objects are similar to the static_box_object
-            self.object_list.append(static_box_obj)
-
+            if self.check_similarity(static_box_obj) == 0: # that means that 0 objects are similar to the static_box_object
+                self.object_list.append(static_box_obj)
+            seeded_box +=1
+            
+        if seeded_box > 0:
+            self.get_logger().info(f'Seeded {seeded_box} box(es) from static TF frames ({self._box_frame}0..).')
         
         # get object poritions from map file
-        seeded = 0
+        seeded_obj = 0
         for i in range(self._max_static_objects):
             child = f'{self._object_frame_prefix}{i}'
             obj_pose = self.lookup_xy_yaw(self._fixed_frame, child)
@@ -187,15 +201,15 @@ class ObjectManager(Node):
             ox, oy, _ = obj_pose
 
             static_cube_idx = self.get_new_obj_idx()
-            static_cube_obj = Obj(static_cube_idx, ox, oy, yaw = 0, status='available', type = 'map_cube')
+            static_cube_obj = Obj(static_cube_idx, ox, oy, yaw = 0, status='available', type = 'map_cube', confidence=1000)
 
             if self.check_similarity(static_cube_obj) == 0: 
                 self.object_list.append(static_cube_obj)
             
-            seeded += 1
+            seeded_obj += 1
 
-        if seeded > 0:
-            self.get_logger().info(f'Seeded {seeded} cubes from static TF frames ({self._object_frame_prefix}0..).')
+        if seeded_obj > 0:
+            self.get_logger().info(f'Seeded {seeded_obj} cubes from static TF frames ({self._object_frame_prefix}0..).')
             # self.publish_topics()
         
         # find a way how to publish the objects in a function
@@ -257,7 +271,7 @@ class ObjectManager(Node):
         res.goals_available = False
 
         for obj in self.object_list:
-            if obj.status == 'available' and obj.type != 'box':
+            if obj.status == 'available' and obj.type != 'box' and obj.type != 'map_box':
                 res.goals_available = True # the variable name in the res object has to match the one defined in the goals_available.srv (see robp_interfaces)
                 return res
             
@@ -265,6 +279,7 @@ class ObjectManager(Node):
         
         
 # -----------------------
+
     def get_closest_cube_callback(self,req, res):
         self.get_logger().info(f'get_closest_CUBE_callback entered')
         closest_obj_id = None
@@ -272,7 +287,7 @@ class ObjectManager(Node):
         closest_obj_y = 0.0
         closest_obj_yaw = 0.0
         for obj in self.object_list:
-            if obj.status == 'available' and obj.type != 'box':
+            if obj.status == 'available' and obj.type != 'box' and obj.type != 'map_box':
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
                     closest_obj_x = obj.last_x
@@ -298,6 +313,8 @@ class ObjectManager(Node):
         
         return res
     
+# -----------------------
+
     def get_closest_box_callback(self, req, res):
         self.get_logger().info(f'get_closest_BOX_callback entered')
         closest_obj_id = None
@@ -305,7 +322,7 @@ class ObjectManager(Node):
         closest_obj_y = 0.0
         closest_obj_yaw = 0.0
         for obj in self.object_list:
-            if obj.status == 'available' and obj.type == 'box':
+            if obj.status == 'available' and (obj.type == 'box' or obj.type == 'map_box'):
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
                     closest_obj_x = obj.last_x
@@ -373,6 +390,50 @@ class ObjectManager(Node):
 
         self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')
 
+# ------------------------
+
+    def output_map_file_callback(self, req, res):
+        self.get_logger().info(f'output_map_file_callback entered in object_manager')
+        output_path = Path(self.get_parameter_or('output_map_csv', str(Path.cwd() / 'src' / 'output_map.csv')).value)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def object_confidence(obj: Obj):
+            return getattr(obj, 'confidence', getattr(obj, 'conidence', 0))
+
+        def object_type_to_map_type(obj_type: str):
+            if obj_type in ('box', 'map_box'):
+                return 'B'
+            if obj_type in ('red_cube', 'green_cube', 'blue_cube', 'cube', 'map_cube'):
+                return 'O'
+            return None
+
+        sorted_objects = sorted(
+            self.object_list,
+            key=lambda obj: (-object_confidence(obj), obj.id),
+        )
+
+        rows = []
+        for obj in sorted_objects:
+            map_type = object_type_to_map_type(obj.type)
+            if map_type is None:
+                continue
+
+            rows.append([
+                map_type,
+                int(round(obj.last_x * 100.0)),
+                int(round(obj.last_y * 100.0)),
+                int(round(math.degrees(obj.last_yaw))),
+            ])
+
+        with output_path.open('w', newline='') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(['Type', 'x', 'y', 'angle'])
+            writer.writerows(rows)
+
+        self.get_logger().info(
+            f'Wrote {len(rows)} object(s) to map CSV: {output_path}'
+        )
+        return res
 
 # ------------------------
 

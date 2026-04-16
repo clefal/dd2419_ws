@@ -15,7 +15,7 @@ from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String, Float32, Bool, Int64
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 from tf2_ros import Buffer, TransformListener
-from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetClosestBox
+from robp_interfaces.srv import GoalsAvailable, GetClosestCube, SetStatus, GetClosestBox, OutputMapFile
 
 
 from .exploration import RandomWaypointExplorer
@@ -107,6 +107,13 @@ class GoalManager(Node):
         while not self.cli_get_closest_box.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('get_closest_box service not available, waiting again...')
 
+
+        self.cli_create_mapfile = self.create_client(OutputMapFile, 'object_manager/create_mapfile')
+        while not self.cli_create_mapfile.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('create_mapfile service not available, waiting again...')
+
+
+        self._mapfile_timer = self.create_timer(15, self.create_mapfile)
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -247,6 +254,11 @@ class GoalManager(Node):
         # i think we dont need an done_callback here because we dont return anything...
 
 
+    def create_mapfile(self):
+        req = OutputMapFile.Request()
+        self.get_logger().info(f'creating mapfile entered in goal_manager')
+        future = self.cli_create_mapfile.call_async(req)
+        # this doesnt return anything, the output is created by the server in the object_manager.py
 
 
     def request_new_target(self, reason: str = 'unspecified'):
