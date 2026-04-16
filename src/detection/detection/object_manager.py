@@ -72,7 +72,7 @@ class ObjectManager(Node):
 
         self._static_loaded = False
         self.create_timer(5, self.get_points_from_csv_once)
-        self.create_timer(2,self.debugging_msg)
+        #self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
 
 # ----------------------------------
