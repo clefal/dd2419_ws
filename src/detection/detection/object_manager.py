@@ -24,7 +24,7 @@ class Obj:
         self.last_yaw = yaw
         self.status = status
         self.type = type
-        self.conidence = confidence
+        self.confidence = confidence
 
     def copy(self):
         return Obj(self.id, self.first_x, self.first_y, self.first_yaw, self.status, self.type)
@@ -398,7 +398,7 @@ class ObjectManager(Node):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         def object_confidence(obj: Obj):
-            return getattr(obj, 'confidence', getattr(obj, 'conidence', 0))
+            return getattr(obj, 'confidence', getattr(obj, 'confidence', 0))
 
         def object_type_to_map_type(obj_type: str):
             if obj_type in ('box', 'map_box'):
