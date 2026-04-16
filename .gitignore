@@ -66,3 +66,5 @@ bags/*
 .vscode
 
 /rosbags
+
+output_map.csv
