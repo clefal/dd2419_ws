@@ -40,7 +40,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
-        self.declare_parameter("replan_check_period_s", 1)
+        self.declare_parameter("replan_check_period_s", 0.2)
         self.declare_parameter("freeze_odom_before_planning", False)
         self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")
         self.declare_parameter("freeze_odom_timeout_s", 0.5)
