@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import time
 from typing import List, Optional, Tuple
 
 import rclpy
@@ -132,6 +133,8 @@ class GlobalPlannerNode(Node):
         self._replan_in_progress = False
         self._replan_check_pending = False
         self._reuse_current_planning_grid_once = False
+        self._last_replan_timer_t: Optional[float] = None
+        self._replan_t0: Optional[float] = None
 
         replan_period = self.get_parameter("replan_check_period_s").get_parameter_value().double_value
         self._replan_timer = self.create_timer(replan_period, self._check_replan)
@@ -640,7 +643,10 @@ class GlobalPlannerNode(Node):
             self.pub_planning_grid.publish(planning_grid)
 
         robot_xy = self._get_robot_xy_in_map()
-        if self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy):
+        path_valid = self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy)
+        if self._replan_t0 is not None:
+            self.get_logger().info(f"replan check elapsed: {(time.perf_counter() - self._replan_t0) * 1000.0:.1f} ms")
+        if path_valid:
             self.get_logger().info("Current global path is valid. --> no replanning")
             self._replan_in_progress = False
             return
@@ -662,11 +668,16 @@ class GlobalPlannerNode(Node):
             self._replan_in_progress = False
 
     def _check_replan(self) -> None:
+        now = time.perf_counter()
+        if self._last_replan_timer_t is not None:
+            self.get_logger().info(f"replan timer gap: {(now - self._last_replan_timer_t) * 1000.0:.1f} ms")
+        self._last_replan_timer_t = now
         if self._current_path_idx is None or self._replan_in_progress:
             return
         if self._active_plan_mode not in ("single", "candidates"):
             return
 
+        self._replan_t0 = now
         self._replan_in_progress = True
         self._replan_check_pending = True
         self.update_object_list()
