@@ -67,4 +67,4 @@ bags/*
 
 /rosbags
 
-/src/output_map.csv
+output_map.csv

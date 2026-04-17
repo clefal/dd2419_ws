@@ -73,6 +73,7 @@ def read_map_csv(path: str, scale: float):
     start = None
     box = None
     objects: List[Tuple[float, float, float]] = []
+    boxes: List[Tuple[float, float, float]] = []
 
     with open(path, "r", newline="") as f:
         reader = csv.DictReader((line.replace("\ufeff", "") for line in f))
@@ -96,12 +97,12 @@ def read_map_csv(path: str, scale: float):
             elif t == "O":
                 objects.append((x, y, ang_deg))
             elif t == "B":
-                box = (x, y, ang_deg)
+                boxes.append((x, y, ang_deg))
 
     if start is None:
         raise ValueError(f"No start 'S' found in {path}")
 
-    return start, objects, box
+    return start, objects, boxes
 
 
 class WorkspaceAndFrames(Node):
@@ -153,18 +154,18 @@ class WorkspaceAndFrames(Node):
 
         # Read files
         polygon_pts = read_workspace_csv(workspace_csv, scale)
-        start, objects, box = read_map_csv(map_csv, scale)
+        start, objects, boxes = read_map_csv(map_csv, scale)
 
         # Publish & broadcast
         self.publish_workspace_polygon(polygon_pts)
-        self.broadcast_static_transforms(start, objects, box)
+        self.broadcast_static_transforms(start, objects, boxes)
 
         self.get_logger().info(
-            f"OK. Workspace points={len(polygon_pts)}, objects={len(objects)}, box={'yes' if box else 'no'}. "
+            f"OK. Workspace points={len(polygon_pts)}, objects={len(objects)}, box={len(boxes)}. "
             f"Units={units} (scale={scale})."
         )
 
-    def broadcast_static_transforms(self, start, objects, box):
+    def broadcast_static_transforms(self, start, objects, boxes):
         now = self.get_clock().now().to_msg()
         tfs: List[TransformStamped] = []
 
@@ -232,13 +233,12 @@ class WorkspaceAndFrames(Node):
             tfs.append(tf_obj)
 
         # map -> box
-        if box is not None:
-            bx, by, bdeg = box
+        for j , (bx,by,bdeg) in enumerate(boxes):
             qx, qy, qz, qw = yaw_to_quat(math.radians(bdeg))
             tf_box = TransformStamped()
             tf_box.header.stamp = now
             tf_box.header.frame_id = self.frame_map
-            tf_box.child_frame_id = self.box_frame
+            tf_box.child_frame_id = f"{self.box_frame}{j}"
             tf_box.transform.translation.x = float(bx)
             tf_box.transform.translation.y = float(by)
             tf_box.transform.translation.z = 0.0

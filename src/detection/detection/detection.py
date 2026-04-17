@@ -119,7 +119,7 @@ class Detection(Node):
 
         # geometrical filter
         # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
-        max_dist = 2
+        max_dist = 1.5
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
@@ -419,7 +419,7 @@ class Detection(Node):
 
         # Quick check: is the point even inside the map?
         if not (0 <= center_col < width and 0 <= center_row < height):
-            self.get_logger().warn("Point is outside the map bounds.")
+            # self.get_logger().warn("Point is outside the map bounds.")
             return True # Often safer to treat out-of-bounds as an obstacle
 
         # 4. Convert search radius from meters to cells

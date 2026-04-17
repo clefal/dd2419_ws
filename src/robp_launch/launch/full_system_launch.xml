@@ -31,6 +31,7 @@
     <param name="freeze_odom_before_planning" value="$(var use_odom_freezer)"/>
   </node>
   <node pkg="detection" exec="detection" name="detection" output="log"/>
+  <node pkg="detection" exec="object_manager" name="object_manager" output="log"/>
 
 
 </launch>
