@@ -24,7 +24,7 @@ class Mapping(Node):
         # If true, the incoming LaserScan is assumed to already be filtered upstream.
         # If false, this node will filter ranges using `median_filter_scan()` before mapping.
         self.declare_parameter("input_is_preprocessed", True)
-        self.declare_parameter("scans_to_skip", 5)
+        self.declare_parameter("scans_to_skip", 3)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
         self.declare_parameter("grid_size", 12)
@@ -49,8 +49,8 @@ class Mapping(Node):
         self.median_filter_kernel_size = 5
 
         # Log-odds params
-        self.log_odds_increse_occ = 0.85
-        self.log_odds_decrease_free = -0.4
+        self.log_odds_increse_occ = 0.9
+        self.log_odds_decrease_free = -0.45
         self.log_odds_min = -5
         self.log_odds_max = 5
 
