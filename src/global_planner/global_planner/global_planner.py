@@ -166,10 +166,7 @@ class GlobalPlannerNode(Node):
 
     def on_map(self, msg: OccupancyGrid) -> None:
         self.path_manager.set_config(self._planner_config())
-        self.path_manager.update_map(msg)
-        planning_grid = self.path_manager.planning_grid
-        if planning_grid is not None:
-            self.pub_planning_grid.publish(planning_grid)
+        self.path_manager.update_map(msg, rebuild=False)
 
     def on_workspace(self, msg: PolygonStamped) -> None:
         frame = (msg.header.frame_id or "").strip()

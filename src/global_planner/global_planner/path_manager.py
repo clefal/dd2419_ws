@@ -89,10 +89,11 @@ class PathManager:
             self._workspace_border_mask = None
         self._config = config
 
-    def update_map(self, msg: OccupancyGrid) -> None:
+    def update_map(self, msg: OccupancyGrid, rebuild: bool = True) -> None:
         self._raw_map = msg
         self._meta = self.extract_meta(msg)
-        self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
+        if rebuild:
+            self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
 
     def update_objects(
         self,
