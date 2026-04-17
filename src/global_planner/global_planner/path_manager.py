@@ -30,6 +30,7 @@ class PlannerConfig:
     workspace_border_width: float
     robot_radius: float
     inflation_margin: float
+    soft_halo_m: float
     cube_size: float
     box_size: float
     box_goal_radius: float
@@ -247,8 +248,9 @@ class PathManager:
             math.ceil((self._config.robot_radius + self._config.inflation_margin) / meta.resolution)
         )
 
-        soft_halo_m = 0.10
-        r_soft_cells = r_lethal_cells + int(math.ceil(soft_halo_m / meta.resolution))
+        r_soft_cells = r_lethal_cells + int(
+            math.ceil(self._config.soft_halo_m / meta.resolution)
+        )
 
         static_data = list(raw.data)
         workspace_inside, workspace_border = self._workspace_masks(meta)
@@ -280,6 +282,9 @@ class PathManager:
             self._config.robot_radius + cube_half_diagonal + self._config.inflation_margin
         )
         r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
+        r_soft_object_cells = r_cells + int(
+            math.ceil(self._config.soft_halo_m / meta.resolution)
+        )
 
         for (cx, cy) in self._cubes:
             if self._target_object is not None:
@@ -291,7 +296,14 @@ class PathManager:
             if idx is None:
                 continue
 
-            self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
+            self.mark_disk_inflated(
+                planning.data,
+                idx[0],
+                idx[1],
+                r_cells,
+                r_soft_object_cells,
+                meta,
+            )
 
         if include_box_lethal:
             box_keepout_radius = (
@@ -300,17 +312,21 @@ class PathManager:
                 + self._config.inflation_margin
             )
             box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
+            box_r_soft_cells = box_r_cells + int(
+                math.ceil(self._config.soft_halo_m / meta.resolution)
+            )
 
             for (bx, by) in self._boxes:
                 box_idx = self.world_to_grid(bx, by, meta)
                 if box_idx is None:
                     continue
 
-                self.mark_disk_lethal(
+                self.mark_disk_inflated(
                     planning.data,
                     box_idx[0],
                     box_idx[1],
                     box_r_cells,
+                    box_r_soft_cells,
                     meta,
                 )
 
@@ -366,6 +382,29 @@ class PathManager:
 
                 if 0 <= gx < meta.width and 0 <= gy < meta.height:
                     data[gx + gy * meta.width] = 100
+
+    @staticmethod
+    def mark_disk_inflated(data, cx, cy, r_lethal, r_soft, meta):
+        for dy in range(-r_soft, r_soft + 1):
+            for dx in range(-r_soft, r_soft + 1):
+                dist2 = dx * dx + dy * dy
+                if dist2 > r_soft * r_soft:
+                    continue
+
+                gx = cx + dx
+                gy = cy + dy
+                if not (0 <= gx < meta.width and 0 <= gy < meta.height):
+                    continue
+
+                idx = gx + gy * meta.width
+                if dist2 <= r_lethal * r_lethal:
+                    data[idx] = 100
+                else:
+                    d = math.sqrt(dist2)
+                    t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
+                    penalty = int(99 * (1.0 - t))
+                    if penalty > data[idx]:
+                        data[idx] = penalty
 
     def _workspace_masks(
         self,

@@ -37,6 +37,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("coarse_object_standoff", 0.5)
         self.declare_parameter("robot_radius", 0.05)
         self.declare_parameter("inflation_margin", 0.01)
+        self.declare_parameter("soft_halo_m", 0.10)
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
@@ -151,6 +152,7 @@ class GlobalPlannerNode(Node):
             workspace_border_width=self.get_parameter("workspace_border_width").get_parameter_value().double_value,
             robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
             inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
+            soft_halo_m=self.get_parameter("soft_halo_m").get_parameter_value().double_value,
             cube_size=self.get_parameter("cube_size").get_parameter_value().double_value,
             box_size=self.get_parameter("box_size").get_parameter_value().double_value,
             box_goal_radius=self.get_parameter("box_goal_radius").get_parameter_value().double_value,
