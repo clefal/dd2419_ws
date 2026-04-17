@@ -612,6 +612,13 @@ class GlobalPlannerNode(Node):
         self._replan_in_progress = False
         self.get_logger().warn(f"Published EMPTY path (reason={reason}).")
 
+    def _publish_stop_path(self, reason: str = "unknown") -> None:
+        path_msg = Path()
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = self.global_frame
+        self.pub_path.publish(path_msg)
+        self.get_logger().warn(f"Published STOP path (reason={reason}).")
+
     def _get_robot_xy_in_map(self) -> Optional[Tuple[float, float]]:
         try:
             # latest available transform
@@ -643,7 +650,8 @@ class GlobalPlannerNode(Node):
             self._replan_in_progress = False
             return
 
-        self.get_logger().warn("Current global path is blocked. Replanning.")
+        self.get_logger().warn("Current global path is blocked. Stopping and replanning.")
+        self._publish_stop_path(reason="path_blocked")
         if self._active_plan_mode == "single":
             self._pending_plan_mode = "single"
             self._pending_plan_reason = "path_blocked"
