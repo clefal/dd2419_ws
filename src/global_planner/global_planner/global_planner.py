@@ -41,7 +41,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
         self.declare_parameter("box_goal_radius", 0.30)
-        self.declare_parameter("replan_check_period_s", 0.5)
+        self.declare_parameter("replan_check_period_s", 0.8)
         self.declare_parameter("freeze_odom_before_planning", False)
         self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")
         self.declare_parameter("freeze_odom_timeout_s", 0.5)
@@ -286,11 +286,6 @@ class GlobalPlannerNode(Node):
                 boxes=self._boxes,
                 target_object=self._target_object,
             )
-            planning_grid = self.path_manager.rebuild_planning_grid(
-                include_box_lethal=self._current_include_box_lethal
-            )
-            if planning_grid is not None:
-                self.pub_planning_grid.publish(planning_grid)
 
             if self._replan_check_pending:
                 self._continue_replan_check()
