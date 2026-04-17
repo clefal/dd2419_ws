@@ -140,6 +140,8 @@ class GlobalPlannerNode(Node):
             f"GlobalPlannerNode started. Subscribing map='{self.map_topic}', goal='{self.goal_topic}', publishing path='{self.path_topic}'."
         )
 
+        self.debugging_start_time = 0
+
     # -------------------------
     # ROS callbacks
     # -------------------------
@@ -266,6 +268,7 @@ class GlobalPlannerNode(Node):
 
     def get_all_objects_callback(self, future):
         
+        self.get_logger().info(f'update_object_list service took {(self.get_clock().now().nanoseconds - self.debugging_start_time)/1000000} ms')
         try:
             res :GetAllObjects.Response = future.result()
             obj_poses :List[ObjPose] = res.obj_poses
@@ -609,10 +612,13 @@ class GlobalPlannerNode(Node):
         if self._active_plan_mode not in ("single", "candidates"):
             self._replan_in_progress = False
             return
-
+        
+        self.debugging_start_time = self.get_clock().now().nanoseconds
         planning_grid = self.path_manager.rebuild_planning_grid(
             include_box_lethal=self._current_include_box_lethal
         )
+        self.get_logger().info(f'rebuild_planning_grid took {(self.get_clock().now().nanoseconds - self.debugging_start_time)/1000000} ms')
+
         if planning_grid is not None:
             self.pub_planning_grid.publish(planning_grid)
 
@@ -636,6 +642,7 @@ class GlobalPlannerNode(Node):
             self._replan_in_progress = False
 
     def _check_replan(self) -> None:
+        self.debugging_start_time = self.get_clock().now().nanoseconds
         self.get_logger().info(f'entered _check_replan function')
         if self._current_path_idx is None or self._replan_in_progress:
             return
