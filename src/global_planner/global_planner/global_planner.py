@@ -275,7 +275,7 @@ class GlobalPlannerNode(Node):
             self._cubes: List[Tuple[float, float]] = []   # in map frame
             self._boxes: List[Tuple[float, float]] = []   # in map frame
             for obj in obj_poses:
-                if obj.obj_type == 'box':
+                if obj.obj_type in ('box', 'map_box'):
                     self._boxes.append((obj.obj_x, obj.obj_y))
                 else:
                     self._cubes.append((obj.obj_x, obj.obj_y))
@@ -286,6 +286,11 @@ class GlobalPlannerNode(Node):
                 boxes=self._boxes,
                 target_object=self._target_object,
             )
+            planning_grid = self.path_manager.rebuild_planning_grid(
+                include_box_lethal=self._current_include_box_lethal
+            )
+            if planning_grid is not None:
+                self.pub_planning_grid.publish(planning_grid)
 
             if self._replan_check_pending:
                 self._continue_replan_check()
