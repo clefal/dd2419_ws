@@ -113,6 +113,7 @@ class PathManager:
             self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
 
     def rebuild_planning_grid(self, include_box_lethal: bool = True) -> Optional[OccupancyGrid]:
+        start_time = time.perf_counter()
         self._last_include_box_lethal = include_box_lethal
         if self._raw_map is None or self._meta is None:
             self._planning_grid = None
@@ -122,6 +123,8 @@ class PathManager:
             self._meta,
             include_box_lethal=include_box_lethal,
         )
+        delta = time.perf_counter()-start_time *1000
+        self._logger().info(f'rebuild plannin grid took {delta} ms')
         return self._planning_grid
 
     def plan_to_goal(
