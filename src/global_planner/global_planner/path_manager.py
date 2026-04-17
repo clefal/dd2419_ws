@@ -349,6 +349,31 @@ class PathManager:
         Soft halo: r_lethal < dist <= r_soft -> descending cost
         """
         inflated = list(data)
+        cache_key = (r_lethal, r_soft)
+        if not hasattr(self, "_inflation_offsets_cache"):
+            self._inflation_offsets_cache = {}
+
+        offsets = self._inflation_offsets_cache.get(cache_key)
+        if offsets is None:
+            offsets = []
+            r_lethal2 = r_lethal * r_lethal
+            r_soft2 = r_soft * r_soft
+            for dy in range(-r_soft, r_soft + 1):
+                for dx in range(-r_soft, r_soft + 1):
+                    dist2 = dx * dx + dy * dy
+                    if dist2 > r_soft2:
+                        continue
+
+                    if dist2 <= r_lethal2:
+                        cost = 100
+                    else:
+                        d = math.sqrt(dist2)
+                        t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
+                        cost = int(99 * (1.0 - t))
+
+                    offsets.append((dx, dy, cost))
+
+            self._inflation_offsets_cache[cache_key] = offsets
 
         for gy in range(meta.height):
             for gx in range(meta.width):
@@ -358,26 +383,17 @@ class PathManager:
                     continue
 
                 if v >= lethal_thresh:
-                    for dy in range(-r_soft, r_soft + 1):
-                        for dx in range(-r_soft, r_soft + 1):
-                            dist2 = dx * dx + dy * dy
-                            if dist2 > r_soft * r_soft:
-                                continue
+                    for dx, dy, cost in offsets:
+                        nx = gx + dx
+                        ny = gy + dy
+                        if not (0 <= nx < meta.width and 0 <= ny < meta.height):
+                            continue
 
-                            nx = gx + dx
-                            ny = gy + dy
-                            if not (0 <= nx < meta.width and 0 <= ny < meta.height):
-                                continue
-
-                            if dist2 <= r_lethal * r_lethal:
-                                inflated[nx + ny * meta.width] = 100
-                            else:
-                                d = math.sqrt(dist2)
-                                t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
-                                penalty = int(99 * (1.0 - t))
-                                idx = nx + ny * meta.width
-                                if penalty > inflated[idx]:
-                                    inflated[idx] = penalty
+                        idx = nx + ny * meta.width
+                        if cost == 100:
+                            inflated[idx] = 100
+                        elif cost > inflated[idx]:
+                            inflated[idx] = cost
 
         return inflated
 
