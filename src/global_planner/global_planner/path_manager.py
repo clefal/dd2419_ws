@@ -132,6 +132,7 @@ class PathManager:
         start_xy: Tuple[float, float],
         goal_xy: Tuple[float, float],
         include_box_lethal: bool,
+        rebuild_grid: bool = True,
     ) -> Optional[PlanResult]:
         if self._raw_map is None or self._meta is None:
             return None
@@ -141,7 +142,10 @@ class PathManager:
         if start_idx is None or goal_idx is None:
             return None
 
-        planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        if rebuild_grid:
+            planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        else:
+            planning_grid = self._planning_grid
         if planning_grid is None:
             return None
 
@@ -161,6 +165,7 @@ class PathManager:
         start_xy: Tuple[float, float],
         candidate_xy: List[Tuple[float, float]],
         include_box_lethal: bool,
+        rebuild_grid: bool = True,
     ) -> Optional[CandidatePlanResult]:
         if self._raw_map is None or self._meta is None:
             return None
@@ -169,7 +174,10 @@ class PathManager:
         if start_idx is None:
             return None
 
-        planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        if rebuild_grid:
+            planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        else:
+            planning_grid = self._planning_grid
         if planning_grid is None:
             return None
 

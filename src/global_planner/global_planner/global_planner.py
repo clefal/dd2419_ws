@@ -131,6 +131,7 @@ class GlobalPlannerNode(Node):
         self._current_include_box_lethal = True
         self._replan_in_progress = False
         self._replan_check_pending = False
+        self._reuse_current_planning_grid_once = False
 
         replan_period = self.get_parameter("replan_check_period_s").get_parameter_value().double_value
         self._replan_timer = self.create_timer(replan_period, self._check_replan)
@@ -342,6 +343,9 @@ class GlobalPlannerNode(Node):
         return
 
     def _continue_plan_and_publish_after_freeze(self, reason: str, freeze_ok: bool) -> None:
+        reuse_grid = self._reuse_current_planning_grid_once
+        self._reuse_current_planning_grid_once = False
+
         if not freeze_ok:
             self._publish_empty_path(reason="freeze_odom_failed")
             return
@@ -377,7 +381,12 @@ class GlobalPlannerNode(Node):
             return
 
         include_box_lethal = True
-        plan = self.path_manager.plan_to_goal(start_xy, goal_xy, include_box_lethal=include_box_lethal)
+        plan = self.path_manager.plan_to_goal(
+            start_xy,
+            goal_xy,
+            include_box_lethal=include_box_lethal,
+            rebuild_grid=not reuse_grid,
+        )
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
             self.pub_planning_grid.publish(planning_grid)
@@ -447,6 +456,9 @@ class GlobalPlannerNode(Node):
         msg: PoseArray,
         freeze_ok: bool,
     ) -> None:
+        reuse_grid = self._reuse_current_planning_grid_once
+        self._reuse_current_planning_grid_once = False
+
         if not freeze_ok:
             self._publish_empty_path(reason="freeze_odom_failed_candidates")
             return
@@ -484,6 +496,7 @@ class GlobalPlannerNode(Node):
             start_xy,
             candidate_xy,
             include_box_lethal=include_box_lethal,
+            rebuild_grid=not reuse_grid,
         )
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
@@ -634,11 +647,13 @@ class GlobalPlannerNode(Node):
         if self._active_plan_mode == "single":
             self._pending_plan_mode = "single"
             self._pending_plan_reason = "path_blocked"
+            self._reuse_current_planning_grid_once = True
             self._continue_plan_and_publish(reason=self._pending_plan_reason)
         elif self._active_plan_mode == "candidates" and self._active_goal_candidates is not None:
             self._pending_goal_candidates = self._active_goal_candidates
             self._pending_plan_mode = "candidates"
             self._pending_plan_reason = "path_blocked"
+            self._reuse_current_planning_grid_once = True
             self._continue_plan_and_publish_candidates(reason=self._pending_plan_reason)
         else:
             self._replan_in_progress = False
