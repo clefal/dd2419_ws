@@ -36,7 +36,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("max_planning_time_ms", 5000) # soft guard for very large maps
         self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("coarse_object_standoff", 0.5)
-        self.declare_parameter("robot_radius", 0.05)
+        self.declare_parameter("robot_radius", 0.02)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("soft_halo_m", 0.40)
         self.declare_parameter("cube_size", 0.02)
