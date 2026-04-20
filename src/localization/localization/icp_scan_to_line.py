@@ -636,7 +636,7 @@ class IcpScanToLine(Node):
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 3)
+        self.declare_parameter("stack_scans", 4)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.
         self.declare_parameter("neighbor_dist_thresh", 0.10)
 
@@ -772,12 +772,12 @@ class IcpScanToLine(Node):
             self.scan_buffer.clear()
             self.get_logger().info("Turning ended: cleared stacked scan buffer")
 
-    def try_initialize_mto(self) -> bool:
+    def try_initialize_mto(self, stamp) -> bool:
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
-                rclpy.time.Time(seconds=0),
+                stamp,
                 timeout=rclpy.time.Duration(seconds=1)
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
@@ -785,7 +785,7 @@ class IcpScanToLine(Node):
             self.get_logger().info(f"Initialized {self.map_frame}->{self.odom_frame} from {self.map_frame}->start")
 
             tf_map_odom = TransformStamped()
-            tf_map_odom.header.stamp = self.get_clock().now().to_msg()
+            tf_map_odom.header.stamp = tf.header.stamp
             tf_map_odom.header.frame_id = self.map_frame
             tf_map_odom.child_frame_id = self.odom_frame
             tf_map_odom.transform = tf.transform
@@ -1040,7 +1040,7 @@ class IcpScanToLine(Node):
         stamp = scan.header.stamp
 
         if not self.mto_initialized:
-            self.try_initialize_mto()
+            self.try_initialize_mto(stamp)
             return
 
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)

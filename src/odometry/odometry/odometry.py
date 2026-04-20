@@ -262,8 +262,8 @@ class Odometry(Node):
         t_temp.transform.rotation.z = q[2]
         t_temp.transform.rotation.w = q[3]
 
-        self._tf_broadcaster.sendTransform(t)
         self._tf_broadcaster.sendTransform(t_temp)
+        self._tf_broadcaster.sendTransform(t)
 
     def publish_path(self, stamp, x, y, yaw):
         self._path.header.stamp = stamp
