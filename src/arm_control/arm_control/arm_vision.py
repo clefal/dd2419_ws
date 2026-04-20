@@ -84,11 +84,11 @@ class ArmVisionNode(Node):
         if frame is None:
             return
         
-        cv2.imshow("debug", frame)
-        key = cv2.waitKey(1)
+        # cv2.imshow("debug", frame)
+        # key = cv2.waitKey(1)
         
-        if key == ord('p'):  # press P to pause and click around
-            self.debug_color_picker(frame)
+        # if key == ord('p'):  # press P to pause and click around
+        #     self.debug_color_picker(frame)
 
         debug_image = frame.copy()
 
