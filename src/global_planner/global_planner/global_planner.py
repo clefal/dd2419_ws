@@ -33,15 +33,15 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("w_heuristic", 1.5)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
         self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
         self.declare_parameter("occ_cost_scale", 6.0)       # penalty factor for soft costs
-        self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
+        self.declare_parameter("max_planning_time_ms", 10000) # soft guard for very large maps
         self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("coarse_object_standoff", 0.5)
-        self.declare_parameter("robot_radius", 0.05)
+        self.declare_parameter("robot_radius", 0.02)
         self.declare_parameter("inflation_margin", 0.01)
-        self.declare_parameter("soft_halo_m", 0.20)
+        self.declare_parameter("soft_halo_m", 0.40)
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
-        self.declare_parameter("box_goal_radius", 0.30)
+        self.declare_parameter("box_goal_radius", 0.40)
         self.declare_parameter("replan_check_period_s", 0.5)
         self.declare_parameter("freeze_odom_before_planning", False)
         self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")

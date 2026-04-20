@@ -29,19 +29,19 @@ MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
     'red': np.array([255, 0, 0]),    #rgba(243, 140, 173)
-    'blue': np.array([0, 0, 255])
+    'blue': np.array([0, 200, 255])
 }
 
 TOLERANCES = {
     'green': 0.25,
     'red': 0.185,
-    'blue': 0.28
+    'blue': 0.108
 }
 
 L_BOUNDS = {
     "red": (0.2, 0.8),
     "green": (0.2, 0.8),
-    "blue": (0.2, 0.81)
+    "blue": (0.2, 0.85)
 }
 
 BOX_COLORS = {

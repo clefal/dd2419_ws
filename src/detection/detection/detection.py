@@ -119,7 +119,7 @@ class Detection(Node):
 
         # geometrical filter
         # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
-        max_dist = 1.5
+        max_dist = 2
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
