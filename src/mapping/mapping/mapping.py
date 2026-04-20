@@ -18,7 +18,14 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
+        self.declare_parameter("exploration_grid_topic", "/map/exploration_grid")
         self.declare_parameter("grid_resolution", 0.02) # m/cell
+
+        self.declare_parameter("exploration_grid_resolution", 0.10) # m/cell
+        self.declare_parameter("min_exploration_view_angle", -30) #deg   
+        self.declare_parameter("range_exploration_view_angle", 60) #deg 
+        self.declare_parameter("exploration_range_max_update", 1.5) # m
+
         # LaserScan input topic. Default assumes an upstream scan preprocessor node.
         self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
         # If true, the incoming LaserScan is assumed to already be filtered upstream.
@@ -37,6 +44,12 @@ class Mapping(Node):
         self.grid_origin = self.get_parameter("grid_origin").value
         self.grid_resolution = self.get_parameter("grid_resolution").value
         self.worspace_topic = self.get_parameter("workspace_topic").value
+
+        # Exploration grid params
+        self.exploration_grid_resolution = self.get_parameter("exploration_grid_resolution").value
+        self.min_exploration_view_angle = self.get_parameter("min_exploration_view_angle").value
+        self.range_exploration_view_angle = self.get_parameter("range_exploration_view_angle").value
+        self.exploration_range_max_update = float(self.get_parameter("exploration_range_max_update").value)
 
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
@@ -66,6 +79,10 @@ class Mapping(Node):
         )
         ocuppancy_grid_topic = self.get_parameter("ocuppancy_grid_topic").value
         self.ocuppancy_grid_publisher = self.create_publisher(OccupancyGrid, ocuppancy_grid_topic, qos)
+
+        # Exploration grid publisher
+        exploration_grid_topic = self.get_parameter("exploration_grid_topic").value
+        self.exploration_grid_publisher = self.create_publisher(OccupancyGrid, exploration_grid_topic, qos)
 
         # Lidar subscriber
         lidar_topic = self.get_parameter("lidar_topic").value
@@ -104,6 +121,7 @@ class Mapping(Node):
 
         # Grid (initialized once we receive the workspace polygon)
         self.grid = None
+        self.exploration_grid = None
         self.workspace_received = False
         self.workspace_polygon_xy = None
         
@@ -129,11 +147,12 @@ class Mapping(Node):
         min_y, max_y = float(min(ys)), float(max(ys))
 
         res = float(self.grid_resolution)
-        if res <= 0.0:
-            self.get_logger().error(f"Invalid grid_resolution={res}")
+        res_exploration = float(self.exploration_grid_resolution)
+        if res <= 0.0 or res_exploration <= 0.0:
+            self.get_logger().error(f"Invalid grid_resolution={res} or exploration_grid_resolution={res_exploration}")
             return
 
-        # Align bounds to resolution and ensure the max boundary is included.
+        # Align bounds to each grid resolution and ensure the max boundary is included.
         origin_x = math.floor(min_x / res) * res
         origin_y = math.floor(min_y / res) * res
         max_x_bound = math.ceil(max_x / res) * res
@@ -142,7 +161,21 @@ class Mapping(Node):
         width = int(round((max_x_bound - origin_x) / res)) + 1
         height = int(round((max_y_bound - origin_y) / res)) + 1
         if width <= 0 or height <= 0:
-            self.get_logger().error(f"Computed invalid grid size: width={width}, height={height}")
+            self.get_logger().error(f"Computed invalid occupancy grid size: width={width}, height={height}")
+            return
+
+        origin_x_exploration = math.floor(min_x / res_exploration) * res_exploration
+        origin_y_exploration = math.floor(min_y / res_exploration) * res_exploration
+        max_x_bound_exploration = math.ceil(max_x / res_exploration) * res_exploration
+        max_y_bound_exploration = math.ceil(max_y / res_exploration) * res_exploration
+
+        width_exploration = int(round((max_x_bound_exploration - origin_x_exploration) / res_exploration)) + 1
+        height_exploration = int(round((max_y_bound_exploration - origin_y_exploration) / res_exploration)) + 1
+        if width_exploration <= 0 or height_exploration <= 0:
+            self.get_logger().error(
+                "Computed invalid exploration grid size: "
+                f"width={width_exploration}, height={height_exploration}"
+            )
             return
 
         needs_reinit = (
@@ -151,19 +184,30 @@ class Mapping(Node):
             or (self.grid.height != height)
             or (abs(self.grid.origin[0] - origin_x) > 1e-9)
             or (abs(self.grid.origin[1] - origin_y) > 1e-9)
+            or (self.exploration_grid is None)
+            or (self.exploration_grid.width != width_exploration)
+            or (self.exploration_grid.height != height_exploration)
+            or (abs(self.exploration_grid.origin[0] - origin_x_exploration) > 1e-9)
+            or (abs(self.exploration_grid.origin[1] - origin_y_exploration) > 1e-9)
         )
         if not needs_reinit:
             return
 
         if not self.workspace_received:
             self.get_logger().info(
-                "Initializing occupancy grid from workspace polygon "
-                f"(width={width}, height={height}, res={res}, origin=({origin_x:.3f},{origin_y:.3f}))"
+                "Initializing grids from workspace polygon "
+                f"(occupancy: width={width}, height={height}, res={res}, "
+                f"origin=({origin_x:.3f},{origin_y:.3f}); "
+                f"exploration: width={width_exploration}, height={height_exploration}, res={res_exploration}, "
+                f"origin=({origin_x_exploration:.3f},{origin_y_exploration:.3f}))"
             )
         else:
             self.get_logger().warn(
-                "Workspace polygon changed; reinitializing occupancy grid "
-                f"(width={width}, height={height}, res={res}, origin=({origin_x:.3f},{origin_y:.3f}))"
+                "Workspace polygon changed; reinitializing grids "
+                f"(occupancy: width={width}, height={height}, res={res}, "
+                f"origin=({origin_x:.3f},{origin_y:.3f}); "
+                f"exploration: width={width_exploration}, height={height_exploration}, res={res_exploration}, "
+                f"origin=({origin_x_exploration:.3f},{origin_y_exploration:.3f}))"
             )
 
         self.grid = OcupancyGridData(
@@ -176,14 +220,28 @@ class Mapping(Node):
             l_min=self.log_odds_min,
             l_max=self.log_odds_max,
         )
+
+        self.exploration_grid = OcupancyGridData(
+            width=width_exploration,
+            height=height_exploration,
+            resolution=res_exploration,
+            origin=[origin_x_exploration, origin_y_exploration],
+            l_occ=self.log_odds_increse_occ,
+            l_free=self.log_odds_decrease_free,
+            l_min=self.log_odds_min,
+            l_max=self.log_odds_max,
+        )
+
         self.grid.set_workspace_polygon(self.workspace_polygon_xy)
+        self.exploration_grid.set_workspace_polygon(self.workspace_polygon_xy)
         self.workspace_received = True
+        self.publish_exploration_grid(self.get_clock().now().to_msg())
         self.publish_grid(self.get_clock().now().to_msg())
 
     def lidar_callback(self, msg: LaserScan):
         if self.is_turning:
             return
-        if self.grid is None:
+        if self.grid is None :
             return
         
         if self.skipped_scans < self.scans_to_skip:
@@ -254,7 +312,14 @@ class Mapping(Node):
             # self.grid.update(x, y, occupied=True)
             self.grid.update_ray(x_robot, y_robot, x, y, last_cell_occupied)
 
+            if ang > np.deg2rad(self.min_exploration_view_angle) and ang < np.deg2rad(self.min_exploration_view_angle + self.range_exploration_view_angle):
+                exploration_r = min(r, self.exploration_range_max_update)
+                x_exploration = x_robot + (exploration_r * math.cos(ang + yaw))
+                y_exploration = y_robot + (exploration_r * math.sin(ang + yaw))
+                self.exploration_grid.update_ray(x_robot, y_robot, x_exploration, y_exploration, False)
+
         self.publish_grid(msg.header.stamp)
+        self.publish_exploration_grid(msg.header.stamp)
 
     def is_turning_callback(self, msg: Bool):
         self.is_turning = msg.data
@@ -296,6 +361,23 @@ class Mapping(Node):
         occupancy_grid_msg.data = self.grid.get_data()
 
         self.ocuppancy_grid_publisher.publish(occupancy_grid_msg)
+
+    def publish_exploration_grid(self, stamp):
+        if self.exploration_grid is None:
+            return
+        
+        occupancy_grid_msg = OccupancyGrid()
+        occupancy_grid_msg.header.stamp = stamp
+        occupancy_grid_msg.header.frame_id = "map"
+        occupancy_grid_msg.info.resolution = self.exploration_grid.resolution
+        occupancy_grid_msg.info.width = self.exploration_grid.width
+        occupancy_grid_msg.info.height = self.exploration_grid.height
+        occupancy_grid_msg.info.origin.position.x = self.exploration_grid.origin[0]
+        occupancy_grid_msg.info.origin.position.y = self.exploration_grid.origin[1]
+        occupancy_grid_msg.info.origin.position.z = 0.0
+        occupancy_grid_msg.data = self.exploration_grid.get_data()
+
+        self.exploration_grid_publisher.publish(occupancy_grid_msg)
 
 def main():
     rclpy.init()
