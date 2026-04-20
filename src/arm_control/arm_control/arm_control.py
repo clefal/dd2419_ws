@@ -43,9 +43,9 @@ CONTROL_TOPIC = '/arm/control'
 CONTROL_RATE_HZ = 10.0
 VISION_TIMEOUT_SEC = 1.0
 
-TARGET_PIXEL_X = 300
+TARGET_PIXEL_X = 310
 TARGET_PIXEL_Y = 420 #400
-ALIGN_X_TOLERANCE = 20  #25
+ALIGN_X_TOLERANCE = 15  #25
 ALIGN_Y_TOLERANCE = 10
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
@@ -331,7 +331,7 @@ class ArmControlNode(Node):
         )
 
     def command_observe_pose(self):
-        self.current_target_rho = BASE_MIN_RHO
+        self.current_target_rho = BASE_MIN_RHO + 20.0
         self.current_target_alpha = 0.0
         self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
