@@ -6,6 +6,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Int32MultiArray
 import colour as co
+from std_msgs.msg import String
 
 #TODO OPENCV EDGE DETECTION
 #TODO CAMERA CALIBRATION
@@ -21,10 +22,18 @@ import colour as co
 
 
 MIN_CONTOUR_AREA = 500.0
+MIN_HOLDING_WIDTH = 130
+HOLDING_TIMEOUT_SEC = 3.0 #TODO: Needs to be tuned 
 IMAGE_TOPIC = '/arm/camera/image_raw'
 CENTER_TOPIC = '/arm/vision/cube_center'
 DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
+HOLDING_CHECK_TOPIC = '/arm/vision/holding_check'
+HOLDING_ANSWER_TOPIC = 'arm/vision/holding_awnser'
+CHECK_HOLDING_MSG = 'CHECK_HOLDING'
+HOLDING_SUCCESS_MSG = 'HOLDING_SUCCESS'
+HOLDING_FAIL_MSG = 'HOLDING_FAIL'
+
 
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
@@ -34,12 +43,12 @@ ARM_COLORS_RGB = {
 
 TOLERANCES = {
     'green': 0.25,
-    'red': 0.185,
+    'red': 0.2, #change to 0.185
     'blue': 0.108
 }
 
 L_BOUNDS = {
-    "red": (0.2, 0.8),
+    "red": (0.2, 0.85), #maybe change to 0.8
     "green": (0.2, 0.8),
     "blue": (0.2, 0.85)
 }
@@ -50,10 +59,11 @@ BOX_COLORS = {
     'blue': (255, 0, 0)
 }
 
-
 class ArmVisionNode(Node):
     def __init__(self):
         super().__init__('arm_vision')
+
+        self.holding = True
 
         self.bridge = CvBridge()
 
@@ -84,6 +94,10 @@ class ArmVisionNode(Node):
             10,
         )
 
+        self.result_pub = self.create_publisher(String, HOLDING_ANSWER_TOPIC, 10)
+        self.create_subscription(String, HOLDING_CHECK_TOPIC, self.holding_callback, 10)
+
+
         # self.image_subscription = self.create_subscription(
         #     Image,
         #     IMAGE_TOPIC,
@@ -91,10 +105,29 @@ class ArmVisionNode(Node):
         #     10,
         # )
 
+    def holding_callback(self, msg):
+        if msg.data == CHECK_HOLDING_MSG:
+            self.holding = True
+            self.holding_timer = self.create_timer(
+                HOLDING_TIMEOUT_SEC, self._holding_timeout
+            )
+
+    def _holding_timeout(self):
+        if self.holding:
+            result = String()
+            result.data = HOLDING_FAIL_MSG
+            self.result_pub.publish(result)
+            self.holding = False
+        self.holding_timer.cancel()
+
     def image_callback_color(self, msg: Image):
         frame = self._ros_image_to_bgr(msg)
         if frame is None:
             return
+        
+        if self.holding:
+            h, w = frame.shape[:2]
+            frame = frame[h // 2:, int(w * 0.3):int(w * 0.8)]
         
         cv2.imshow("debug", frame)
         key = cv2.waitKey(1)
@@ -117,6 +150,14 @@ class ArmVisionNode(Node):
 
             if detection['center'] is None:
                 continue
+
+            if self.holding():
+                _, _, box_w, _ = detection['bbox']
+                if box_w >= MIN_HOLDING_WIDTH:
+                    msg = String()
+                    msg.data = HOLDING_SUCCESS_MSG
+                    self.result_pub.publish(msg)
+                    self.holding = False
 
             self.draw_detection(debug_image, detection, self.box_colors[color_name])
 
