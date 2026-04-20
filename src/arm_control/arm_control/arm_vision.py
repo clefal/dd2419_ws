@@ -41,7 +41,7 @@ TOLERANCES = {
 L_BOUNDS = {
     "red": (0.2, 0.8),
     "green": (0.2, 0.8),
-    "blue": (0.2, 0.81)
+    "blue": (0.3, 0.81)
 }
 
 BOX_COLORS = {
