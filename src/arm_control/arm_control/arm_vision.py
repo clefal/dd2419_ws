@@ -15,15 +15,21 @@ DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 
 ARM_COLORS_RGB = {
-    'green': np.array([0, 70, 57]),
-    'red': np.array([140, 45, 35]),
-    'blue': np.array([0, 83, 125])
+    'green': np.array([0, 255, 0]),
+    'red': np.array([255, 0, 0]),    #rgba(243, 140, 173)
+    'blue': np.array([0, 0, 255])
 }
 
 TOLERANCES = {
-    'green': 0.015,
-    'red': 0.03,
-    'blue': 0.02
+    'green': 0.25,
+    'red': 0.185,
+    'blue': 0.28
+}
+
+L_BOUNDS = {
+    "red": (0.2, 0.8),
+    "green": (0.2, 0.8),
+    "blue": (0.2, 0.81)
 }
 
 BOX_COLORS = {
@@ -77,11 +83,17 @@ class ArmVisionNode(Node):
         frame = self._ros_image_to_bgr(msg)
         if frame is None:
             return
+        
+        cv2.imshow("debug", frame)
+        key = cv2.waitKey(1)
+        
+        if key == ord('p'):  # press P to pause and click around
+            self.debug_color_picker(frame)
 
         debug_image = frame.copy()
 
         # Convert to Oklab
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) / 255.0
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         xyz = co.sRGB_to_XYZ(rgb)
         oklab = co.XYZ_to_Oklab(xyz)
 
@@ -127,12 +139,17 @@ class ArmVisionNode(Node):
         ref = self.oklab_refs[color_name]
         tol = self.tolerances[color_name]
         
-        # Create mask using Oklab thresholds
-        mask = (
-            (ref[1] - tol < oklab[:, :, 1]) & (oklab[:, :, 1] < ref[1] + tol) &
-            (ref[2] - tol < oklab[:, :, 2]) & (oklab[:, :, 2] < ref[2] + tol) &
-            (0.2 < oklab[:, :, 0]) & (oklab[:, :, 0] < 0.6)  # Loose lightness bounds
-        ).astype(np.uint8) * 255
+        L = oklab[:, :, 0]
+        a = oklab[:, :, 1]
+        b = oklab[:, :, 2]
+
+        L_min, L_max = L_BOUNDS[color_name]
+        chroma_tol = tol
+        #chroma_tol = tol * (1.0 + 1.5 * L)  # tolerance grows with brightness
+        color_dist = (a - ref[1])**2 + (b - ref[2])**2
+        mask = (color_dist < chroma_tol**2) & (L_min < L) & (L < L_max)
+
+        mask = mask.astype(np.uint8) * 255
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -241,6 +258,37 @@ class ArmVisionNode(Node):
 
         self.get_logger().warn(f'Encoding {msg.encoding} not supported')
         return None
+    
+    def debug_color_picker(self, frame):
+        """Click on any pixel to print its OKLab values"""
+        
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        xyz = co.sRGB_to_XYZ(rgb)
+        oklab = co.XYZ_to_Oklab(xyz)
+
+        def on_click(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                roi = oklab[max(0,y-2):y+3, max(0,x-2):x+3]
+                L = roi[:,:,0].mean()
+                a = roi[:,:,1].mean()
+                b = roi[:,:,2].mean()
+                
+                # Sample RGB from original frame
+                roi_bgr = frame[max(0,y-2):y+3, max(0,x-2):x+3]
+                rgb = roi_bgr[:,:,::-1].mean(axis=(0,1)).astype(int)  # flip BGR→RGB
+                print(f"Clicked ({x}, {y}) → RGB=({rgb[0]}, {rgb[1]}, {rgb[2]}) | L={L:.3f}, a={a:.3f}, b={b:.3f}")
+                
+                for color_name, ref in self.oklab_refs.items():
+                    dist = np.sqrt((a - ref[1])**2 + (b - ref[2])**2)
+                    L_min, L_max = L_BOUNDS[color_name]
+                    in_L = L_min < L < L_max
+                    print(f"  {color_name}: chroma_dist={dist:.3f} (tol={self.tolerances[color_name]}), L_in_bounds={in_L}")
+
+        cv2.namedWindow("debug")
+        cv2.setMouseCallback("debug", on_click)
+
+        cv2.imshow("debug", frame)
+        cv2.waitKey(0)
 
 
 def main():
