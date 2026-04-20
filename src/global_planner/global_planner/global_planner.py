@@ -161,7 +161,6 @@ class GlobalPlannerNode(Node):
             soft_halo_m=self.get_parameter("soft_halo_m").get_parameter_value().double_value,
             cube_size=self.get_parameter("cube_size").get_parameter_value().double_value,
             box_size=self.get_parameter("box_size").get_parameter_value().double_value,
-            box_goal_radius=self.get_parameter("box_goal_radius").get_parameter_value().double_value,
         )
 
     def on_map(self, msg: OccupancyGrid) -> None:

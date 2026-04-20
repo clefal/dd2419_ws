@@ -243,11 +243,7 @@ class PathManager:
 
         return True
 
-    def is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        for box_xy in self._boxes:
-            if math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= self._config.box_goal_radius:
-                return True
-        return False
+
 
     def build_planning_grid(
         self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
