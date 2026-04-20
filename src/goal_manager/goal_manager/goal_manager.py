@@ -73,7 +73,7 @@ class GoalManager(Node):
             failed_blacklist_radius_m=0.6,
             occ_lethal=90,
         )
-        self._box_side_offset = 0.6  # coarse standoff along the two long sides
+        self.declare_parameter('box_standoff_distance', 0.6)
 
         self._fixed_frame = 'map'
         self._base_frame = 'base_link'
@@ -532,7 +532,7 @@ class GoalManager(Node):
             return
 
         bx, by, _ = self._box_pose
-        d = self._box_side_offset
+        d = float(self.get_parameter('box_standoff_distance').value)
 
         cands = [
             (bx + d, by),
