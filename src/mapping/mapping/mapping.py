@@ -18,7 +18,7 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.04) # m/cell
+        self.declare_parameter("grid_resolution", 0.03) # m/cell
         # LaserScan input topic. Default assumes an upstream scan preprocessor node.
         self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
         # If true, the incoming LaserScan is assumed to already be filtered upstream.
