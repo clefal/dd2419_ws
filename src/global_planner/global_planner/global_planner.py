@@ -646,7 +646,7 @@ class GlobalPlannerNode(Node):
         # if self._replan_t0 is not None:
         #     self.get_logger().info(f"replan check elapsed: {(time.perf_counter() - self._replan_t0) * 1000.0:.1f} ms")
         if path_valid:
-            self.get_logger().info("Current global path is valid. --> no replanning")
+            #self.get_logger().info("Current global path is valid. --> no replanning")
             self._replan_in_progress = False
             return
 

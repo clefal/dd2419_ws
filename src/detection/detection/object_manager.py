@@ -225,9 +225,7 @@ class ObjectManager(Node):
 
         if self.check_similarity(obj) == 0:  # if object is similar to zero objects then add it to the list
             self.object_list.append(obj)
-            self.get_logger().info(
-                f'New {obj.type} detected: id={obj.id}, x={obj.last_x:.2f}, y={obj.last_y:.2f}'
-            )
+            #self.get_logger().info(f'New {obj.type} detected: id={obj.id}, x={obj.last_x:.2f}, y={obj.last_y:.2f}')
         
 # -------------------------
 
