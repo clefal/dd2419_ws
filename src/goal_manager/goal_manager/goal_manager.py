@@ -59,6 +59,7 @@ class GoalManager(Node):
         self._pending_target_reason = None
         self._pending_box_reason = None
         self._pending_startup_check = False
+        self._search_retarget_pending = False
 
 
 
@@ -90,6 +91,7 @@ class GoalManager(Node):
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
         self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
         self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
+        self.create_subscription(OccupancyGrid, 'map/exploration_grid', self.exploration_grid_callback, 10)
 
         self.cli_goals_available = self.create_client(GoalsAvailable, 'object_manager/goals_available')
         while not self.cli_goals_available.wait_for_service(timeout_sec=1.0):
@@ -120,6 +122,7 @@ class GoalManager(Node):
 
         self._initial_goal_dispatched = False
         self._startup_timer = self.create_timer(0.5, self.try_startup)
+        self._search_retarget_timer = self.create_timer(0.5, self.search_retarget_timer_callback)
     
 
         self._waiting_for_result = False
@@ -145,7 +148,7 @@ class GoalManager(Node):
                 if self._active_search_goal is not None:
                     self._explorer.note_waypoint_result(self._active_search_goal, msg.data)
                     self._active_search_goal = None
-                self.publish_next_search_goal()
+                self.request_new_target(reason='search_retarget')
             elif not self.manual_goal and self._state == AutoState.APPROACH_OBJECT_COARSE:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Coarse object approach reached. Starting final approach.')
@@ -262,10 +265,19 @@ class GoalManager(Node):
 
 
     def request_new_target(self, reason: str = 'unspecified'):
+        if reason == 'search_retarget':
+            if self._search_retarget_pending:
+                return
+            self._search_retarget_pending = True
+
         robot_xy = self.get_robot_xy()
         if robot_xy is None:
             self.get_logger().warn(f'Cannot request new target ({reason}): robot pose unavailable.')
-            if reason in ('startup', 'after_drop', 'search_retarget'):
+            if reason == 'search_retarget':
+                self._search_retarget_pending = False
+                if self._state == AutoState.SEARCH and not self._waiting_for_result:
+                    self.publish_next_search_goal()
+            elif reason in ('startup', 'after_drop'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -277,11 +289,16 @@ class GoalManager(Node):
 
 
     def goals_available_response_callback(self, future):
+        reason = self._pending_target_reason
         try:
             res = future.result()
         except Exception as e:
             self.get_logger().error(f'goals_available call failed: {e}')
-            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+            if reason == 'search_retarget':
+                self._search_retarget_pending = False
+                if self._state == AutoState.SEARCH and not self._waiting_for_result:
+                    self.publish_next_search_goal()
+            elif reason in ('startup', 'after_drop'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -290,7 +307,11 @@ class GoalManager(Node):
         self.get_logger().info(f'Goals available service returned: {res.goals_available}')
 
         if not res.goals_available:
-            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+            if reason == 'search_retarget':
+                self._search_retarget_pending = False
+                if self._state == AutoState.SEARCH and not self._waiting_for_result:
+                    self.publish_next_search_goal()
+            elif reason in ('startup', 'after_drop'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -298,6 +319,8 @@ class GoalManager(Node):
         robot_xy = self.get_robot_xy()
         if robot_xy is None:
             self.get_logger().warn('Robot pose unavailable after goals_available response.')
+            if reason == 'search_retarget':
+                self._search_retarget_pending = False
             return
 
         req = GetClosestCube.Request()
@@ -307,11 +330,16 @@ class GoalManager(Node):
         future.add_done_callback(self.get_closest_cube_response_callback)
 
     def get_closest_cube_response_callback(self, future):
+        reason = self._pending_target_reason
         try:
             res = future.result()
         except Exception as e:
             self.get_logger().error(f'get_closest_cube Service call failed: {e}')
-            if self._pending_target_reason in ('startup', 'after_drop', 'search_retarget'):
+            if reason == 'search_retarget':
+                self._search_retarget_pending = False
+                if self._state == AutoState.SEARCH and not self._waiting_for_result:
+                    self.publish_next_search_goal()
+            elif reason in ('startup', 'after_drop'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -320,6 +348,7 @@ class GoalManager(Node):
         self._target_id = res.obj_id
         self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
 
+        self._search_retarget_pending = False
         self._active_search_goal = None
         self._state = AutoState.APPROACH_OBJECT_COARSE
         self.publish_goal(res.obj_x, res.obj_y, 0.0)
@@ -420,7 +449,24 @@ class GoalManager(Node):
     def planning_grid_callback(self, msg: OccupancyGrid):
         self._explorer.set_planning_grid(msg)
 
+    def exploration_grid_callback(self, msg: OccupancyGrid):
+        if msg.header.frame_id and msg.header.frame_id != self._fixed_frame:
+            self.get_logger().warn(
+                f'Exploration grid in frame "{msg.header.frame_id}", expected "{self._fixed_frame}". Ignoring.'
+            )
+            return
+        self._explorer.set_exploration_grid(msg)
 
+    def search_retarget_timer_callback(self):
+        if self.manual_goal:
+            return
+        if self._state != AutoState.SEARCH:
+            self._search_retarget_pending = False
+            return
+        if self._search_retarget_pending:
+            return
+
+        self.request_new_target(reason='search_retarget')
 
     def get_robot_xy(self):
         try:
