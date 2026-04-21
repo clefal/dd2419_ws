@@ -102,6 +102,7 @@ class Controller(Node):
         self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
+        self._final_approach_enabled_wall = None
         self.final_approach_start_delay_s = 0.5
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
@@ -423,10 +424,9 @@ class Controller(Node):
 
         if self._final_approach_enabled:
 
-            final_approach_enabled_wall = None
-            if final_approach_enabled_wall is None:
-                final_approach_enabled_wall = time.time()
-            if (time.time() - final_approach_enabled_wall) < self.final_approach_start_delay_s:
+            if self._final_approach_enabled_wall is None:
+                self._final_approach_enabled_wall = time.time()
+            if (time.time() - self._final_approach_enabled_wall) < self.final_approach_start_delay_s:
                 self.stop()
                 return
 
