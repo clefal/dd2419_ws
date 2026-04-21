@@ -28,6 +28,7 @@ class PlannerConfig:
     occ_cost_scale: float
     max_planning_time_ms: int
     path_smoothing_enabled: bool
+    path_smoothing_max_shortcut_m: float
     workspace_border_width: float
     robot_radius: float
     inflation_margin: float
@@ -261,10 +262,17 @@ class PathManager:
 
         smoothed: List[GridIndex] = [path_idx[0]]
         anchor_i = 0
+        max_shortcut_cells = int(
+            math.ceil(max(0.0, self._config.path_smoothing_max_shortcut_m) / meta.resolution)
+        )
 
         while anchor_i < len(path_idx) - 1:
             next_i = anchor_i + 1
-            for candidate_i in range(len(path_idx) - 1, anchor_i, -1):
+            furthest_i = len(path_idx) - 1
+            if max_shortcut_cells > 0:
+                furthest_i = min(furthest_i, anchor_i + max_shortcut_cells)
+
+            for candidate_i in range(furthest_i, anchor_i, -1):
                 if self.segment_is_traversable(path_idx[anchor_i], path_idx[candidate_i], occ, meta):
                     next_i = candidate_i
                     break

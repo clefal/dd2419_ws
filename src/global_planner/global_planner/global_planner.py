@@ -35,6 +35,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("occ_cost_scale", 6.0)       # penalty factor for soft costs
         self.declare_parameter("max_planning_time_ms", 60000) # soft guard for very large maps
         self.declare_parameter("path_smoothing_enabled", True)
+        self.declare_parameter("path_smoothing_max_shortcut_m", 0.1)
         self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("coarse_object_standoff", 0.65)
         self.declare_parameter("robot_radius", 0.02)
@@ -156,6 +157,7 @@ class GlobalPlannerNode(Node):
             occ_cost_scale=self.get_parameter("occ_cost_scale").get_parameter_value().double_value,
             max_planning_time_ms=self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value,
             path_smoothing_enabled=self.get_parameter("path_smoothing_enabled").get_parameter_value().bool_value,
+            path_smoothing_max_shortcut_m=self.get_parameter("path_smoothing_max_shortcut_m").get_parameter_value().double_value,
             workspace_border_width=self.get_parameter("workspace_border_width").get_parameter_value().double_value,
             robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
             inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
