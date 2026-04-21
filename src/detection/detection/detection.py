@@ -37,7 +37,7 @@ class Detection(Node):
         self.declare_parameter("buffer_size", 3)
         self.declare_parameter("max_general_counter", 5000)
         self.declare_parameter("obstacle_distance_m", 0.15)
-        self.declare_parameter("occupancy_threshold", 51) # threshold used for occupancy grid check
+        self.declare_parameter("occupancy_threshold", 90) # threshold used for occupancy grid check
 
         # Topic params
         self.declare_parameter("input_cloud_topic", "/realsense/depth/color/points")
@@ -119,7 +119,7 @@ class Detection(Node):
 
         # geometrical filter
         # these thresholds are applied in the camera frame, that is why handling them can be counter intuitive
-        max_dist = 1.5
+        max_dist = 2
         max_height = 0.05   
         min_height = 0.08
         geom_mask = ((points[:,2] < max_dist) & (points[:,1] > max_height) & (points[:,1] < min_height))
@@ -494,7 +494,7 @@ class Detection(Node):
         # medium trehsholds
         tol_red = 0.03   
         tol_green = 0.01
-        tol_blue = 0.015
+        tol_blue = 0.018
         tol_box = 0.02  
 
         # strict thresholds

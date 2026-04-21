@@ -33,7 +33,6 @@ class PlannerConfig:
     soft_halo_m: float
     cube_size: float
     box_size: float
-    box_goal_radius: float
 
 
 @dataclass(frozen=True)
@@ -243,11 +242,7 @@ class PathManager:
 
         return True
 
-    def is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        for box_xy in self._boxes:
-            if math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= self._config.box_goal_radius:
-                return True
-        return False
+
 
     def build_planning_grid(
         self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
@@ -591,7 +586,7 @@ class PathManager:
     def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
         v = occ.data[self.idx_to_flat(gx, gy, meta)]
         if v < 0:
-            return 0.5 * self._config.occ_cost_scale
+            return 0.2 * self._config.occ_cost_scale
         return (float(v) / 100.0) * self._config.occ_cost_scale
 
     def path_total_cost(self, path_idx: List[GridIndex], occ: OccupancyGrid, meta: GridMeta) -> float:

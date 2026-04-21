@@ -19,7 +19,7 @@ class Mapping(Node):
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
         self.declare_parameter("exploration_grid_topic", "/map/exploration_grid")
-        self.declare_parameter("grid_resolution", 0.02) # m/cell
+        self.declare_parameter("grid_resolution", 0.04) # m/cell
 
         self.declare_parameter("exploration_grid_resolution", 0.10) # m/cell
         self.declare_parameter("min_exploration_view_angle", -30) #deg   
