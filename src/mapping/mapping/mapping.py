@@ -227,7 +227,7 @@ class Mapping(Node):
             resolution=res_exploration,
             origin=[origin_x_exploration, origin_y_exploration],
             l_occ=self.log_odds_increse_occ,
-            l_free=self.log_odds_decrease_free,
+            l_free=-0.9,
             l_min=self.log_odds_min,
             l_max=self.log_odds_max,
         )
