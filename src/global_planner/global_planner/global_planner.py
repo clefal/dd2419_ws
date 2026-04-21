@@ -33,7 +33,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("w_heuristic", 1.5)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
         self.declare_parameter("occ_lethal", 99)            # >= lethal => not traversable (0..100) default: 70
         self.declare_parameter("occ_cost_scale", 6.0)       # penalty factor for soft costs
-        self.declare_parameter("max_planning_time_ms", 10000) # soft guard for very large maps
+        self.declare_parameter("max_planning_time_ms", 60000) # soft guard for very large maps
         self.declare_parameter("workspace_border_width", 0.05)
         self.declare_parameter("coarse_object_standoff", 0.65)
         self.declare_parameter("robot_radius", 0.02)
