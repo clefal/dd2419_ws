@@ -345,10 +345,18 @@ class GoalManager(Node):
             return
 
         self._target_ = (res.obj_x, res.obj_y)
-        self._target_id = res.obj_id
         self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
 
         self._search_retarget_pending = False
+
+        if (
+            reason == 'search_retarget'
+            and self._state == AutoState.APPROACH_OBJECT_COARSE
+            and self._target_id == res.obj_id
+        ):
+            return
+
+        self._target_id = res.obj_id
         self._active_search_goal = None
         self._state = AutoState.APPROACH_OBJECT_COARSE
         self.publish_goal(res.obj_x, res.obj_y, 0.0)
@@ -460,7 +468,7 @@ class GoalManager(Node):
     def search_retarget_timer_callback(self):
         if self.manual_goal:
             return
-        if self._state != AutoState.SEARCH:
+        if self._state not in (AutoState.SEARCH, AutoState.APPROACH_OBJECT_COARSE):
             self._search_retarget_pending = False
             return
         if self._search_retarget_pending:
