@@ -103,7 +103,7 @@ class Controller(Node):
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
         self._final_approach_enabled_wall = None
-        self.final_approach_start_delay_s = 0.5
+        self.final_approach_start_delay_s = 1.5
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
