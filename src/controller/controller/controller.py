@@ -94,7 +94,7 @@ class Controller(Node):
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
 
-        self.declare_parameter('final_nominal_speed', 0.1)                # duty-equivalent for close approach
+        self.declare_parameter('final_nominal_speed', 0.12)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
