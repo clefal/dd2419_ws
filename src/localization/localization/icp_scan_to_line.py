@@ -2,6 +2,7 @@
 
 import math
 import time
+import struct
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from collections import deque
@@ -11,6 +12,7 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import PointCloud2, PointField
 from geometry_msgs.msg import Point, TransformStamped
 from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster
@@ -62,6 +64,33 @@ def transform_points(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
     homog = np.hstack([pts, np.ones((pts.shape[0], 1), dtype=float)])
     out = (T @ homog.T).T
     return out[:, :2]
+
+
+def points_to_pointcloud2(points: np.ndarray, frame_id: str, stamp) -> PointCloud2:
+    msg = PointCloud2()
+    msg.header.stamp = stamp
+    msg.header.frame_id = frame_id
+    msg.height = 1
+    msg.width = int(points.shape[0])
+    msg.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+    ]
+    msg.is_bigendian = False
+    msg.point_step = 12
+    msg.row_step = msg.point_step * msg.width
+    msg.is_dense = True
+
+    if points.shape[0] == 0:
+        msg.data = b""
+        return msg
+
+    buf = bytearray(msg.row_step)
+    for i, p in enumerate(points):
+        struct.pack_into("<fff", buf, i * msg.point_step, float(p[0]), float(p[1]), 0.0)
+    msg.data = bytes(buf)
+    return msg
 
 
 def tfmsg_to_matrix(tf_msg: TransformStamped) -> np.ndarray:
@@ -472,6 +501,8 @@ class IcpScanToLine(Node):
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         # Debug visualization topic for publishing the current map lines.
         self.declare_parameter("map_lines_topic", "/localization/map_lines")
+        # Debug point cloud topic for publishing stacked scan points used by ICP.
+        self.declare_parameter("stacked_points_topic", "/localization/stacked_points")
         # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link_temp")
         # Odometry frame used as the short-term motion prior.
@@ -483,7 +514,7 @@ class IcpScanToLine(Node):
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 4)
+        self.declare_parameter("stack_scans", 5)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -493,7 +524,7 @@ class IcpScanToLine(Node):
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
-        self.declare_parameter("line_min_length", 0.40)
+        self.declare_parameter("line_min_length", 0.15)
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
@@ -545,6 +576,7 @@ class IcpScanToLine(Node):
         self.scan_topic = self.get_parameter("scan_topic").value
         self.is_turning_topic = self.get_parameter("is_turning_topic").value
         self.map_lines_topic = self.get_parameter("map_lines_topic").value
+        self.stacked_points_topic = self.get_parameter("stacked_points_topic").value
         self.base_frame = self.get_parameter("base_frame").value
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
@@ -601,6 +633,7 @@ class IcpScanToLine(Node):
         self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
         self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 10)
+        self.stacked_points_pub = self.create_publisher(PointCloud2, self.stacked_points_topic, 10)
 
         self.get_logger().info(
             f"scan_to_line_slam started | scan_topic={self.scan_topic}, "
@@ -813,6 +846,10 @@ class IcpScanToLine(Node):
 
         self.map_lines_pub.publish(markers)
 
+    def publish_stacked_points(self, points_laser: np.ndarray, laser_frame: str, stamp) -> None:
+        cloud_msg = points_to_pointcloud2(points_laser, laser_frame, stamp)
+        self.stacked_points_pub.publish(cloud_msg)
+
     def seed_map_from_scan(self, points_laser: np.ndarray, T_map_laser: np.ndarray) -> None:
         raw_lines = extract_lines_from_scan(
             points_laser,
@@ -922,6 +959,7 @@ class IcpScanToLine(Node):
             return
 
         # Robust ICP
+        self.publish_stacked_points(stacked_points_laser, laser_frame, stamp)
         result = icp_point_to_line_robust(
             stacked_points_laser,
             self.map_lines,
