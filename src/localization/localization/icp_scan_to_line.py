@@ -2,7 +2,6 @@
 
 import math
 import time
-import struct
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from collections import deque
@@ -61,9 +60,7 @@ def invert_transform(T: np.ndarray) -> np.ndarray:
 def transform_points(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
     if pts.shape[0] == 0:
         return pts
-    homog = np.hstack([pts, np.ones((pts.shape[0], 1), dtype=float)])
-    out = (T @ homog.T).T
-    return out[:, :2]
+    return pts @ T[:2, :2].T + T[:2, 2]
 
 
 def points_to_pointcloud2(points: np.ndarray, frame_id: str, stamp) -> PointCloud2:
@@ -86,10 +83,10 @@ def points_to_pointcloud2(points: np.ndarray, frame_id: str, stamp) -> PointClou
         msg.data = b""
         return msg
 
-    buf = bytearray(msg.row_step)
-    for i, p in enumerate(points):
-        struct.pack_into("<fff", buf, i * msg.point_step, float(p[0]), float(p[1]), 0.0)
-    msg.data = bytes(buf)
+    xyz = np.empty((points.shape[0], 3), dtype=np.float32)
+    xyz[:, :2] = points.astype(np.float32, copy=False)
+    xyz[:, 2] = 0.0
+    msg.data = xyz.tobytes()
     return msg
 
 
@@ -175,6 +172,16 @@ class IcpResult:
     time: float
 
 
+@dataclass
+class LineMapCache:
+    p1: np.ndarray
+    q: np.ndarray
+    n: np.ndarray
+    d: np.ndarray
+    mid: np.ndarray
+    length: np.ndarray
+
+
 # =========================
 # Line segment creation
 # =========================
@@ -211,30 +218,31 @@ def scan_to_points(
     range_max_clip: Optional[float] = None,
     stride: int = 1
 ) -> np.ndarray:
-    pts = []
     rmax = scan.range_max if range_max_clip is None else min(scan.range_max, range_max_clip)
-
-    angle = scan.angle_min
-    for i, r in enumerate(scan.ranges):
-        if i % stride != 0:
-            angle += scan.angle_increment
-            continue
-
-        if not math.isfinite(r):
-            angle += scan.angle_increment
-            continue
-
-        if r < max(scan.range_min, range_min_clip) or r > rmax:
-            angle += scan.angle_increment
-            continue
-
-        pts.append([r * math.cos(angle), r * math.sin(angle)])
-        angle += scan.angle_increment
-
-    if len(pts) == 0:
+    ranges = np.asarray(scan.ranges, dtype=float)
+    if ranges.size == 0:
         return np.zeros((0, 2), dtype=float)
 
-    return np.array(pts, dtype=float)
+    valid = np.isfinite(ranges)
+    valid &= ranges >= max(scan.range_min, range_min_clip)
+    valid &= ranges <= rmax
+
+    if stride > 1:
+        stride_mask = np.zeros(ranges.shape[0], dtype=bool)
+        stride_mask[::stride] = True
+        valid &= stride_mask
+
+    if not np.any(valid):
+        return np.zeros((0, 2), dtype=float)
+
+    idx = np.nonzero(valid)[0]
+    ranges = ranges[idx]
+    angles = scan.angle_min + idx.astype(float) * scan.angle_increment
+
+    pts = np.empty((idx.shape[0], 2), dtype=float)
+    pts[:, 0] = ranges * np.cos(angles)
+    pts[:, 1] = ranges * np.sin(angles)
+    return pts
 
 # =========================
 # Split-and-merge line extraction
@@ -325,6 +333,20 @@ def extract_lines_from_scan(
     return segments
 
 
+def build_line_map_cache(map_lines: List[LineSegment]) -> Optional[LineMapCache]:
+    if len(map_lines) == 0:
+        return None
+
+    return LineMapCache(
+        p1=np.array([line.p1 for line in map_lines], dtype=float),
+        q=np.array([line.q for line in map_lines], dtype=float),
+        n=np.array([line.n for line in map_lines], dtype=float),
+        d=np.array([line.d for line in map_lines], dtype=float),
+        mid=np.array([line.mid for line in map_lines], dtype=float),
+        length=np.array([line.length for line in map_lines], dtype=float),
+    )
+
+
 # =========================
 # Point-to-line association
 # =========================
@@ -379,7 +401,10 @@ def icp_point_to_line_robust(
     max_perp_dist: float = 0.12,
     huber_delta: float = 0.05,
     max_step_translation: float = 0.05,
-    max_step_rotation_deg: float = 2.0
+    max_step_rotation_deg: float = 2.0,
+    line_cache: Optional[LineMapCache] = None,
+    endpoint_margin: float = 0.08,
+    local_radius: float = 4.0,
 ) -> IcpResult:
     init_time = time.time()
     if points_laser.shape[0] == 0 or len(map_lines) == 0:
@@ -389,7 +414,8 @@ def icp_point_to_line_robust(
             mean_abs_residual=float("inf"),
             median_abs_residual=float("inf"),
             converged=False,
-            iterations=0
+            iterations=0,
+            time=(time.time() - init_time) * 1000
         )
 
     x, y, th = matrix_to_pose(T_init)
@@ -399,6 +425,19 @@ def icp_point_to_line_robust(
     final_median_abs = float("inf")
     converged = False
     max_step_rot = math.radians(max_step_rotation_deg)
+    I3 = np.eye(3, dtype=float)
+    cache = line_cache if line_cache is not None else build_line_map_cache(map_lines)
+    if cache is None:
+        return IcpResult(
+            T=T_init.copy(),
+            num_corr=0,
+            mean_abs_residual=float("inf"),
+            median_abs_residual=float("inf"),
+            converged=False,
+            iterations=0,
+            time=(time.time() - init_time) * 1000
+        )
+    local_radius_sq = local_radius * local_radius
 
     for it in range(max_iters):
         c = math.cos(th)
@@ -406,44 +445,49 @@ def icp_point_to_line_robust(
         R = np.array([[c, -s], [s, c]], dtype=float)
         t = np.array([x, y], dtype=float)
 
-        J_rows = []
-        e_rows = []
+        Rp_all = points_laser @ R.T
+        p_map_all = Rp_all + t
 
-        for p in points_laser:
-            Rp = R @ p
-            p_map = Rp + t
+        rel_mid = p_map_all[:, None, :] - cache.mid[None, :, :]
+        mid_dist_sq = np.einsum("ijk,ijk->ij", rel_mid, rel_mid)
 
-            line = closest_line_for_point(
-                p_map,
-                map_lines,
-                max_perp_dist=max_perp_dist
-            )
-            if line is None:
-                continue
+        rel_p1 = p_map_all[:, None, :] - cache.p1[None, :, :]
+        along = np.einsum("ijk,jk->ij", rel_p1, cache.d)
 
-            e = float(line.n @ (p_map - line.q))
-            dtheta = np.array([-Rp[1], Rp[0]], dtype=float)
-            J = np.array([
-                line.n[0],
-                line.n[1],
-                float(line.n @ dtheta)
-            ], dtype=float)
+        rel_q = p_map_all[:, None, :] - cache.q[None, :, :]
+        perp_signed = np.einsum("ijk,jk->ij", rel_q, cache.n)
+        perp_abs = np.abs(perp_signed)
 
-            J_rows.append(J)
-            e_rows.append(e)
+        valid = mid_dist_sq <= local_radius_sq
+        valid &= along >= -endpoint_margin
+        valid &= along <= (cache.length[None, :] + endpoint_margin)
+        valid &= perp_abs <= max_perp_dist
 
-        final_num_corr = len(J_rows)
+        scores = np.where(valid, perp_abs, np.inf)
+        best_idx = np.argmin(scores, axis=1)
+        point_idx = np.arange(points_laser.shape[0])
+        matched = np.isfinite(scores[point_idx, best_idx])
+
+        final_num_corr = int(np.count_nonzero(matched))
         if final_num_corr < min_corr:
             break
 
-        J = np.vstack(J_rows)
-        e = np.array(e_rows, dtype=float)
+        sel_points = point_idx[matched]
+        sel_lines = best_idx[matched]
+        matched_Rp = Rp_all[matched]
+        matched_n = cache.n[sel_lines]
+        e = perp_signed[sel_points, sel_lines]
+
+        dtheta = np.column_stack((-matched_Rp[:, 1], matched_Rp[:, 0]))
+        J = np.empty((final_num_corr, 3), dtype=float)
+        J[:, :2] = matched_n
+        J[:, 2] = np.einsum("ij,ij->i", matched_n, dtheta)
 
         abs_e = np.abs(e)
         final_mean_abs = float(np.mean(abs_e))
         final_median_abs = float(np.median(abs_e))
 
-        W = np.array([huber_weight(v, huber_delta) for v in abs_e], dtype=float)
+        W = np.where(abs_e <= huber_delta, 1.0, huber_delta / np.maximum(abs_e, 1e-12))
         sqrtW = np.sqrt(W)
 
         Jw = J * sqrtW[:, None]
@@ -451,7 +495,7 @@ def icp_point_to_line_robust(
 
         H = Jw.T @ Jw
         g = Jw.T @ ew
-        H += 1e-6 * np.eye(3)
+        H += 1e-6 * I3
 
         try:
             dx = -np.linalg.solve(H, g)
@@ -622,6 +666,7 @@ class IcpScanToLine(Node):
         self.mto_initialized = False
 
         self.map_lines: List[LineSegment] = []
+        self.line_map_cache: Optional[LineMapCache] = None
         self.initialized = False
 
         self.scan_buffer = deque(maxlen=max(0, self.stack_scans - 1))
@@ -807,6 +852,8 @@ class IcpScanToLine(Node):
         if len(self.map_lines) > self.map_max_lines:
             self.map_lines = self.map_lines[-self.map_max_lines:]
 
+        self.line_map_cache = build_line_map_cache(self.map_lines)
+
     def publish_map_lines_markers(self, stamp) -> None:
         markers = MarkerArray()
 
@@ -970,7 +1017,8 @@ class IcpScanToLine(Node):
             max_perp_dist=self.icp_max_perp_dist,
             huber_delta=self.icp_huber_delta,
             max_step_translation=self.icp_accept_max_translation,
-            max_step_rotation_deg=self.icp_accept_max_rotation_deg
+            max_step_rotation_deg=self.icp_accept_max_rotation_deg,
+            line_cache=self.line_map_cache,
         )
 
         accepted = self.accept_icp_result(T_map_laser_init, result)
