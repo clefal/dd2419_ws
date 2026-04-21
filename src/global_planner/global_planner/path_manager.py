@@ -33,7 +33,6 @@ class PlannerConfig:
     soft_halo_m: float
     cube_size: float
     box_size: float
-    box_goal_radius: float
 
 
 @dataclass(frozen=True)

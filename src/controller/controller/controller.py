@@ -81,7 +81,7 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.15)        # m
+        self.declare_parameter('lookahead_distance', 0.19)        # m
         self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
         self.declare_parameter('max_angular_speed', 0.15)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
