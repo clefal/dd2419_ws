@@ -207,23 +207,6 @@ def scan_to_points(
 
     return np.array(pts, dtype=float)
 
-def remove_isolated_points_ordered(points: np.ndarray, neighbor_dist_thresh: float = 0.12) -> np.ndarray:
-    if points.shape[0] < 3:
-        return points
-
-    keep = np.zeros(points.shape[0], dtype=bool)
-    keep[0] = np.linalg.norm(points[1] - points[0]) < neighbor_dist_thresh
-    keep[-1] = np.linalg.norm(points[-1] - points[-2]) < neighbor_dist_thresh
-
-    for i in range(1, points.shape[0] - 1):
-        d_prev = np.linalg.norm(points[i] - points[i - 1])
-        d_next = np.linalg.norm(points[i] - points[i + 1])
-        if d_prev < neighbor_dist_thresh or d_next < neighbor_dist_thresh:
-            keep[i] = True
-
-    return points[keep]
-
-
 # =========================
 # Split-and-merge line extraction
 # =========================
@@ -637,8 +620,6 @@ class IcpScanToLine(Node):
         self.declare_parameter("range_max_clip", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
         self.declare_parameter("stack_scans", 4)
-        # Remove points whose immediate scan-order neighbors are both farther than this distance.
-        self.declare_parameter("neighbor_dist_thresh", 0.10)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -706,7 +687,6 @@ class IcpScanToLine(Node):
 
         self.range_max_clip = float(self.get_parameter("range_max_clip").value)
         self.stack_scans = max(1, int(self.get_parameter("stack_scans").value))
-        self.neighbor_dist_thresh = float(self.get_parameter("neighbor_dist_thresh").value)
 
         self.cluster_jump_thresh = float(self.get_parameter("cluster_jump_thresh").value)
         self.split_thresh = float(self.get_parameter("split_thresh").value)
@@ -811,13 +791,11 @@ class IcpScanToLine(Node):
 
     def preprocess_scan(self, scan: LaserScan) -> Tuple[LaserScan, np.ndarray]:
         # Scan-level filtering is done upstream (see `filter_scan` node). Here we only
-        # convert to points and apply the point-neighborhood filter.
+        # convert the already preprocessed scan into points.
         points = scan_to_points(
             scan,
             range_max_clip=self.range_max_clip,
         )
-
-        points = remove_isolated_points_ordered(points, neighbor_dist_thresh=self.neighbor_dist_thresh)
         return scan, points
 
     def build_stacked_points(self, current_points_laser: np.ndarray, T_odom_laser_current: np.ndarray) -> np.ndarray:

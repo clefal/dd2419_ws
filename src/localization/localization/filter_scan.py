@@ -4,6 +4,12 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 import numpy as np
 
+
+def neighbor_distance(r1: float, r2: float, cos_dtheta: float) -> float:
+    d2 = r1 * r1 + r2 * r2 - 2.0 * r1 * r2 * cos_dtheta
+    return math.sqrt(max(d2, 0.0))
+
+
 class ScanPreprocessor(Node):
     def __init__(self):
         super().__init__('scan_preprocessor')
@@ -22,7 +28,7 @@ class ScanPreprocessor(Node):
         # Reject a beam if it differs from both adjacent beams by more than this range jump.
         self.declare_parameter("range_jump_thresh", 0.20)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.
-        self.declare_parameter("neighbor_dist_thresh", 0.10)
+        self.declare_parameter("neighbor_dist_thresh", 0.05)
 
         self.input_topic = self.get_parameter('input_topic').value
         self.output_topic = self.get_parameter('output_topic').value
@@ -55,6 +61,12 @@ class ScanPreprocessor(Node):
         filtered_ranges = self.median_filter_ranges(scan.ranges, kernel_size=self.median_kernel_size)
         filtered_ranges = self.reject_range_spikes(filtered_ranges, jump_thresh=self.range_jump_thresh)
 
+        filtered_ranges = self.reject_isolated_points(
+            filtered_ranges,
+            scan,
+            neighbor_dist_thresh=self.neighbor_dist_thresh,
+        )
+
         filtered_ranges[
             np.logical_and(np.isfinite(filtered_ranges), filtered_ranges > self.range_max_filter_scan)
         ] = np.inf
@@ -80,6 +92,47 @@ class ScanPreprocessor(Node):
                     vals.append(v)
             out[i] = float(np.median(vals)) if vals else np.nan
 
+        return out
+
+    def reject_isolated_points(
+        self,
+        ranges,
+        scan: LaserScan,
+        neighbor_dist_thresh: float = 0.12,
+    ) -> np.ndarray:
+        out = np.array(ranges, dtype=float)
+        if out.shape[0] < 3 or neighbor_dist_thresh <= 0.0:
+            return out
+
+        max_valid_range = min(scan.range_max, self.range_max_clip, self.range_max_filter_scan)
+        valid = np.logical_and.reduce((
+            np.isfinite(out),
+            out >= max(scan.range_min, 0.05),
+            out <= max_valid_range,
+        ))
+
+        keep = np.zeros(out.shape[0], dtype=bool)
+        cos_dtheta = math.cos(scan.angle_increment)
+
+        if valid[0] and valid[1]:
+            keep[0] = neighbor_distance(out[0], out[1], cos_dtheta) < neighbor_dist_thresh
+
+        if valid[-1] and valid[-2]:
+            keep[-1] = neighbor_distance(out[-1], out[-2], cos_dtheta) < neighbor_dist_thresh
+
+        for i in range(1, out.shape[0] - 1):
+            if not valid[i]:
+                continue
+
+            close_prev = valid[i - 1] and (
+                neighbor_distance(out[i], out[i - 1], cos_dtheta) < neighbor_dist_thresh
+            )
+            close_next = valid[i + 1] and (
+                neighbor_distance(out[i], out[i + 1], cos_dtheta) < neighbor_dist_thresh
+            )
+            keep[i] = close_prev or close_next
+
+        out[np.logical_and(valid, ~keep)] = np.nan
         return out
 
 
