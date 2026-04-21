@@ -912,6 +912,7 @@ class IcpScanToLine(Node):
         self.tf_broadcaster.sendTransform(tf_msg)
 
     def scan_callback(self, scan: LaserScan) -> None:
+        init_time = time.time()
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
             return
@@ -1025,6 +1026,9 @@ class IcpScanToLine(Node):
         else:
             # Reject frame, keep previous map->odom
             pass
+
+        finish_time = time.time()
+        self.get_logger().info(f"ICP time: {(finish_time - init_time) * 1000.0:.2f}ms")
 
         self.publish_map_to_odom(stamp)
         self.publish_map_lines_markers(stamp)
