@@ -27,6 +27,7 @@ class PlannerConfig:
     occ_lethal: int
     occ_cost_scale: float
     max_planning_time_ms: int
+    path_smoothing_enabled: bool
     workspace_border_width: float
     robot_radius: float
     inflation_margin: float
@@ -152,6 +153,7 @@ class PathManager:
         path_idx = self.weighted_a_star(start_idx, goal_idx, planning_grid, self._meta)
         if path_idx is None or len(path_idx) == 0:
             return None
+        path_idx = self.smooth_path(path_idx, planning_grid, self._meta)
 
         return PlanResult(
             path_idx=path_idx,
@@ -196,6 +198,7 @@ class PathManager:
                 continue
 
             pcost = self.path_total_cost(path_idx, planning_grid, self._meta)
+            path_idx = self.smooth_path(path_idx, planning_grid, self._meta)
             if best_cost is None or pcost < best_cost:
                 best_cost = pcost
                 best_path_idx = path_idx
@@ -234,10 +237,72 @@ class PathManager:
                 start_i = self._nearest_path_index(path_idx, robot_idx)
                 start_i = max(0, start_i - 1)
 
-        for gx, gy in path_idx[start_i:]:
+        previous = path_idx[start_i]
+        for current in path_idx[start_i:]:
+            gx, gy = current
             if not (0 <= gx < self._meta.width and 0 <= gy < self._meta.height):
                 return False
             if not self.cell_is_traversable(gx, gy, self._planning_grid, self._meta):
+                return False
+            if not self.segment_is_traversable(previous, current, self._planning_grid, self._meta):
+                return False
+            previous = current
+
+        return True
+
+    def smooth_path(
+        self,
+        path_idx: List[GridIndex],
+        occ: OccupancyGrid,
+        meta: GridMeta,
+    ) -> List[GridIndex]:
+        if not self._config.path_smoothing_enabled or len(path_idx) <= 2:
+            return path_idx
+
+        smoothed: List[GridIndex] = [path_idx[0]]
+        anchor_i = 0
+
+        while anchor_i < len(path_idx) - 1:
+            next_i = anchor_i + 1
+            for candidate_i in range(len(path_idx) - 1, anchor_i, -1):
+                if self.segment_is_traversable(path_idx[anchor_i], path_idx[candidate_i], occ, meta):
+                    next_i = candidate_i
+                    break
+
+            smoothed.append(path_idx[next_i])
+            anchor_i = next_i
+
+        self._info(f"Path smoothing: {len(path_idx)} -> {len(smoothed)} waypoints")
+        return smoothed
+
+    def segment_is_traversable(
+        self,
+        start: GridIndex,
+        goal: GridIndex,
+        occ: OccupancyGrid,
+        meta: GridMeta,
+    ) -> bool:
+        x0, y0 = start
+        x1, y1 = goal
+        dx = x1 - x0
+        dy = y1 - y0
+        steps = max(abs(dx), abs(dy)) * 2
+        if steps <= 0:
+            return self.cell_is_traversable(x0, y0, occ, meta)
+
+        previous = None
+        for i in range(steps + 1):
+            t = float(i) / float(steps)
+            gx = int(round(x0 + dx * t))
+            gy = int(round(y0 + dy * t))
+            current = (gx, gy)
+            if current == previous:
+                continue
+            previous = current
+
+            if not (0 <= gx < meta.width and 0 <= gy < meta.height):
+                return False
+            if not self.cell_is_traversable(gx, gy, occ, meta):
                 return False
 
         return True

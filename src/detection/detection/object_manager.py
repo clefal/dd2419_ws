@@ -287,7 +287,7 @@ class ObjectManager(Node):
         closest_obj_y = 0.0
         closest_obj_yaw = 0.0
         for obj in self.object_list:
-            if obj.status == 'available' and obj.type != 'box' and obj.type != 'map_box':
+            if obj.status in ('available', 'isgoal') and obj.type != 'box' and obj.type != 'map_box':
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
                     closest_obj_x = obj.last_x
@@ -304,7 +304,8 @@ class ObjectManager(Node):
             for obj in self.object_list:
                 if obj.id == closest_obj_id:
                     obj.status = 'isgoal'
-                    break
+                elif obj.status == 'isgoal' and obj.type != 'box' and obj.type != 'map_box':
+                    obj.status = 'available'
 
         res.obj_id = closest_obj_id
         res.obj_x = closest_obj_x
