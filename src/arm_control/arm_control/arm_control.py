@@ -414,9 +414,9 @@ class ArmControlNode(Node):
 
     def publish_result(self, text: str):
         msg = String()
-        msg.data = str(text.name)
+        msg.data = text.value
         self.result_pub.publish(msg)
-        self.get_logger().info(f'Arm result: {text}')
+        self.get_logger().info(f'Arm result: {text.value}')
 
 def main():
     rclpy.init()
