@@ -276,11 +276,11 @@ class RandomWaypointExplorer:
 
     @staticmethod
     def _is_unknown_exploration_value(value: int) -> bool:
-        return value < 0
+        return value < 0 or 45 <= value <= 55
 
     @staticmethod
     def _is_known_exploration_value(value: int) -> bool:
-        return value >= 0
+        return 0 <= value < 45
 
     @staticmethod
     def _grid_to_world(gx: int, gy: int, meta: GridMeta) -> Tuple[float, float]:
