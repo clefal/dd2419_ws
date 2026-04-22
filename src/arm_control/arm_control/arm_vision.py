@@ -111,8 +111,13 @@ class ArmVisionNode(Node):
             result = String()
             result.data = HOLDING_FAIL_MSG
             self.result_pub.publish(result)
+            self.get_logger().info("Timeout triggered")
             self.holding = False
-        self.holding_timer.cancel()
+
+        if self.holding_timer is not None:
+            self.holding_timer.cancel()
+            self.holding_timer = None
+            self.get_logger().info("Timer reset")
 
     def image_callback_color(self, msg: Image):
         frame = self._ros_image_to_bgr(msg)
@@ -155,7 +160,7 @@ class ArmVisionNode(Node):
                     msg.data = HOLDING_SUCCESS_MSG
                     self.result_pub.publish(msg)
                     self.get_logger().info("Holding cube!")
-                    #self.holding = False
+                    self.holding = False
 
             self.draw_detection(debug_image, detection, self.box_colors[color_name])
 
