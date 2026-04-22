@@ -52,11 +52,11 @@ def calc_max_abs_alpha(rho):
     return math.degrees(math.acos(BASE_MIN_RHO / rho))
 
 def clamp_rho(rho: float, alpha_deg: float) -> float:
-    min_rho = get_min_rho(alpha_deg, rho)
+    min_rho = get_min_rho(alpha_deg)
     return max(min_rho, min(MAX_RHO, rho))
 
 def is_rho_safe(rho: float, alpha_deg: float) -> bool:
-    min_rho = get_min_rho(alpha_deg, rho)
+    min_rho = get_min_rho(alpha_deg)
     return min_rho <= rho <= MAX_RHO
 
 def is_joint_value_in_limits(value: float, limits) -> bool:
@@ -74,7 +74,7 @@ def is_base_safe(base: float) -> bool:
 
 def inverse_kinematics_2d(rho: float, z: float, orientation_deg: float = WRIST_DOWN_ORIENTATION_DEG, alpha_deg: float = 0.0):
     if not is_rho_safe(rho, alpha_deg):
-        min_rho = get_min_rho(alpha_deg, rho)
+        min_rho = get_min_rho(alpha_deg)
         raise ValueError(f'rho {rho:.2f} outside safe range [{min_rho:.2f}, {MAX_RHO}]')
 
     orientation = math.radians(orientation_deg)
