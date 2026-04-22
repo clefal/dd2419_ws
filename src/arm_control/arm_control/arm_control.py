@@ -414,7 +414,7 @@ class ArmControlNode(Node):
 
     def publish_result(self, text: str):
         msg = String()
-        msg.data = text
+        msg.data = str(text)
         self.result_pub.publish(msg)
         self.get_logger().info(f'Arm result: {text}')
 
