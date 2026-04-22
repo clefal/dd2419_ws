@@ -154,7 +154,7 @@ class ArmControlNode(Node):
 
         if self.state == State.MOVING_TO_IDLE:
             self.transition_to(State.IDLE)
-            self.publish_result('IDLE_SUCCESS')
+            self.publish_result(Result.IDLE_SUCCESS)
             return
 
         if self.state == State.MOVING_TO_OBSERVE:
