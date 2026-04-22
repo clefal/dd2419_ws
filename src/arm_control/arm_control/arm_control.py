@@ -35,7 +35,7 @@ OPEN_GRIPPER_ANGLE = 10.0
 CLOSED_GRIPPER_ANGLE = 105.0
 BASE_CENTER_ANGLE = 120.0
 
-VISION_TOPIC = '/arm/vision/green_cube_center'
+VISION_TOPIC = '/arm/vision/cube_center'
 ACTION_TOPIC = '/arm/action'
 RESULT_TOPIC = '/arm/result'
 CONTROL_TOPIC = '/arm/control'
@@ -43,9 +43,9 @@ CONTROL_TOPIC = '/arm/control'
 CONTROL_RATE_HZ = 10.0
 VISION_TIMEOUT_SEC = 1.0
 
-TARGET_PIXEL_X = 300
-TARGET_PIXEL_Y = 400
-ALIGN_X_TOLERANCE = 20  #25
+TARGET_PIXEL_X = 310
+TARGET_PIXEL_Y = 420 #400
+ALIGN_X_TOLERANCE = 15  #25
 ALIGN_Y_TOLERANCE = 10
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
@@ -83,6 +83,7 @@ class State(Enum):
     MOVING_TO_DROP = 'moving_to_drop'
     OPENING_FOR_DROP = 'opening_for_drop'
     RETURNING_TO_IDLE = 'returning_to_idle'
+    PICK_UP_TO_IDLE = 'pick_up_to_idle'
     ERROR = 'error'
 
 
@@ -110,7 +111,6 @@ class ArmControlNode(Node):
         self.detection_history = deque(maxlen=REQUIRED_DETECTIONS)
         self.last_logged_detection = None
         self.last_vision_log_time = None
-        self.track_only_mode = False
         self.out_of_reach_counter = 0
         self.alignment_error_history = deque(maxlen=OUT_OF_REACH_CONFIRMATION_STEPS + 1)
 
@@ -126,8 +126,6 @@ class ArmControlNode(Node):
         command = msg.data.strip().upper()
         if command == 'START':
             self.handle_start_command()
-        elif command == 'TRACK_ONLY':
-            self.handle_track_only_command()
         elif command == 'PICK_UP':
             self.handle_pickup_command()
         elif command == 'DROP':
@@ -263,6 +261,9 @@ class ArmControlNode(Node):
             self.transition_to(State.IDLE)
             self.publish_result('DROP_SUCCESS')
 
+        if self.state == State.PICK_UP_TO_IDLE:
+            self.command_idle_pose(State.IDLE)
+
     def handle_start_command(self):
         if self.state != State.START or self.is_motion_active():
             self.publish_result('START_FAIL')
@@ -277,15 +278,6 @@ class ArmControlNode(Node):
             self.publish_result('PICK_UP_FAIL_NO_IDLE')
             return
 
-        self.track_only_mode = False
-        self.command_observe_pose()
-
-    def handle_track_only_command(self):
-        if self.state != State.IDLE:
-            self.publish_result('TRACK_ONLY_FAIL_NO_IDLE')
-            return
-
-        self.track_only_mode = True
         self.command_observe_pose()
 
     def handle_drop_command(self):
@@ -345,7 +337,7 @@ class ArmControlNode(Node):
         )
 
     def command_observe_pose(self):
-        self.current_target_rho = BASE_MIN_RHO
+        self.current_target_rho = BASE_MIN_RHO + 20.0
         self.current_target_alpha = 0.0
         self.current_target_z = START_PICKUP_Z
         self.detection_history.clear()
@@ -400,7 +392,7 @@ class ArmControlNode(Node):
         detection = self.get_stable_detection()
         if detection is None:
             if self.vision_is_stale():
-                self.transition_to(State.IDLE)
+                self.transition_to(State.PICK_UP_TO_IDLE)
                 self.publish_result('PICK_UP_FAIL_TIMEOUT')
             return
 
@@ -431,9 +423,8 @@ class ArmControlNode(Node):
                 if self.is_out_of_reach_adjustment(requested_rho, requested_alpha):
                     self.out_of_reach_counter += 1
                     if self.out_of_reach_counter >= OUT_OF_REACH_CONFIRMATION_STEPS:
-                        self.track_only_mode = False
                         self.alignment_error_history.clear()
-                        self.transition_to(State.IDLE)
+                        self.transition_to(State.PICK_UP_TO_IDLE)
                         self.publish_result('PICK_UP_FAIL_OUT_OF_REACH')
                         return
                 else:
@@ -456,18 +447,8 @@ class ArmControlNode(Node):
             alpha = self.current_target_alpha
             if new_z == FINAL_PICKUP_Z:
                 # At FINAL_PICKUP_Z, close gripper
-                if self.track_only_mode:
-                    self.track_only_mode = False
-                    self.transition_to(State.IDLE)
-                    self.publish_result(
-                        f'TRACK_ONLY_SUCCESS x={detection.center_x} y={detection.center_y} '
-                        f'rho={self.current_target_rho:.1f} alpha={self.current_target_alpha:.1f} '
-                        f'z={self.current_target_z:.1f}'
-                    )
-                    return
-                else:
-                    self.command_gripper(CLOSED_GRIPPER_ANGLE, new_state=State.CLOSING_GRIPPER)
-                    return
+                self.command_gripper(CLOSED_GRIPPER_ANGLE, new_state=State.CLOSING_GRIPPER)
+                return
 
         try:
             self.command_planar_target(
@@ -489,11 +470,9 @@ class ArmControlNode(Node):
                     )
                 except ValueError:
                     # If still fails, then error
-                    self.track_only_mode = False
                     self.transition_to(State.ERROR)
                     self.publish_result(f'PICK_UP_FAIL_RANGE: {exc}')
             else:
-                self.track_only_mode = False
                 self.transition_to(State.ERROR)
                 self.publish_result(f'PICK_UP_FAIL_RANGE: {exc}')
 

@@ -29,7 +29,8 @@ IDLE_POSE =             [10, 120, 16.6, 166.4, 89.8, 120]
 LIFTING_POSE = {'p4': 120.0, 'p5': 120.0}
 HOLDING_POSE = {'p2': 30.0, 'p3': 170.0}
 
-DROP_POSE = {'p2': 90.0, 'p4': 80.0}
+#DROP_POSE = {'p2': 90.0, 'p4': 80.0} #TODO: UPDATE TO BE LESS FORWARD
+DROP_POSE = {'p2': 60.0, 'p4': 80.0} 
 
 @dataclass(frozen=True)
 class PlanarTarget:

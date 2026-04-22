@@ -81,7 +81,7 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.15)        # m
+        self.declare_parameter('lookahead_distance', 0.20)        # m
         self.declare_parameter('nominal_linear_speed', 0.25)    # default slower for path tracking
         self.declare_parameter('max_angular_speed', 0.15)        # cap turning a bit more conservatively
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
@@ -94,7 +94,7 @@ class Controller(Node):
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
 
-        self.declare_parameter('final_nominal_speed', 0.1)                # duty-equivalent for close approach
+        self.declare_parameter('final_nominal_speed', 0.12)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
@@ -102,12 +102,14 @@ class Controller(Node):
         self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
+        self._final_approach_enabled_wall = None
+        self.final_approach_start_delay_s = 1.0
 
         # Motor deadzone requirement: each wheel is 0 or |duty| >= this
         self._dc_min = 0.08
 
         # Start-of-path heading error threshold for turn-in-place alignment
-        self._turn_in_place_yaw_thresh = 0.6  # rad
+        self._turn_in_place_yaw_thresh = 0.4  # rad
         self._yaw_tol = 0.1  # rad for final alignment 0.05 gold
 
         # Control loop
@@ -421,6 +423,13 @@ class Controller(Node):
             return
 
         if self._final_approach_enabled:
+
+            if self._final_approach_enabled_wall is None:
+                self._final_approach_enabled_wall = time.time()
+            if (time.time() - self._final_approach_enabled_wall) < self.final_approach_start_delay_s:
+                self.stop()
+                return
+
             pose = self.get_pose_2d()
             if pose is None:
                 self.stop()

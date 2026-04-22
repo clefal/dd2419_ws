@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'colour'],
     zip_safe=True,
     maintainer='tilde',
     maintainer_email='Tilde@tarnvik.com',

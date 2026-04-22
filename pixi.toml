@@ -6,7 +6,7 @@ channels = [
   "https://prefix.dev/robostack-jazzy",
 ]
 platforms = [
-  "linux-64",
+  "linux-64", "osx-arm64",
 ]
 version = "1.0.0"
 preview = ["pixi-build"]

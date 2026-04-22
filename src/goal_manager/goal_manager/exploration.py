@@ -46,6 +46,8 @@ class RandomWaypointExplorer:
 
         self._planning_data: Optional[List[int]] = None
         self._meta: Optional[GridMeta] = None
+        self._exploration_data: Optional[List[int]] = None
+        self._exploration_meta: Optional[GridMeta] = None
 
     def set_workspace_polygon(self, polygon_xy: List[Tuple[float, float]]) -> None:
         self._workspace_polygon = list(polygon_xy)
@@ -53,6 +55,16 @@ class RandomWaypointExplorer:
     def set_planning_grid(self, msg: OccupancyGrid) -> None:
         self._planning_data = list(msg.data)
         self._meta = GridMeta(
+            width=msg.info.width,
+            height=msg.info.height,
+            resolution=msg.info.resolution,
+            origin_x=msg.info.origin.position.x,
+            origin_y=msg.info.origin.position.y,
+        )
+
+    def set_exploration_grid(self, msg: OccupancyGrid) -> None:
+        self._exploration_data = list(msg.data)
+        self._exploration_meta = GridMeta(
             width=msg.info.width,
             height=msg.info.height,
             resolution=msg.info.resolution,
@@ -68,6 +80,10 @@ class RandomWaypointExplorer:
             self._failed.append((float(xy[0]), float(xy[1])))
 
     def next_waypoint(self, robot_xy: Tuple[float, float]) -> Optional[Tuple[float, float]]:
+        grid_waypoint = self._next_exploration_grid_waypoint(robot_xy)
+        if grid_waypoint is not None:
+            return grid_waypoint
+
         if len(self._workspace_polygon) < 3:
             return None
 
@@ -124,6 +140,97 @@ class RandomWaypointExplorer:
 
         return None
 
+    def _next_exploration_grid_waypoint(
+        self, robot_xy: Tuple[float, float]
+    ) -> Optional[Tuple[float, float]]:
+        if self._exploration_data is None or self._exploration_meta is None:
+            return None
+
+        waypoint = self._best_unknown_cell_waypoint(
+            robot_xy,
+            revisit_radius_m=self._min_revisit_dist_m,
+        )
+        if waypoint is not None:
+            return waypoint
+
+        return self._best_unknown_cell_waypoint(
+            robot_xy,
+            revisit_radius_m=0.35 * self._min_revisit_dist_m,
+        )
+
+    def _best_unknown_cell_waypoint(
+        self,
+        robot_xy: Tuple[float, float],
+        revisit_radius_m: float,
+    ) -> Optional[Tuple[float, float]]:
+        if self._exploration_data is None or self._exploration_meta is None:
+            return None
+
+        rx, ry = robot_xy
+        meta = self._exploration_meta
+        best_xy = None
+        best_score = None
+
+        for gy in range(meta.height):
+            for gx in range(meta.width):
+                value = self._exploration_data[gx + gy * meta.width]
+                if not self._is_unknown_exploration_value(value):
+                    continue
+
+                x, y = self._grid_to_world(gx, gy, meta)
+                d_robot = math.hypot(x - rx, y - ry)
+                if d_robot < self._min_step_m or d_robot > self._max_step_m:
+                    continue
+
+                if self._is_near_any((x, y), self._visited, revisit_radius_m):
+                    continue
+
+                if self._is_near_any((x, y), self._failed, self._failed_blacklist_radius_m):
+                    continue
+
+                if not self._is_traversable(x, y):
+                    continue
+
+                dist_to_known = self._distance_to_nearest_known_cell(gx, gy)
+                score = (
+                    dist_to_known,
+                    self._distance_to_nearest_point((x, y), self._visited),
+                    -d_robot,
+                    self._rng.random(),
+                )
+                if best_score is None or score > best_score:
+                    best_score = score
+                    best_xy = (x, y)
+
+        return best_xy
+
+    def _distance_to_nearest_known_cell(self, gx: int, gy: int) -> float:
+        if self._exploration_data is None or self._exploration_meta is None:
+            return 0.0
+
+        meta = self._exploration_meta
+        max_radius_cells = int(math.ceil(self._max_step_m / meta.resolution))
+        best_cells = None
+
+        for dy in range(-max_radius_cells, max_radius_cells + 1):
+            ny = gy + dy
+            if ny < 0 or ny >= meta.height:
+                continue
+            for dx in range(-max_radius_cells, max_radius_cells + 1):
+                nx = gx + dx
+                if nx < 0 or nx >= meta.width:
+                    continue
+                value = self._exploration_data[nx + ny * meta.width]
+                if not self._is_known_exploration_value(value):
+                    continue
+                dist_cells = math.hypot(dx, dy)
+                if best_cells is None or dist_cells < best_cells:
+                    best_cells = dist_cells
+
+        if best_cells is None:
+            return max_radius_cells * meta.resolution
+        return best_cells * meta.resolution
+
     def _is_interior_enough(
         self, x: float, y: float, bounds: Tuple[float, float, float, float]
     ) -> bool:
@@ -157,6 +264,29 @@ class RandomWaypointExplorer:
             if math.hypot(x - px, y - py) < radius_m:
                 return True
         return False
+
+    @staticmethod
+    def _distance_to_nearest_point(
+        xy: Tuple[float, float], points: List[Tuple[float, float]]
+    ) -> float:
+        if len(points) == 0:
+            return float("inf")
+        x, y = xy
+        return min(math.hypot(x - px, y - py) for px, py in points)
+
+    @staticmethod
+    def _is_unknown_exploration_value(value: int) -> bool:
+        return value < 0
+
+    @staticmethod
+    def _is_known_exploration_value(value: int) -> bool:
+        return value >= 0
+
+    @staticmethod
+    def _grid_to_world(gx: int, gy: int, meta: GridMeta) -> Tuple[float, float]:
+        x = meta.origin_x + (float(gx) + 0.5) * meta.resolution
+        y = meta.origin_y + (float(gy) + 0.5) * meta.resolution
+        return (x, y)
 
     @staticmethod
     def _point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) -> bool:

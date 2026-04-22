@@ -27,12 +27,14 @@ class PlannerConfig:
     occ_lethal: int
     occ_cost_scale: float
     max_planning_time_ms: int
+    path_smoothing_enabled: bool
+    path_smoothing_max_shortcut_m: float
     workspace_border_width: float
     robot_radius: float
     inflation_margin: float
+    soft_halo_m: float
     cube_size: float
     box_size: float
-    box_goal_radius: float
 
 
 @dataclass(frozen=True)
@@ -88,10 +90,11 @@ class PathManager:
             self._workspace_border_mask = None
         self._config = config
 
-    def update_map(self, msg: OccupancyGrid) -> None:
+    def update_map(self, msg: OccupancyGrid, rebuild: bool = True) -> None:
         self._raw_map = msg
         self._meta = self.extract_meta(msg)
-        self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
+        if rebuild:
+            self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
 
     def update_objects(
         self,
@@ -112,6 +115,7 @@ class PathManager:
             self.rebuild_planning_grid(include_box_lethal=self._last_include_box_lethal)
 
     def rebuild_planning_grid(self, include_box_lethal: bool = True) -> Optional[OccupancyGrid]:
+        start_time = time.perf_counter()
         self._last_include_box_lethal = include_box_lethal
         if self._raw_map is None or self._meta is None:
             self._planning_grid = None
@@ -121,6 +125,8 @@ class PathManager:
             self._meta,
             include_box_lethal=include_box_lethal,
         )
+        delta = (time.perf_counter()-start_time)*1000
+        self._logger.info(f'replanning took {delta} ms')
         return self._planning_grid
 
     def plan_to_goal(
@@ -128,6 +134,7 @@ class PathManager:
         start_xy: Tuple[float, float],
         goal_xy: Tuple[float, float],
         include_box_lethal: bool,
+        rebuild_grid: bool = True,
     ) -> Optional[PlanResult]:
         if self._raw_map is None or self._meta is None:
             return None
@@ -137,13 +144,17 @@ class PathManager:
         if start_idx is None or goal_idx is None:
             return None
 
-        planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        if rebuild_grid:
+            planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        else:
+            planning_grid = self._planning_grid
         if planning_grid is None:
             return None
 
         path_idx = self.weighted_a_star(start_idx, goal_idx, planning_grid, self._meta)
         if path_idx is None or len(path_idx) == 0:
             return None
+        path_idx = self.smooth_path(path_idx, planning_grid, self._meta)
 
         return PlanResult(
             path_idx=path_idx,
@@ -157,6 +168,7 @@ class PathManager:
         start_xy: Tuple[float, float],
         candidate_xy: List[Tuple[float, float]],
         include_box_lethal: bool,
+        rebuild_grid: bool = True,
     ) -> Optional[CandidatePlanResult]:
         if self._raw_map is None or self._meta is None:
             return None
@@ -165,7 +177,10 @@ class PathManager:
         if start_idx is None:
             return None
 
-        planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        if rebuild_grid:
+            planning_grid = self.rebuild_planning_grid(include_box_lethal=include_box_lethal)
+        else:
+            planning_grid = self._planning_grid
         if planning_grid is None:
             return None
 
@@ -184,6 +199,7 @@ class PathManager:
                 continue
 
             pcost = self.path_total_cost(path_idx, planning_grid, self._meta)
+            path_idx = self.smooth_path(path_idx, planning_grid, self._meta)
             if best_cost is None or pcost < best_cost:
                 best_cost = pcost
                 best_path_idx = path_idx
@@ -222,19 +238,84 @@ class PathManager:
                 start_i = self._nearest_path_index(path_idx, robot_idx)
                 start_i = max(0, start_i - 1)
 
-        for gx, gy in path_idx[start_i:]:
+        previous = path_idx[start_i]
+        for current in path_idx[start_i:]:
+            gx, gy = current
             if not (0 <= gx < self._meta.width and 0 <= gy < self._meta.height):
                 return False
             if not self.cell_is_traversable(gx, gy, self._planning_grid, self._meta):
                 return False
+            if not self.segment_is_traversable(previous, current, self._planning_grid, self._meta):
+                return False
+            previous = current
 
         return True
 
-    def is_box_goal(self, goal_xy: Tuple[float, float]) -> bool:
-        for box_xy in self._boxes:
-            if math.hypot(goal_xy[0] - box_xy[0], goal_xy[1] - box_xy[1]) <= self._config.box_goal_radius:
-                return True
-        return False
+    def smooth_path(
+        self,
+        path_idx: List[GridIndex],
+        occ: OccupancyGrid,
+        meta: GridMeta,
+    ) -> List[GridIndex]:
+        if not self._config.path_smoothing_enabled or len(path_idx) <= 2:
+            return path_idx
+
+        smoothed: List[GridIndex] = [path_idx[0]]
+        anchor_i = 0
+        max_shortcut_cells = int(
+            math.ceil(max(0.0, self._config.path_smoothing_max_shortcut_m) / meta.resolution)
+        )
+
+        while anchor_i < len(path_idx) - 1:
+            next_i = anchor_i + 1
+            furthest_i = len(path_idx) - 1
+            if max_shortcut_cells > 0:
+                furthest_i = min(furthest_i, anchor_i + max_shortcut_cells)
+
+            for candidate_i in range(furthest_i, anchor_i, -1):
+                if self.segment_is_traversable(path_idx[anchor_i], path_idx[candidate_i], occ, meta):
+                    next_i = candidate_i
+                    break
+
+            smoothed.append(path_idx[next_i])
+            anchor_i = next_i
+
+        self._info(f"Path smoothing: {len(path_idx)} -> {len(smoothed)} waypoints")
+        return smoothed
+
+    def segment_is_traversable(
+        self,
+        start: GridIndex,
+        goal: GridIndex,
+        occ: OccupancyGrid,
+        meta: GridMeta,
+    ) -> bool:
+        x0, y0 = start
+        x1, y1 = goal
+        dx = x1 - x0
+        dy = y1 - y0
+        steps = max(abs(dx), abs(dy)) * 2
+        if steps <= 0:
+            return self.cell_is_traversable(x0, y0, occ, meta)
+
+        previous = None
+        for i in range(steps + 1):
+            t = float(i) / float(steps)
+            gx = int(round(x0 + dx * t))
+            gy = int(round(y0 + dy * t))
+            current = (gx, gy)
+            if current == previous:
+                continue
+            previous = current
+
+            if not (0 <= gx < meta.width and 0 <= gy < meta.height):
+                return False
+            if not self.cell_is_traversable(gx, gy, occ, meta):
+                return False
+
+        return True
+
+
 
     def build_planning_grid(
         self, raw: OccupancyGrid, meta: GridMeta, include_box_lethal: bool = True
@@ -247,8 +328,9 @@ class PathManager:
             math.ceil((self._config.robot_radius + self._config.inflation_margin) / meta.resolution)
         )
 
-        soft_halo_m = 0.10
-        r_soft_cells = r_lethal_cells + int(math.ceil(soft_halo_m / meta.resolution))
+        r_soft_cells = r_lethal_cells + int(
+            math.ceil(self._config.soft_halo_m / meta.resolution)
+        )
 
         static_data = list(raw.data)
         workspace_inside, workspace_border = self._workspace_masks(meta)
@@ -280,6 +362,9 @@ class PathManager:
             self._config.robot_radius + cube_half_diagonal + self._config.inflation_margin
         )
         r_cells = int(math.ceil(cube_keepout_radius / meta.resolution))
+        r_soft_object_cells = r_cells + int(
+            math.ceil(self._config.soft_halo_m / meta.resolution)
+        )
 
         for (cx, cy) in self._cubes:
             if self._target_object is not None:
@@ -291,7 +376,14 @@ class PathManager:
             if idx is None:
                 continue
 
-            self.mark_disk_lethal(planning.data, idx[0], idx[1], r_cells, meta)
+            self.mark_disk_inflated(
+                planning.data,
+                idx[0],
+                idx[1],
+                r_cells,
+                r_soft_object_cells,
+                meta,
+            )
 
         if include_box_lethal:
             box_keepout_radius = (
@@ -300,17 +392,21 @@ class PathManager:
                 + self._config.inflation_margin
             )
             box_r_cells = int(math.ceil(box_keepout_radius / meta.resolution))
+            box_r_soft_cells = box_r_cells + int(
+                math.ceil(self._config.soft_halo_m / meta.resolution)
+            )
 
             for (bx, by) in self._boxes:
                 box_idx = self.world_to_grid(bx, by, meta)
                 if box_idx is None:
                     continue
 
-                self.mark_disk_lethal(
+                self.mark_disk_inflated(
                     planning.data,
                     box_idx[0],
                     box_idx[1],
                     box_r_cells,
+                    box_r_soft_cells,
                     meta,
                 )
 
@@ -322,6 +418,31 @@ class PathManager:
         Soft halo: r_lethal < dist <= r_soft -> descending cost
         """
         inflated = list(data)
+        cache_key = (r_lethal, r_soft)
+        if not hasattr(self, "_inflation_offsets_cache"):
+            self._inflation_offsets_cache = {}
+
+        offsets = self._inflation_offsets_cache.get(cache_key)
+        if offsets is None:
+            offsets = []
+            r_lethal2 = r_lethal * r_lethal
+            r_soft2 = r_soft * r_soft
+            for dy in range(-r_soft, r_soft + 1):
+                for dx in range(-r_soft, r_soft + 1):
+                    dist2 = dx * dx + dy * dy
+                    if dist2 > r_soft2:
+                        continue
+
+                    if dist2 <= r_lethal2:
+                        cost = 100
+                    else:
+                        d = math.sqrt(dist2)
+                        t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
+                        cost = int(99 * (1.0 - t))
+
+                    offsets.append((dx, dy, cost))
+
+            self._inflation_offsets_cache[cache_key] = offsets
 
         for gy in range(meta.height):
             for gx in range(meta.width):
@@ -331,26 +452,17 @@ class PathManager:
                     continue
 
                 if v >= lethal_thresh:
-                    for dy in range(-r_soft, r_soft + 1):
-                        for dx in range(-r_soft, r_soft + 1):
-                            dist2 = dx * dx + dy * dy
-                            if dist2 > r_soft * r_soft:
-                                continue
+                    for dx, dy, cost in offsets:
+                        nx = gx + dx
+                        ny = gy + dy
+                        if not (0 <= nx < meta.width and 0 <= ny < meta.height):
+                            continue
 
-                            nx = gx + dx
-                            ny = gy + dy
-                            if not (0 <= nx < meta.width and 0 <= ny < meta.height):
-                                continue
-
-                            if dist2 <= r_lethal * r_lethal:
-                                inflated[nx + ny * meta.width] = 100
-                            else:
-                                d = math.sqrt(dist2)
-                                t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
-                                penalty = int(99 * (1.0 - t))
-                                idx = nx + ny * meta.width
-                                if penalty > inflated[idx]:
-                                    inflated[idx] = penalty
+                        idx = nx + ny * meta.width
+                        if cost == 100:
+                            inflated[idx] = 100
+                        elif cost > inflated[idx]:
+                            inflated[idx] = cost
 
         return inflated
 
@@ -366,6 +478,29 @@ class PathManager:
 
                 if 0 <= gx < meta.width and 0 <= gy < meta.height:
                     data[gx + gy * meta.width] = 100
+
+    @staticmethod
+    def mark_disk_inflated(data, cx, cy, r_lethal, r_soft, meta):
+        for dy in range(-r_soft, r_soft + 1):
+            for dx in range(-r_soft, r_soft + 1):
+                dist2 = dx * dx + dy * dy
+                if dist2 > r_soft * r_soft:
+                    continue
+
+                gx = cx + dx
+                gy = cy + dy
+                if not (0 <= gx < meta.width and 0 <= gy < meta.height):
+                    continue
+
+                idx = gx + gy * meta.width
+                if dist2 <= r_lethal * r_lethal:
+                    data[idx] = 100
+                else:
+                    d = math.sqrt(dist2)
+                    t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
+                    penalty = int(99 * (1.0 - t))
+                    if penalty > data[idx]:
+                        data[idx] = penalty
 
     def _workspace_masks(
         self,
@@ -524,7 +659,7 @@ class PathManager:
     def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
         v = occ.data[self.idx_to_flat(gx, gy, meta)]
         if v < 0:
-            return 0.5 * self._config.occ_cost_scale
+            return 0.2 * self._config.occ_cost_scale
         return (float(v) / 100.0) * self._config.occ_cost_scale
 
     def path_total_cost(self, path_idx: List[GridIndex], occ: OccupancyGrid, meta: GridMeta) -> float:

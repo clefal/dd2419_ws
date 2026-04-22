@@ -18,13 +18,13 @@ class Mapping(Node):
 
         # Params
         self.declare_parameter("ocuppancy_grid_topic", "/map/occupancy_grid")
-        self.declare_parameter("grid_resolution", 0.02) # m/cell
+        self.declare_parameter("grid_resolution", 0.04) # m/cell
         # LaserScan input topic. Default assumes an upstream scan preprocessor node.
         self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
         # If true, the incoming LaserScan is assumed to already be filtered upstream.
         # If false, this node will filter ranges using `median_filter_scan()` before mapping.
         self.declare_parameter("input_is_preprocessed", True)
-        self.declare_parameter("scans_to_skip", 5)
+        self.declare_parameter("scans_to_skip", 3)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
         self.declare_parameter("grid_size", 12)
@@ -49,8 +49,8 @@ class Mapping(Node):
         self.median_filter_kernel_size = 5
 
         # Log-odds params
-        self.log_odds_increse_occ = 0.85
-        self.log_odds_decrease_free = -0.4
+        self.log_odds_increse_occ = 0.9
+        self.log_odds_decrease_free = -0.45
         self.log_odds_min = -5
         self.log_odds_max = 5
 

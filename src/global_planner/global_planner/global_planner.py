@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+# import time
 from typing import List, Optional, Tuple
 
 import rclpy
@@ -29,18 +30,20 @@ class GlobalPlannerNode(Node):
 
 
         # Planning knobs
-        self.declare_parameter("w_heuristic", 1.8)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
-        self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
-        self.declare_parameter("occ_cost_scale", 2.0)       # penalty factor for soft costs
-        self.declare_parameter("max_planning_time_ms", 150) # soft guard for very large maps
+        self.declare_parameter("w_heuristic", 1.5)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
+        self.declare_parameter("occ_lethal", 99)            # >= lethal => not traversable (0..100) default: 70
+        self.declare_parameter("occ_cost_scale", 6.0)       # penalty factor for soft costs
+        self.declare_parameter("max_planning_time_ms", 60000) # soft guard for very large maps
+        self.declare_parameter("path_smoothing_enabled", True)
+        self.declare_parameter("path_smoothing_max_shortcut_m", 0.1)
         self.declare_parameter("workspace_border_width", 0.05)
-        self.declare_parameter("coarse_object_standoff", 0.5)
-        self.declare_parameter("robot_radius", 0.05)
+        self.declare_parameter("coarse_object_standoff", 0.65)
+        self.declare_parameter("robot_radius", 0.02)
         self.declare_parameter("inflation_margin", 0.01)
+        self.declare_parameter("soft_halo_m", 0.40)
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
-        self.declare_parameter("box_goal_radius", 0.30)
-        self.declare_parameter("replan_check_period_s", 1)
+        self.declare_parameter("replan_check_period_s", 0.5)
         self.declare_parameter("freeze_odom_before_planning", False)
         self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")
         self.declare_parameter("freeze_odom_timeout_s", 0.5)
@@ -130,6 +133,9 @@ class GlobalPlannerNode(Node):
         self._current_include_box_lethal = True
         self._replan_in_progress = False
         self._replan_check_pending = False
+        self._reuse_current_planning_grid_once = False
+        # self._last_replan_timer_t: Optional[float] = None
+        # self._replan_t0: Optional[float] = None
 
         replan_period = self.get_parameter("replan_check_period_s").get_parameter_value().double_value
         self._replan_timer = self.create_timer(replan_period, self._check_replan)
@@ -138,6 +144,8 @@ class GlobalPlannerNode(Node):
         self.get_logger().info(
             f"GlobalPlannerNode started. Subscribing map='{self.map_topic}', goal='{self.goal_topic}', publishing path='{self.path_topic}'."
         )
+
+        self.debugging_start_time = 0
 
     # -------------------------
     # ROS callbacks
@@ -148,20 +156,19 @@ class GlobalPlannerNode(Node):
             occ_lethal=self.get_parameter("occ_lethal").get_parameter_value().integer_value,
             occ_cost_scale=self.get_parameter("occ_cost_scale").get_parameter_value().double_value,
             max_planning_time_ms=self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value,
+            path_smoothing_enabled=self.get_parameter("path_smoothing_enabled").get_parameter_value().bool_value,
+            path_smoothing_max_shortcut_m=self.get_parameter("path_smoothing_max_shortcut_m").get_parameter_value().double_value,
             workspace_border_width=self.get_parameter("workspace_border_width").get_parameter_value().double_value,
             robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
             inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
+            soft_halo_m=self.get_parameter("soft_halo_m").get_parameter_value().double_value,
             cube_size=self.get_parameter("cube_size").get_parameter_value().double_value,
             box_size=self.get_parameter("box_size").get_parameter_value().double_value,
-            box_goal_radius=self.get_parameter("box_goal_radius").get_parameter_value().double_value,
         )
 
     def on_map(self, msg: OccupancyGrid) -> None:
         self.path_manager.set_config(self._planner_config())
-        self.path_manager.update_map(msg)
-        planning_grid = self.path_manager.planning_grid
-        if planning_grid is not None:
-            self.pub_planning_grid.publish(planning_grid)
+        self.path_manager.update_map(msg, rebuild=False)
 
     def on_workspace(self, msg: PolygonStamped) -> None:
         frame = (msg.header.frame_id or "").strip()
@@ -270,7 +277,7 @@ class GlobalPlannerNode(Node):
             self._cubes: List[Tuple[float, float]] = []   # in map frame
             self._boxes: List[Tuple[float, float]] = []   # in map frame
             for obj in obj_poses:
-                if obj.obj_type == 'box':
+                if obj.obj_type in ('box', 'map_box'):
                     self._boxes.append((obj.obj_x, obj.obj_y))
                 else:
                     self._cubes.append((obj.obj_x, obj.obj_y))
@@ -333,6 +340,9 @@ class GlobalPlannerNode(Node):
         return
 
     def _continue_plan_and_publish_after_freeze(self, reason: str, freeze_ok: bool) -> None:
+        reuse_grid = self._reuse_current_planning_grid_once
+        self._reuse_current_planning_grid_once = False
+
         if not freeze_ok:
             self._publish_empty_path(reason="freeze_odom_failed")
             return
@@ -368,7 +378,12 @@ class GlobalPlannerNode(Node):
             return
 
         include_box_lethal = True
-        plan = self.path_manager.plan_to_goal(start_xy, goal_xy, include_box_lethal=include_box_lethal)
+        plan = self.path_manager.plan_to_goal(
+            start_xy,
+            goal_xy,
+            include_box_lethal=include_box_lethal,
+            rebuild_grid=not reuse_grid,
+        )
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
             self.pub_planning_grid.publish(planning_grid)
@@ -438,6 +453,9 @@ class GlobalPlannerNode(Node):
         msg: PoseArray,
         freeze_ok: bool,
     ) -> None:
+        reuse_grid = self._reuse_current_planning_grid_once
+        self._reuse_current_planning_grid_once = False
+
         if not freeze_ok:
             self._publish_empty_path(reason="freeze_odom_failed_candidates")
             return
@@ -475,6 +493,7 @@ class GlobalPlannerNode(Node):
             start_xy,
             candidate_xy,
             include_box_lethal=include_box_lethal,
+            rebuild_grid=not reuse_grid,
         )
         planning_grid = self.path_manager.planning_grid
         if planning_grid is not None:
@@ -590,6 +609,13 @@ class GlobalPlannerNode(Node):
         self._replan_in_progress = False
         self.get_logger().warn(f"Published EMPTY path (reason={reason}).")
 
+    def _publish_stop_path(self, reason: str = "unknown") -> None:
+        path_msg = Path()
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+        path_msg.header.frame_id = self.global_frame
+        self.pub_path.publish(path_msg)
+        self.get_logger().warn(f"Published STOP path (reason={reason}).")
+
     def _get_robot_xy_in_map(self) -> Optional[Tuple[float, float]]:
         try:
             # latest available transform
@@ -607,38 +633,50 @@ class GlobalPlannerNode(Node):
         if self._active_plan_mode not in ("single", "candidates"):
             self._replan_in_progress = False
             return
-
+        
         planning_grid = self.path_manager.rebuild_planning_grid(
             include_box_lethal=self._current_include_box_lethal
         )
+
         if planning_grid is not None:
             self.pub_planning_grid.publish(planning_grid)
 
         robot_xy = self._get_robot_xy_in_map()
-        if self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy):
-            self.get_logger().info("Current global path is valid. --> no replanning")
+        path_valid = self.path_manager.path_is_still_valid(self._current_path_idx, robot_xy=robot_xy)
+        # if self._replan_t0 is not None:
+        #     self.get_logger().info(f"replan check elapsed: {(time.perf_counter() - self._replan_t0) * 1000.0:.1f} ms")
+        if path_valid:
+            #self.get_logger().info("Current global path is valid. --> no replanning")
             self._replan_in_progress = False
             return
 
-        self.get_logger().warn("Current global path is blocked. Replanning.")
+        self.get_logger().warn("Current global path is blocked. Stopping and replanning.")
+        self._publish_stop_path(reason="path_blocked")
         if self._active_plan_mode == "single":
             self._pending_plan_mode = "single"
             self._pending_plan_reason = "path_blocked"
+            self._reuse_current_planning_grid_once = True
             self._continue_plan_and_publish(reason=self._pending_plan_reason)
         elif self._active_plan_mode == "candidates" and self._active_goal_candidates is not None:
             self._pending_goal_candidates = self._active_goal_candidates
             self._pending_plan_mode = "candidates"
             self._pending_plan_reason = "path_blocked"
+            self._reuse_current_planning_grid_once = True
             self._continue_plan_and_publish_candidates(reason=self._pending_plan_reason)
         else:
             self._replan_in_progress = False
 
     def _check_replan(self) -> None:
+        # now = time.perf_counter()
+        # if self._last_replan_timer_t is not None:
+        #     self.get_logger().info(f"replan timer gap: {(now - self._last_replan_timer_t) * 1000.0:.1f} ms")
+        # self._last_replan_timer_t = now
         if self._current_path_idx is None or self._replan_in_progress:
             return
         if self._active_plan_mode not in ("single", "candidates"):
             return
 
+        # self._replan_t0 = now
         self._replan_in_progress = True
         self._replan_check_pending = True
         self.update_object_list()
