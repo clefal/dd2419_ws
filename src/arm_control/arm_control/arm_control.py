@@ -22,7 +22,6 @@ from arm_control.arm_kinematics import (
     INITIAL_POSITION,
     START_SAFE_POSITION,
     BASE_MIN_RHO,
-    get_min_rho,
     make_planar_target,
     planar_to_joint_target,
 )
