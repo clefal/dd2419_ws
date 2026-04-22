@@ -1007,7 +1007,7 @@ class IcpScanToLine(Node):
             return
 
         # Robust ICP
-        self.publish_stacked_points(stacked_points_laser, "laser_scan_temp", stamp)
+        self.publish_stacked_points(stacked_points_laser, "lidar_link_temp", stamp)
         result = icp_point_to_line_robust(
             stacked_points_laser,
             self.map_lines,

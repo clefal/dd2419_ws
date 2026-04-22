@@ -76,7 +76,7 @@ def generate_launch_description():
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            name='base_to_lidar',
+            name='base_to_lidar_temp',
             arguments=[
                 '--x', '0.0',
                 '--y', '0.01',
