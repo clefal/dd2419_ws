@@ -217,8 +217,6 @@ class ArmVisionNode(Node):
         valid_contours = [c for c in contours if cv2.contourArea(c) > MIN_CONTOUR_AREA]
 
         if not valid_contours:
-            if color_name == 'red':
-                self.get_logger().info("No valid contours found")
             self.smoothed_angles[color_name] = None 
             return {'mask': mask, 'center': None, 'bbox': None, 'box_w': 0, 'angle': 0, 'box_points': None, 'edges': edges}
 
