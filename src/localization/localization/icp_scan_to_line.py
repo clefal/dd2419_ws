@@ -860,7 +860,8 @@ class IcpScanToLine(Node):
         delete_marker = Marker()
         delete_marker.header.frame_id = self.map_frame
         delete_marker.header.stamp = stamp
-        delete_marker.ns = "map_lines"
+        delete_marker.ns = "map_lines_clear"
+        delete_marker.id = 0
         delete_marker.action = Marker.DELETEALL
         markers.markers.append(delete_marker)
 
