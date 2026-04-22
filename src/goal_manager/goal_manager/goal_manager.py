@@ -28,6 +28,7 @@ class AutoState(Enum):
     APPROACH_OBJECT_COARSE = 'APPROACH_OBJECT_COARSE'
     APPROACH_OBJECT_FINAL = 'APPROACH_OBJECT_FINAL'
     WAIT_PICKUP_RESULT = 'WAIT_PICKUP_RESULT'
+    BACKUP_BEFORE_PICKUP_RETRY = 'BACKUP_BEFORE_PICKUP_RETRY'
     RETURN_BOX_COARSE = 'RETURN_BOX_COARSE'
     RETURN_BOX_FINAL = 'RETURN_BOX_FINAL'
     BACKUP_AFTER_DROP = 'BACKUP_AFTER_DROP'
@@ -195,6 +196,14 @@ class GoalManager(Node):
                 else:
                     self.get_logger().warn(f'Backup after drop failed with status={msg.data}. Continuing anyway.')
                     self._continue_after_drop()
+            elif not self.manual_goal and self._state == AutoState.BACKUP_BEFORE_PICKUP_RETRY:
+                if msg.data == 'REACHED':
+                    self.get_logger().info('Backup before pickup retry complete. Starting final approach again.')
+                else:
+                    self.get_logger().warn(
+                        f'Backup before pickup retry failed with status={msg.data}. Trying final approach anyway.'
+                    )
+                self._retry_final_object_approach()
 
     # ----------------------------
 
@@ -215,16 +224,20 @@ class GoalManager(Node):
 
                 self.request_box_goal_candidates(reason='pickup_success')
             elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
-                self.get_logger().warn('Arm reported cube out of reach. Re-approaching target.')
-                self._waiting_for_result = False
-                if self._target_ is None:
-                    self._state = AutoState.SEARCH
-                    self.publish_next_search_goal()
-                else:
-                    self._state = AutoState.APPROACH_OBJECT_COARSE
-                    self.publish_goal(self._target_[0], self._target_[1], 0.0)
-            elif msg.data in ('PICK_UP_FAIL_NO_OBJECT', 'PICK_UP_FAIL_NO_START'):
-                self.get_logger().warn(f'Arm pickup failed: {msg.data}')
+                self.get_logger().warn('Arm reported cube out of reach. Backing up before retrying final approach.')
+                self._state = AutoState.BACKUP_BEFORE_PICKUP_RETRY
+                self.publish_backup_distance(0.6)
+            elif msg.data in (
+                'PICK_UP_FAIL_NO_OBJECT',
+                'PICK_UP_FAIL_NO_START',
+                'PICK_UP_FAIL_NO_DETECTION',
+                'PICK_UP_FAIL_TIMEOUT',
+            ):
+                self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
+                self._skip_current_target()
+            elif msg.data in ('NO_HOLDING', 'PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_HOLD'):
+                self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Retrying pickup.')
+                self.publish_arm_status('PICK_UP')
             else:
                 self.get_logger().info(f'Arm result received while waiting for pickup: {msg.data}')
             return
@@ -247,14 +260,54 @@ class GoalManager(Node):
 
     def set_status(self, reason):
         req = SetStatus.Request() 
-        if reason == 'cube_picked':
+        if reason in ('cube_picked', 'cube_skipped'):
             req.obj_id = self._target_id
-            req.status = 'unavailable'  # after a dropoff succeeds we need to change the status to unavailable to not select it as goal again (and to not inflate it)
+            req.status = 'unavailable'  # do not select this cube as a goal again
         elif reason == 'dropoff_at_box':
             req.obj_id = self._box_id
             req.status = 'available'  # after a dropoff at box A, we have to set the status of box A back from 'isgoal' to 'available' in order to mark it as occupoied cells later in the global planner
-        future = self.cli_set_status.call_async(req)
-        # i think we dont need an done_callback here because we dont return anything...
+        else:
+            self.get_logger().warn(f'Unknown set_status reason: {reason}')
+            return None
+
+        return self.cli_set_status.call_async(req)
+
+    def _retry_final_object_approach(self):
+        if self._target_id is None:
+            self.get_logger().warn('Cannot retry final approach because no target id is available. Returning to search.')
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+            return
+
+        if not self.start_final_approach(self._target_id, AutoState.APPROACH_OBJECT_FINAL):
+            self._state = AutoState.SEARCH
+            self.publish_next_search_goal()
+
+    def _skip_current_target(self):
+        future = None
+        if self._target_id is not None:
+            future = self.set_status(reason='cube_skipped')
+
+        self._target_ = None
+        self._target_id = None
+
+        if future is None:
+            self._state = AutoState.SEARCH
+            self.request_new_target(reason='pickup_failed_skip')
+            return
+
+        self._state = AutoState.IDLE
+        future.add_done_callback(self._skip_current_target_status_callback)
+
+    def _skip_current_target_status_callback(self, future):
+        try:
+            future.result()
+        except Exception as e:
+            self.get_logger().warn(f'Failed to mark skipped cube unavailable: {e}')
+            return
+
+        self._state = AutoState.SEARCH
+        self.request_new_target(reason='pickup_failed_skip')
 
 
     def create_mapfile(self):
@@ -277,7 +330,7 @@ class GoalManager(Node):
                 self._search_retarget_pending = False
                 if self._state == AutoState.SEARCH and not self._waiting_for_result:
                     self.publish_next_search_goal()
-            elif reason in ('startup', 'after_drop'):
+            elif reason in ('startup', 'after_drop', 'pickup_failed_skip'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -298,7 +351,7 @@ class GoalManager(Node):
                 self._search_retarget_pending = False
                 if self._state == AutoState.SEARCH and not self._waiting_for_result:
                     self.publish_next_search_goal()
-            elif reason in ('startup', 'after_drop'):
+            elif reason in ('startup', 'after_drop', 'pickup_failed_skip'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -311,7 +364,7 @@ class GoalManager(Node):
                 self._search_retarget_pending = False
                 if self._state == AutoState.SEARCH and not self._waiting_for_result:
                     self.publish_next_search_goal()
-            elif reason in ('startup', 'after_drop'):
+            elif reason in ('startup', 'after_drop', 'pickup_failed_skip'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return
@@ -339,7 +392,7 @@ class GoalManager(Node):
                 self._search_retarget_pending = False
                 if self._state == AutoState.SEARCH and not self._waiting_for_result:
                     self.publish_next_search_goal()
-            elif reason in ('startup', 'after_drop'):
+            elif reason in ('startup', 'after_drop', 'pickup_failed_skip'):
                 self._state = AutoState.SEARCH
                 self.publish_next_search_goal()
             return

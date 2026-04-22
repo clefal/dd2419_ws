@@ -121,6 +121,8 @@ class ObjectManager(Node):
                         updated_obj.confidence = updated_obj.confidence + 1 # increase confidence by 1 every time we spot an object                         
                         self.object_list[idx] = updated_obj
                         updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
+                        if updated_obj.status == 'unavailable' and obj.type not in ('map_cube', 'map_box'):
+                            updated_obj.status = 'available'
 
                         similarity_counter += 1
             
