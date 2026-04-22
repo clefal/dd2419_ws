@@ -337,8 +337,7 @@ class ArmControlNode(Node):
                     self.command_planar_target(
                         rho=self.current_target_rho,
                         alpha_deg=self.current_target_alpha,
-                        z=fallback_z,
-                        new_state=State.ALIGNING,
+                        z=fallback_z
                     )
                 except ValueError:
                     self.transition_to(State.RETURN_TO_IDLE)
