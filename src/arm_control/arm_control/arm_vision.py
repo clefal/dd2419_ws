@@ -18,7 +18,7 @@ CENTER_TOPIC = '/arm/vision/cube_center'
 DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 HOLDING_CHECK_TOPIC = '/arm/vision/holding_check'
-HOLDING_ANSWER_TOPIC = 'arm/vision/holding_awnser'
+HOLDING_ANSWER_TOPIC = '/arm/vision/holding_answer'
 
 #Holding messages
 CHECK_HOLDING_MSG = 'CHECK_HOLDING'
@@ -96,7 +96,7 @@ class ArmVisionNode(Node):
             10,
         )
 
-        self.result_pub = self.create_publisher(String, HOLDING_ANSWER_TOPIC, 10)
+        self.holding_pub = self.create_publisher(String, HOLDING_ANSWER_TOPIC, 10)
         self.create_subscription(String, HOLDING_CHECK_TOPIC, self.holding_callback, 10)
 
     def holding_callback(self, msg):
@@ -110,7 +110,7 @@ class ArmVisionNode(Node):
         if self.holding:
             result = String()
             result.data = HOLDING_FAIL_MSG
-            self.result_pub.publish(result)
+            self.holding_pub.publish(result)
             self.get_logger().info("Timeout triggered")
             self.holding = False
 
@@ -158,7 +158,7 @@ class ArmVisionNode(Node):
                 if detection['box_w'] >= MIN_HOLDING_WIDTH:
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG
-                    self.result_pub.publish(msg)
+                    self.holding_pub.publish(msg)
                     self.get_logger().info("Holding cube!")
                     self.holding = False
 
