@@ -1,11 +1,5 @@
 <?xml version="1.0"?>
 <launch>
-
-  <arg name="publish_workspace_odom_frames" default="true"/>
-
-  <arg name="workspace_csv" default=""/>
-  <arg name="map_csv" default=""/>
-  <arg name="input_units" default="cm"/>
   <arg name="publish_workspace_odom_frames" default="true"/>
 
   <!-- Workspace/mapfile TF frames -->
