@@ -611,6 +611,8 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_update_min_translation", 0.15)
         # Minimum base rotation required before adding more lines to the map.
         self.declare_parameter("map_update_min_rotation_deg", 8.0)
+        # If false, keep the seeded line map fixed after initialization.
+        self.declare_parameter("update_map_lines", True)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
@@ -653,6 +655,7 @@ class IcpScanToLine(Node):
         self.init_min_lines = int(self.get_parameter("init_min_lines").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
+        self.update_map_lines = bool(self.get_parameter("update_map_lines").value)
 
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
@@ -1052,7 +1055,7 @@ class IcpScanToLine(Node):
             T_map_laser_smoothed = self.T_map_odom @ T_odom_laser
             T_map_base_smoothed = self.T_map_odom @ T_odom_base
 
-            if self.should_update_map(T_map_base_smoothed):
+            if self.update_map_lines and self.should_update_map(T_map_base_smoothed):
                 raw_lines = extract_lines_from_scan(
                     stacked_points_laser,
                     jump_thresh=self.cluster_jump_thresh,

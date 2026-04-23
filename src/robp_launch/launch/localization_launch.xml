@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="publish_workspace_odom_frames" default="true"/>
+  <!-- <arg name="update_map_lines" default="true"/> -->
 
   <!-- Workspace/mapfile TF frames -->
   <include file="$(find-pkg-share mapping)/launch/workspace_loader.launch.py">
@@ -18,6 +19,8 @@
   <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>
   <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
   <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
-  <node pkg="localization" exec="localization" name="localization" output="log"/>
+  <node pkg="localization" exec="localization" name="localization" output="log">
+    <!-- <param name="update_map_lines" value="$(var update_map_lines)"/> -->
+  </node>
 
 </launch>
