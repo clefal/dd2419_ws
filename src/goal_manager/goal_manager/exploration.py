@@ -24,6 +24,7 @@ class RandomWaypointExplorer:
         max_step_m: float = 2.0,
         min_revisit_dist_m: float = 0.8,
         failed_blacklist_radius_m: float = 0.6,
+        workspace_margin_m: float = 0.2,
         occ_lethal: int = 90,
         interior_bias_count: int = 2,
         interior_margin_m: float = 0.4,
@@ -34,6 +35,7 @@ class RandomWaypointExplorer:
         self._max_step_m = float(max_step_m)
         self._min_revisit_dist_m = float(min_revisit_dist_m)
         self._failed_blacklist_radius_m = float(failed_blacklist_radius_m)
+        self._workspace_margin_m = float(workspace_margin_m)
         self._occ_lethal = int(occ_lethal)
         self._interior_bias_count = int(interior_bias_count)
         self._interior_margin_m = float(interior_margin_m)
@@ -102,6 +104,9 @@ class RandomWaypointExplorer:
             if not self._point_in_polygon(x, y, self._workspace_polygon):
                 continue
 
+            if self._is_too_close_to_workspace_boundary(x, y):
+                continue
+
             d = math.hypot(x - rx, y - ry)
             if d < self._min_step_m or d > self._max_step_m:
                 continue
@@ -126,6 +131,8 @@ class RandomWaypointExplorer:
             x = self._rng.uniform(min_x, max_x)
             y = self._rng.uniform(min_y, max_y)
             if not self._point_in_polygon(x, y, self._workspace_polygon):
+                continue
+            if self._is_too_close_to_workspace_boundary(x, y):
                 continue
             d = math.hypot(x - rx, y - ry)
             if d < self._min_step_m or d > self._max_step_m:
@@ -178,6 +185,8 @@ class RandomWaypointExplorer:
                     continue
 
                 x, y = self._grid_to_world(gx, gy, meta)
+                if self._is_too_close_to_workspace_boundary(x, y):
+                    continue
                 d_robot = math.hypot(x - rx, y - ry)
                 if d_robot < self._min_step_m or d_robot > self._max_step_m:
                     continue
@@ -239,6 +248,17 @@ class RandomWaypointExplorer:
         min_x, max_x, min_y, max_y = bounds
         dist_to_edge = min(x - min_x, max_x - x, y - min_y, max_y - y)
         return dist_to_edge >= self._interior_margin_m
+
+    def _is_too_close_to_workspace_boundary(self, x: float, y: float) -> bool:
+        if len(self._workspace_polygon) < 3 or self._workspace_margin_m <= 0.0:
+            return False
+
+        for i in range(len(self._workspace_polygon)):
+            ax, ay = self._workspace_polygon[i]
+            bx, by = self._workspace_polygon[(i + 1) % len(self._workspace_polygon)]
+            if self._distance_point_to_segment(x, y, ax, ay, bx, by) < self._workspace_margin_m:
+                return True
+        return False
 
     def _is_traversable(self, wx: float, wy: float) -> bool:
         if self._planning_data is None or self._meta is None:
@@ -313,3 +333,20 @@ class RandomWaypointExplorer:
         if gx < 0 or gy < 0 or gx >= meta.width or gy >= meta.height:
             return None
         return (gx, gy)
+
+    @staticmethod
+    def _distance_point_to_segment(
+        px: float, py: float, ax: float, ay: float, bx: float, by: float
+    ) -> float:
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
+        ab_len2 = abx * abx + aby * aby
+        if ab_len2 <= 1e-12:
+            return math.hypot(px - ax, py - ay)
+
+        t = max(0.0, min(1.0, (apx * abx + apy * aby) / ab_len2))
+        closest_x = ax + t * abx
+        closest_y = ay + t * aby
+        return math.hypot(px - closest_x, py - closest_y)
