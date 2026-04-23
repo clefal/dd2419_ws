@@ -24,7 +24,7 @@ class RandomWaypointExplorer:
         max_step_m: float = 2.0,
         min_revisit_dist_m: float = 0.8,
         failed_blacklist_radius_m: float = 0.6,
-        workspace_margin_m: float = 0.2,
+        workspace_margin_m: float = 0.4,
         occ_lethal: int = 90,
         interior_bias_count: int = 2,
         interior_margin_m: float = 0.4,
