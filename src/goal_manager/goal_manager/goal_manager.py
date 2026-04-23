@@ -358,7 +358,7 @@ class GoalManager(Node):
             return
 
         self._goals_available = res.goals_available
-        self.get_logger().info(f'Goals available service returned: {res.goals_available}')
+        # self.get_logger().info(f'Goals available service returned: {res.goals_available}')
 
         if not res.goals_available:
             if reason == 'search_retarget':
