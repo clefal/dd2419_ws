@@ -74,6 +74,7 @@ class ObjectManager(Node):
         self.create_timer(5, self.get_points_from_csv_once)
         #self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
+        self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
 
 # ----------------------------------
 
@@ -103,6 +104,12 @@ class ObjectManager(Node):
         '''checks similarity of the obj with the objects in the object_list, returns the number of similar objects.
         If object is similar to another object then this object will be updated.'''
         similarity_counter = 0
+        cube_types = ('red_cube', 'green_cube', 'blue_cube', 'cube', 'map_cube')
+
+        if obj.type in cube_types:
+            for o in self.object_list:
+                if o.type in ('box', 'map_box') and math.hypot(o.last_x - obj.last_x, o.last_y - obj.last_y) < self.cube_box_exclusion_threshold:
+                    return 1
 
         # maybe this can be done quicker with pandas or something like that, so if it becomes a problem then i can look into that again
         if len(self.object_list)>0:
