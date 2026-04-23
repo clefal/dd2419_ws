@@ -20,8 +20,8 @@ class GridMeta:
 class RandomWaypointExplorer:
     def __init__(
         self,
-        min_step_m: float = 2.0,
-        max_step_m: float = 3.0,
+        min_step_m: float = 0.2,
+        max_step_m: float = 0.3,
         min_revisit_dist_m: float = 0.8,
         failed_blacklist_radius_m: float = 0.6,
         exploration_grid_margin_m: float = 0.2,
