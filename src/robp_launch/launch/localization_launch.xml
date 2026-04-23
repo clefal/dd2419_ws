@@ -1,6 +1,8 @@
 <?xml version="1.0"?>
 <launch>
 
+  <arg name="publish_workspace_odom_frames" default="true"/>
+
   <arg name="workspace_csv" default=""/>
   <arg name="map_csv" default=""/>
   <arg name="input_units" default="cm"/>
@@ -8,9 +10,9 @@
 
   <!-- Workspace/mapfile TF frames -->
   <include file="$(find-pkg-share mapping)/launch/workspace_loader.launch.py">
-    <arg name="workspace_csv" value="$(var workspace_csv)"/>
+    <!-- <arg name="workspace_csv" value="$(var workspace_csv)"/>
     <arg name="map_csv" value="$(var map_csv)"/>
-    <arg name="input_units" value="$(var input_units)"/>
+    <arg name="input_units" value="$(var input_units)"/> -->
     <arg name="publish_odom_frames" value="$(var publish_workspace_odom_frames)"/>
   </include>
 

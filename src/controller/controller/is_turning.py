@@ -14,7 +14,7 @@ class IsTurning(Node):
         super().__init__('mock_is_turning')
 
         # Parameters
-        self.declare_parameter('omega_threshold', 0.3)   # rad/s
+        self.declare_parameter('omega_threshold', 0.4)   # rad/s
         self.declare_parameter('wheel_radius', 0.04921)     # m
         self.declare_parameter('wheel_base', 0.3075)       # m
         self.declare_parameter('ticks_per_rev', 48 * 64)   # encoder ticks / wheel revolution
