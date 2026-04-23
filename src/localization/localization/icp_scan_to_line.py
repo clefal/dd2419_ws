@@ -558,7 +558,7 @@ class IcpScanToLine(Node):
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 4.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 5)
+        self.declare_parameter("stack_scans", 20)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -568,7 +568,7 @@ class IcpScanToLine(Node):
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
-        self.declare_parameter("line_min_length", 0.15)
+        self.declare_parameter("line_min_length", 0.3)
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
@@ -598,7 +598,7 @@ class IcpScanToLine(Node):
         # Minimum midpoint separation before a similar detected line is inserted into the map.
         self.declare_parameter("map_insert_min_separation", 0.35)
         # If true, merge near-duplicate collinear segments into a longer segment.
-        self.declare_parameter("map_merge_lines", True)
+        self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
         self.declare_parameter("map_merge_angle_deg", 5.0)
         # Maximum perpendicular distance (m) between segments for merging.
