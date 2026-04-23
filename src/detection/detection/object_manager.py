@@ -114,9 +114,12 @@ class ObjectManager(Node):
         # maybe this can be done quicker with pandas or something like that, so if it becomes a problem then i can look into that again
         if len(self.object_list)>0:
             for idx, o in enumerate(self.object_list):
-                if o.type == obj.type or o.type == 'map_cube':
+                if o.type == obj.type or o.type == 'map_cube' or o.type=='map_box':
                     # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
                     if o.type == 'map_cube' and (obj.type == 'box' or obj.type == 'map_box'):
+                        continue
+
+                    if o.type == 'map_box' and obj.type != 'box' and obj.type != 'map_box':
                         continue
                         
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
@@ -126,11 +129,11 @@ class ObjectManager(Node):
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         updated_obj.confidence = updated_obj.confidence + 1 # increase confidence by 1 every time we spot an object                         
-                        self.object_list[idx] = updated_obj
                         updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
                         if updated_obj.status == 'unavailable' and obj.type not in ('map_cube', 'map_box'):
                             updated_obj.status = 'available'
 
+                        self.object_list[idx] = updated_obj
                         similarity_counter += 1
             
         return similarity_counter       
