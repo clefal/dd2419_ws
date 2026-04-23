@@ -186,7 +186,7 @@ class RandomWaypointExplorer:
         for gy in range(meta.height):
             for gx in range(meta.width):
                 value = self._exploration_data[gx + gy * meta.width]
-                if not self._is_unknown_exploration_value(value):
+                if not self._is_frontier_cell(gx, gy, meta):
                     continue
 
                 if self._is_too_close_to_exploration_grid_edge(gx, gy, meta):
@@ -206,9 +206,7 @@ class RandomWaypointExplorer:
                 if not self._is_traversable(x, y):
                     continue
 
-                dist_to_known = self._distance_to_nearest_known_cell(gx, gy)
                 score = (
-                    dist_to_known,
                     self._distance_to_nearest_point((x, y), self._visited),
                     -d_robot,
                     self._rng.random(),
@@ -245,6 +243,28 @@ class RandomWaypointExplorer:
         if best_cells is None:
             return max_radius_cells * meta.resolution
         return best_cells * meta.resolution
+
+    def _is_frontier_cell(self, gx: int, gy: int, meta: GridMeta) -> bool:
+        if self._exploration_data is None:
+            return False
+
+        value = self._exploration_data[gx + gy * meta.width]
+        if not self._is_unknown_exploration_value(value):
+            return False
+
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx = gx + dx
+                ny = gy + dy
+                if nx < 0 or ny < 0 or nx >= meta.width or ny >= meta.height:
+                    continue
+                neighbor_value = self._exploration_data[nx + ny * meta.width]
+                if self._is_known_exploration_value(neighbor_value):
+                    return True
+
+        return False
 
     def _is_too_close_to_exploration_grid_edge(self, gx: int, gy: int, meta: GridMeta) -> bool:
         margin_cells = int(math.ceil(self._exploration_grid_margin_m / meta.resolution))
