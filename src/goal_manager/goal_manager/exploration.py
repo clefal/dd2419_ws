@@ -3,7 +3,7 @@
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from nav_msgs.msg import OccupancyGrid
 
@@ -20,8 +20,8 @@ class GridMeta:
 class RandomWaypointExplorer:
     def __init__(
         self,
-        min_step_m: float = 0.2,
-        max_step_m: float = 0.3,
+        min_step_m: float = 1.5,
+        max_step_m: float = 2.5,
         min_revisit_dist_m: float = 0.8,
         failed_blacklist_radius_m: float = 0.6,
         exploration_grid_margin_m: float = 0.2,
@@ -30,6 +30,7 @@ class RandomWaypointExplorer:
         interior_margin_m: float = 0.4,
         max_samples: int = 500,
         seed: Optional[int] = None,
+        logger: Optional[Any] = None,
     ) -> None:
         self._min_step_m = float(min_step_m)
         self._max_step_m = float(max_step_m)
@@ -41,6 +42,7 @@ class RandomWaypointExplorer:
         self._interior_margin_m = float(interior_margin_m)
         self._max_samples = int(max_samples)
         self._rng = random.Random(seed)
+        self._logger = logger
 
         self._workspace_polygon: List[Tuple[float, float]] = []
         self._visited: List[Tuple[float, float]] = []
@@ -84,9 +86,14 @@ class RandomWaypointExplorer:
     def next_waypoint(self, robot_xy: Tuple[float, float]) -> Optional[Tuple[float, float]]:
         grid_waypoint = self._next_exploration_grid_waypoint(robot_xy)
         if grid_waypoint is not None:
+            self._log_info(
+                "Explorer selected exploration-grid waypoint: "
+                f"({grid_waypoint[0]:.2f},{grid_waypoint[1]:.2f})"
+            )
             return grid_waypoint
 
         if len(self._workspace_polygon) < 3:
+            self._log_warn("Explorer has no workspace polygon for random fallback sampling.")
             return None
 
         rx, ry = robot_xy
@@ -120,6 +127,7 @@ class RandomWaypointExplorer:
             if not self._is_traversable(x, y):
                 continue
 
+            self._log_info(f"Explorer selected random fallback waypoint: ({x:.2f},{y:.2f})")
             return (x, y)
 
         # Relax revisit requirement, but keep step range and traversability.
@@ -138,8 +146,10 @@ class RandomWaypointExplorer:
                 continue
             if not self._is_traversable(x, y):
                 continue
+            self._log_info(f"Explorer selected relaxed random fallback waypoint: ({x:.2f},{y:.2f})")
             return (x, y)
 
+        self._log_warn("Explorer failed to find any valid waypoint.")
         return None
 
     def _next_exploration_grid_waypoint(
@@ -266,6 +276,14 @@ class RandomWaypointExplorer:
         if v < 0:
             return True
         return v < self._occ_lethal
+
+    def _log_info(self, msg: str) -> None:
+        if self._logger is not None:
+            self._logger.info(msg)
+
+    def _log_warn(self, msg: str) -> None:
+        if self._logger is not None:
+            self._logger.warn(msg)
 
     @staticmethod
     def _is_near_any(
