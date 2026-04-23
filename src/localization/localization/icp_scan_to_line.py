@@ -612,7 +612,7 @@ class IcpScanToLine(Node):
         # Minimum base rotation required before adding more lines to the map.
         self.declare_parameter("map_update_min_rotation_deg", 8.0)
         # If false, keep the seeded line map fixed after initialization.
-        self.declare_parameter("update_map_lines", True)
+        self.declare_parameter("update_map_lines", False)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
