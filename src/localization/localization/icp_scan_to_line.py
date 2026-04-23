@@ -598,7 +598,7 @@ class IcpScanToLine(Node):
         # Minimum midpoint separation before a similar detected line is inserted into the map.
         self.declare_parameter("map_insert_min_separation", 0.35)
         # If true, merge near-duplicate collinear segments into a longer segment.
-        self.declare_parameter("map_merge_lines", True)
+        self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
         self.declare_parameter("map_merge_angle_deg", 5.0)
         # Maximum perpendicular distance (m) between segments for merging.
