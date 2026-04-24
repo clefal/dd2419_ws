@@ -558,7 +558,7 @@ class IcpScanToLine(Node):
         # Maximum range kept when turning scan beams into points for mapping and ICP.
         self.declare_parameter("range_max_clip", 6.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 5)
+        self.declare_parameter("stack_scans", 35)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -600,10 +600,10 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_insert_max_angle_deg", 10.0)
         # Maximum perpendicular offset (m) for considering a new line similar to an existing one
         # during insertion filtering. Smaller values reject more parallel nearby duplicates.
-        self.declare_parameter("map_insert_max_perp_dist", 0.15)
+        self.declare_parameter("map_insert_max_perp_dist", 0.25)
         # Minimum midpoint separation (m) between two already-similar lines before the new line
         # is rejected as a duplicate. Larger values make insertion more conservative.
-        self.declare_parameter("map_insert_min_separation", 0.35)
+        self.declare_parameter("map_insert_min_separation", 0.5)
         # If true, merge near-duplicate collinear segments into a longer segment.
         self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
@@ -996,11 +996,13 @@ class IcpScanToLine(Node):
         T_odom_laser = T_odom_base @ T_base_laser
 
         _, current_points_laser = self.preprocess_scan(scan)
-        if current_points_laser.shape[0] < 20:
+        if current_points_laser.shape[0] < 100:
+            self.get_logger().warn("Ignoring scan with too few points")
             return
 
         stacked_points_laser = self.build_stacked_points(current_points_laser, T_odom_laser)
-        if stacked_points_laser.shape[0] < 20:
+        if stacked_points_laser.shape[0] < 100:
+            self.get_logger().warn("Ignoring scan with too few stacked points")
             return
 
         T_map_laser_init = self.T_map_odom @ T_odom_laser
