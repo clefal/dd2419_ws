@@ -491,10 +491,10 @@ class Detection(Node):
         # define tolerances
         # loose thresholds tol_red = 0.04    tol_green = 0.02 tol_blue = 0.025 tol_wood = 0.012 tol_box = 0.02    
   
-        # medium trehsholds
-        tol_red = 0.03   
-        tol_green = 0.01
-        tol_blue = 0.018
+        # used trehsholds
+        tol_red = 0.035   
+        tol_green = 0.015
+        tol_blue = 0.02
         tol_box = 0.02  
 
         # strict thresholds
