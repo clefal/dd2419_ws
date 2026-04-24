@@ -35,7 +35,7 @@ class Detection(Node):
         self.declare_parameter("box_max_width", 0.23)
         self.declare_parameter("obj_tolerance", 0.03)
         self.declare_parameter("buffer_size", 3)
-        self.declare_parameter("max_general_counter", 5000)
+        self.declare_parameter("max_general_counter", 12000)
         self.declare_parameter("obstacle_distance_m", 0.15)
         self.declare_parameter("occupancy_threshold", 90) # threshold used for occupancy grid check
 
