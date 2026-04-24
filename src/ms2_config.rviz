@@ -8,9 +8,7 @@ Panels:
         - /Status1
         - /Grid1
         - /Path1/Topic1
-        - /TF1
         - /TF1/Frames1
-        - /Map2
       Splitter Ratio: 0.5277161598205566
     Tree Height: 1258
   - Class: rviz_common/Selection
@@ -86,7 +84,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: false
-      Enabled: false
+      Enabled: true
       Name: Map
       Topic:
         Depth: 5
@@ -102,7 +100,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /nav/planning_grid_updates
       Use Timestamp: false
-      Value: false
+      Value: true
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
@@ -144,25 +142,19 @@ Visualization Manager:
           Value: false
         box0:
           Value: true
-        det_object0:
-          Value: true
         lidar_link:
           Value: false
         lidar_link_temp:
           Value: true
         map:
           Value: true
+        object0:
+          Value: true
+        object1:
+          Value: true
         odom:
           Value: true
         odom_temp:
-          Value: false
-        realsense_camera_color_frame:
-          Value: false
-        realsense_camera_color_optical_frame:
-          Value: false
-        realsense_camera_depth_frame:
-          Value: false
-        realsense_camera_depth_optical_frame:
           Value: false
         realsense_camera_link:
           Value: false
@@ -177,9 +169,9 @@ Visualization Manager:
         map:
           box0:
             {}
-          det_object0:
+          object0:
             {}
-          odom:
+          object1:
             {}
           start:
             {}
@@ -348,7 +340,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: false
-      Enabled: true
+      Enabled: false
       Name: Map
       Topic:
         Depth: 5
@@ -364,7 +356,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /map/exploration_grid_updates
       Use Timestamp: false
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/Polygon
       Color: 25; 255; 0
