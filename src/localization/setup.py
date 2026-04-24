@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'localization = localization.icp_scan_to_line:main',
+            'localization_motion_triggered = localization.icp_scan_to_line_motion_triggered:main',
             'filter_scan = localization.filter_scan:main',
             'map_odom_freezer = localization.map_odom_freezer:main',
         ],

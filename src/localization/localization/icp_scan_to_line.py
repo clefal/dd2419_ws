@@ -609,15 +609,15 @@ class IcpScanToLine(Node):
         # Maximum orientation difference (deg) for merging collinear segments.
         self.declare_parameter("map_merge_angle_deg", 5.0)
         # Maximum perpendicular distance (m) between segments for merging.
-        self.declare_parameter("map_merge_perp_dist", 0.1)
+        self.declare_parameter("map_merge_perp_dist", 0.03)
         # Maximum allowed along-line gap (m) between segment intervals for merging.
         self.declare_parameter("map_merge_max_gap", 0.25)
         # Minimum number of stored lines before the node switches from map seeding to ICP tracking.
         self.declare_parameter("init_min_lines", 2)
         # Minimum base translation required before adding more lines to the map.
-        self.declare_parameter("map_update_min_translation", 0.15)
+        self.declare_parameter("map_update_min_translation", 0.30)
         # Minimum base rotation required before adding more lines to the map.
-        self.declare_parameter("map_update_min_rotation_deg", 8.0)
+        self.declare_parameter("map_update_min_rotation_deg", 15.0)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
@@ -974,23 +974,28 @@ class IcpScanToLine(Node):
 
     def scan_callback(self, scan: LaserScan) -> None:
         init_time = time.time()
+        stamp = scan.header.stamp
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
+            if self.mto_initialized:
+                self.publish_map_to_odom(stamp)
             return
-
-        stamp = scan.header.stamp
 
         if not self.mto_initialized:
             self.try_initialize_mto(stamp)
+            if self.mto_initialized:
+                self.publish_map_to_odom(stamp)
             return
 
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
         if T_odom_base is None:
+            self.publish_map_to_odom(stamp)
             return
 
         laser_frame = scan.header.frame_id
         T_base_laser = self.lookup_T("base_link", laser_frame, stamp)
         if T_base_laser is None:
+            self.publish_map_to_odom(stamp)
             return
 
         T_odom_laser = T_odom_base @ T_base_laser
@@ -998,11 +1003,13 @@ class IcpScanToLine(Node):
         _, current_points_laser = self.preprocess_scan(scan)
         if current_points_laser.shape[0] < 100:
             self.get_logger().warn("Ignoring scan with too few points")
+            self.publish_map_to_odom(stamp)
             return
 
         stacked_points_laser = self.build_stacked_points(current_points_laser, T_odom_laser)
         if stacked_points_laser.shape[0] < 100:
             self.get_logger().warn("Ignoring scan with too few stacked points")
+            self.publish_map_to_odom(stamp)
             return
 
         T_map_laser_init = self.T_map_odom @ T_odom_laser
