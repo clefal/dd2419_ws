@@ -20,15 +20,15 @@ class ScanPreprocessor(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 4.0)
+        self.declare_parameter("range_max_clip", 5.0)
         # Maximum range kept in the published preprocessed scan message.
-        self.declare_parameter("range_max_filter_scan", 4.0)
+        self.declare_parameter("range_max_filter_scan", 5.0)
         # Median filter size applied to the raw range array.
         self.declare_parameter("median_kernel_size", 5)
         # Reject a beam if it differs from both adjacent beams by more than this range jump.
         self.declare_parameter("range_jump_thresh", 0.20)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.
-        self.declare_parameter("neighbor_dist_thresh", 0.05)
+        self.declare_parameter("neighbor_dist_thresh", 0.08)
 
         self.input_topic = self.get_parameter('input_topic').value
         self.output_topic = self.get_parameter('output_topic').value
@@ -66,7 +66,7 @@ class ScanPreprocessor(Node):
             scan,
             neighbor_dist_thresh=self.neighbor_dist_thresh,
         )
-
+        
         filtered_ranges[
             np.logical_and(np.isfinite(filtered_ranges), filtered_ranges > self.range_max_filter_scan)
         ] = np.inf

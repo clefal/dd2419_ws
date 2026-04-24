@@ -556,9 +556,9 @@ class IcpScanToLine(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 4.0)
+        self.declare_parameter("range_max_clip", 6.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 20)
+        self.declare_parameter("stack_scans", 5)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -568,7 +568,7 @@ class IcpScanToLine(Node):
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
-        self.declare_parameter("line_min_length", 0.3)
+        self.declare_parameter("line_min_length", 0.15)
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
@@ -595,7 +595,14 @@ class IcpScanToLine(Node):
         # Map maintenance
         # Hard cap on the number of stored map line segments.
         self.declare_parameter("map_max_lines", 50)
-        # Minimum midpoint separation before a similar detected line is inserted into the map.
+        # Maximum angle difference (deg) for considering a new line similar to an existing one
+        # during insertion filtering. Smaller values reject more near-duplicate lines.
+        self.declare_parameter("map_insert_max_angle_deg", 10.0)
+        # Maximum perpendicular offset (m) for considering a new line similar to an existing one
+        # during insertion filtering. Smaller values reject more parallel nearby duplicates.
+        self.declare_parameter("map_insert_max_perp_dist", 0.15)
+        # Minimum midpoint separation (m) between two already-similar lines before the new line
+        # is rejected as a duplicate. Larger values make insertion more conservative.
         self.declare_parameter("map_insert_min_separation", 0.35)
         # If true, merge near-duplicate collinear segments into a longer segment.
         self.declare_parameter("map_merge_lines", False)
@@ -645,6 +652,8 @@ class IcpScanToLine(Node):
         self.pose_smoothing_alpha = float(self.get_parameter("pose_smoothing_alpha").value)
 
         self.map_max_lines = int(self.get_parameter("map_max_lines").value)
+        self.map_insert_max_angle_deg = float(self.get_parameter("map_insert_max_angle_deg").value)
+        self.map_insert_max_perp_dist = float(self.get_parameter("map_insert_max_perp_dist").value)
         self.map_insert_min_separation = float(self.get_parameter("map_insert_min_separation").value)
         self.map_merge_lines = bool(self.get_parameter("map_merge_lines").value)
         self.map_merge_angle_deg = float(self.get_parameter("map_merge_angle_deg").value)
@@ -764,13 +773,17 @@ class IcpScanToLine(Node):
         )
 
     def should_insert_line(self, line: LineSegment) -> bool:
+        # A new line is rejected only if it is already similar to some existing line in
+        # all three senses: orientation, perpendicular offset, and midpoint proximity.
+        # The `continue` statements are intentional: if one existing line is not similar
+        # enough in angle or perpendicular offset, we skip that candidate and test the next.
         for existing in self.map_lines:
             angle = math.acos(np.clip(abs(existing.d @ line.d), 0.0, 1.0))
-            if angle > math.radians(10.0):
+            if angle > math.radians(self.map_insert_max_angle_deg):
                 continue
 
             perp_dist = abs(existing.n @ (line.mid - existing.q))
-            if perp_dist > 0.15:
+            if perp_dist > self.map_insert_max_perp_dist:
                 continue
 
             if np.linalg.norm(existing.mid - line.mid) < self.map_insert_min_separation:
