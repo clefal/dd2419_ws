@@ -227,7 +227,7 @@ class GoalManager(Node):
             elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
                 self.get_logger().warn('Arm reported cube out of reach. Backing up before retrying final approach.')
                 self._state = AutoState.BACKUP_BEFORE_PICKUP_RETRY
-                self.publish_backup_distance(0.6)
+                self.publish_backup_distance(0.3)
             elif msg.data in (
                 'PICK_UP_FAIL_NO_OBJECT',
                 'PICK_UP_FAIL_NO_START',
