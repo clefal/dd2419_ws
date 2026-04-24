@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <launch>
 
-  <arg name="publish_workspace_odom_frames" default="true"/>
-  <arg name="use_odom_freezer" default="false"/>
+  <arg name="publish_workspace_odom_frames" default="false"/>
+  <arg name="use_odom_freezer" default="true"/>
 
 
   <!-- Workspace/mapfile TF frames -->
@@ -30,7 +30,7 @@
   <node pkg="global_planner" exec="global_planner" name="global_planner" output="log">
     <param name="freeze_odom_before_planning" value="$(var use_odom_freezer)"/>
   </node>
-  <!-- <node pkg="detection" exec="detection" name="detection" output="log"/> -->
+  <node pkg="detection" exec="detection" name="detection" output="log"/>
   <node pkg="detection" exec="object_manager" name="object_manager" output="log"/>
 
 

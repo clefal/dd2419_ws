@@ -74,6 +74,7 @@ class ObjectManager(Node):
         self.create_timer(5, self.get_points_from_csv_once)
         #self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
+        self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
 
 # ----------------------------------
 
@@ -103,13 +104,22 @@ class ObjectManager(Node):
         '''checks similarity of the obj with the objects in the object_list, returns the number of similar objects.
         If object is similar to another object then this object will be updated.'''
         similarity_counter = 0
+        cube_types = ('red_cube', 'green_cube', 'blue_cube', 'cube', 'map_cube')
+
+        if obj.type in cube_types:
+            for o in self.object_list:
+                if o.type in ('box', 'map_box') and math.hypot(o.last_x - obj.last_x, o.last_y - obj.last_y) < self.cube_box_exclusion_threshold:
+                    return 1
 
         # maybe this can be done quicker with pandas or something like that, so if it becomes a problem then i can look into that again
         if len(self.object_list)>0:
             for idx, o in enumerate(self.object_list):
-                if o.type == obj.type or o.type == 'map_cube':
+                if o.type == obj.type or o.type == 'map_cube' or o.type=='map_box':
                     # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
                     if o.type == 'map_cube' and (obj.type == 'box' or obj.type == 'map_box'):
+                        continue
+
+                    if o.type == 'map_box' and obj.type != 'box' and obj.type != 'map_box':
                         continue
                         
                     if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
@@ -119,11 +129,11 @@ class ObjectManager(Node):
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         updated_obj.confidence = updated_obj.confidence + 1 # increase confidence by 1 every time we spot an object                         
-                        self.object_list[idx] = updated_obj
                         updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
                         if updated_obj.status == 'unavailable' and obj.type not in ('map_cube', 'map_box'):
                             updated_obj.status = 'available'
 
+                        self.object_list[idx] = updated_obj
                         similarity_counter += 1
             
         return similarity_counter       

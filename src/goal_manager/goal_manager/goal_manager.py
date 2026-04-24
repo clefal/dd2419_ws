@@ -69,11 +69,12 @@ class GoalManager(Node):
         self._search_yaw = 3.1415/2
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
-            min_step_m=1.0,
-            max_step_m=2.0,
+            min_step_m=1.5,
+            max_step_m=2.5,
             min_revisit_dist_m=0.8,
             failed_blacklist_radius_m=0.6,
             occ_lethal=90,
+            logger=self.get_logger(),
         )
         self.declare_parameter('box_standoff_distance', 0.6)
 
@@ -357,7 +358,7 @@ class GoalManager(Node):
             return
 
         self._goals_available = res.goals_available
-        self.get_logger().info(f'Goals available service returned: {res.goals_available}')
+        # self.get_logger().info(f'Goals available service returned: {res.goals_available}')
 
         if not res.goals_available:
             if reason == 'search_retarget':

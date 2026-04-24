@@ -24,7 +24,7 @@ class Mapping(Node):
         self.declare_parameter("exploration_grid_resolution", 0.10) # m/cell
         self.declare_parameter("min_exploration_view_angle", -30) #deg   
         self.declare_parameter("range_exploration_view_angle", 60) #deg 
-        self.declare_parameter("exploration_range_max_update", 1.5) # m
+        self.declare_parameter("exploration_range_max_update", 2.0) # m
 
         # LaserScan input topic. Default assumes an upstream scan preprocessor node.
         self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
