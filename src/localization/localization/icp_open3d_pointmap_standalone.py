@@ -268,9 +268,9 @@ class Open3DPointMapLocalization(Node):
         self.declare_parameter("min_scan_points", 80)
 
         # Motion-trigger accumulation
-        self.declare_parameter("trigger_translation", 0.30)
-        self.declare_parameter("trigger_rotation_deg", 10.0)
-        self.declare_parameter("trigger_max_scans", 14)
+        self.declare_parameter("trigger_translation", 0.20)
+        self.declare_parameter("trigger_rotation_deg", 8.0)
+        self.declare_parameter("trigger_max_scans", 12)
         self.declare_parameter("publish_wait_debug", True)
 
         # Open3D ICP
@@ -290,6 +290,12 @@ class Open3DPointMapLocalization(Node):
         self.declare_parameter("pointmap_min_points", 200)
         self.declare_parameter("map_update_min_translation", 0.25)
         self.declare_parameter("map_update_min_rotation_deg", 10.0)
+        # Stricter gate for adding corrected scan points into the map.
+        # Localization can be accepted while map update is rejected.
+        self.declare_parameter("map_update_min_fitness", 0.85)
+        self.declare_parameter("map_update_max_rmse", 0.055)
+        self.declare_parameter("map_update_max_correction_translation", 0.05)
+        self.declare_parameter("map_update_max_correction_rotation_deg", 2.0)
 
         # Debug
         self.declare_parameter("log_icp_debug", True)
@@ -331,6 +337,14 @@ class Open3DPointMapLocalization(Node):
         self.pointmap_min_points = int(self.get_parameter("pointmap_min_points").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
+        self.map_update_min_fitness = float(self.get_parameter("map_update_min_fitness").value)
+        self.map_update_max_rmse = float(self.get_parameter("map_update_max_rmse").value)
+        self.map_update_max_correction_translation = float(
+            self.get_parameter("map_update_max_correction_translation").value
+        )
+        self.map_update_max_correction_rotation_deg = float(
+            self.get_parameter("map_update_max_correction_rotation_deg").value
+        )
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
         self.tf_buffer = Buffer()
@@ -533,6 +547,7 @@ class Open3DPointMapLocalization(Node):
         )
 
     def accept_icp_result(self, T_init: np.ndarray, result: IcpOutcome) -> bool:
+        """Gate for using ICP to correct localization / map->odom."""
         if not result.converged:
             return False
         if result.correspondences < self.min_scan_points:
@@ -548,6 +563,22 @@ class Open3DPointMapLocalization(Node):
         if math.hypot(dx, dy) > self.icp_accept_max_translation:
             return False
         if abs(math.degrees(dth)) > self.icp_accept_max_rotation_deg:
+            return False
+        return True
+
+    def accept_map_update_result(self, T_init: np.ndarray, result: IcpOutcome) -> bool:
+        """Stricter gate for inserting aligned scan points into the point map."""
+        if not self.accept_icp_result(T_init, result):
+            return False
+        if result.fitness < self.map_update_min_fitness:
+            return False
+        if result.rmse > self.map_update_max_rmse:
+            return False
+
+        dx, dy, dth = relative_pose(T_init, result.T_map_laser)
+        if math.hypot(dx, dy) > self.map_update_max_correction_translation:
+            return False
+        if abs(math.degrees(dth)) > self.map_update_max_correction_rotation_deg:
             return False
         return True
 
@@ -622,7 +653,8 @@ class Open3DPointMapLocalization(Node):
             return
 
         result = self.run_open3d_icp(stacked_laser, self.point_map, T_map_laser_init)
-        accepted = self.accept_icp_result(T_map_laser_init, result)
+        accepted_for_localization = self.accept_icp_result(T_map_laser_init, result)
+        accepted_for_map_update = self.accept_map_update_result(T_map_laser_init, result)
 
         aligned_map = transform_points(result.T_map_laser, stacked_laser)
         self.publish_debug_clouds(stamp, stacked_laser, T_map_laser_init, aligned_map)
@@ -634,10 +666,13 @@ class Open3DPointMapLocalization(Node):
                 f"reasons={trigger_reasons} dist={trigger_trans:.3f}m rot={trigger_rot_deg:.2f}deg "
                 f"fitness={result.fitness:.3f} rmse={result.rmse:.4f} corr={result.correspondences} "
                 f"dx={dx:.3f} dy={dy:.3f} dth_deg={math.degrees(dth):.2f} "
-                f"time={result.elapsed_ms:.2f}ms accepted={accepted} map_points={self.point_map.shape[0]}"
+                f"time={result.elapsed_ms:.2f}ms "
+                f"loc_accepted={accepted_for_localization} "
+                f"map_update_accepted={accepted_for_map_update} "
+                f"map_points={self.point_map.shape[0]}"
             )
 
-        if accepted:
+        if accepted_for_localization:
             T_map_base_est = result.T_map_laser @ T_laser_base
             T_map_odom_est = T_map_base_est @ invert_transform(T_odom_base)
             self.T_map_odom = interpolate_pose(self.T_map_odom, T_map_odom_est, self.pose_smoothing_alpha)
@@ -645,7 +680,7 @@ class Open3DPointMapLocalization(Node):
             T_map_laser_smoothed = self.T_map_odom @ T_odom_laser
             T_map_base_smoothed = self.T_map_odom @ T_odom_base
 
-            if self.should_update_map(T_map_base_smoothed):
+            if accepted_for_map_update and self.should_update_map(T_map_base_smoothed):
                 new_points_map = transform_points(T_map_laser_smoothed, stacked_laser)
                 self.add_points_to_map(new_points_map)
                 self.last_map_update_base_pose = T_map_base_smoothed.copy()
