@@ -618,6 +618,7 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_update_min_translation", 0.30)
         # Minimum base rotation required before adding more lines to the map.
         self.declare_parameter("map_update_min_rotation_deg", 15.0)
+        self.declare_parameter("tf_lookup_timeout_sec", 0.2)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
@@ -662,12 +663,13 @@ class IcpScanToLine(Node):
         self.init_min_lines = int(self.get_parameter("init_min_lines").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
+        self.tf_lookup_timeout_sec = float(self.get_parameter("tf_lookup_timeout_sec").value)
 
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
         # TF
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # State
@@ -705,18 +707,19 @@ class IcpScanToLine(Node):
 
     def try_initialize_mto(self, stamp) -> bool:
         try:
+            timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
             if not self.tf_buffer.can_transform(
                 self.map_frame,
                 "start",
                 stamp,
-                timeout=rclpy.time.Duration(seconds=0.0),
+                timeout=timeout,
             ):
                 return False
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
                 stamp,
-                timeout=rclpy.time.Duration(seconds=0.0)
+                timeout=timeout
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
             self.mto_initialized = True
@@ -737,11 +740,12 @@ class IcpScanToLine(Node):
 
     def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
+            timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
             if not self.tf_buffer.can_transform(
                 target,
                 source,
                 stamp,
-                timeout=rclpy.time.Duration(seconds=0.0),
+                timeout=timeout,
             ):
                 self.get_logger().warn(
                     f"TF not ready {target} <- {source} at scan stamp "
@@ -749,7 +753,7 @@ class IcpScanToLine(Node):
                 )
                 return None
             tf_msg = self.tf_buffer.lookup_transform(
-                target, source, stamp, timeout=rclpy.time.Duration(seconds=0.0)
+                target, source, stamp, timeout=timeout
             )
             return tfmsg_to_matrix(tf_msg)
         except TransformException as ex:
