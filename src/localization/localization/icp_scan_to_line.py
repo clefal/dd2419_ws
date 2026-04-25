@@ -705,11 +705,18 @@ class IcpScanToLine(Node):
 
     def try_initialize_mto(self, stamp) -> bool:
         try:
+            if not self.tf_buffer.can_transform(
+                self.map_frame,
+                "start",
+                stamp,
+                timeout=rclpy.time.Duration(seconds=0.0),
+            ):
+                return False
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
                 stamp,
-                timeout=rclpy.time.Duration(seconds=1)
+                timeout=rclpy.time.Duration(seconds=0.0)
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
             self.mto_initialized = True
@@ -730,10 +737,19 @@ class IcpScanToLine(Node):
 
     def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
-            # future = self.tf_buffer.wait_for_transform_async(target, source, stamp)
-            # rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+            if not self.tf_buffer.can_transform(
+                target,
+                source,
+                stamp,
+                timeout=rclpy.time.Duration(seconds=0.0),
+            ):
+                self.get_logger().warn(
+                    f"TF not ready {target} <- {source} at scan stamp "
+                    f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
+                )
+                return None
             tf_msg = self.tf_buffer.lookup_transform(
-                target, source, stamp, timeout=rclpy.time.Duration(seconds=1)
+                target, source, stamp, timeout=rclpy.time.Duration(seconds=0.0)
             )
             return tfmsg_to_matrix(tf_msg)
         except TransformException as ex:
