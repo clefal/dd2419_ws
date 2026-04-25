@@ -24,7 +24,7 @@ class ScanPreprocessor(Node):
         # Maximum range kept in the published preprocessed scan message.
         self.declare_parameter("range_max_filter_scan", 7.0)
         # Median filter size applied to the raw range array.
-        self.declare_parameter("median_kernel_size", 3)
+        self.declare_parameter("median_kernel_size", 5)
         # Reject a beam if it differs from both adjacent beams by more than this range jump.
         self.declare_parameter("range_jump_thresh", 0.20)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.

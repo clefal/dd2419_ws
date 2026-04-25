@@ -28,7 +28,11 @@ setup(
             'localization_motion_triggered = localization.icp_scan_to_line_motion_triggered:main',
             'filter_scan = localization.filter_scan:main',
             'map_odom_freezer = localization.map_odom_freezer:main',
-            'localization_open3d = localization.icp_open3d_pointmap_standalone:main'
+            'localization_open3d_v0 = localization.icp_open3d_pointmap_standalone_v0:main',
+            'localization_open3d = localization.icp_open3d_pointmap_standalone:main',
+            'localization_open3d_clustered = localization.icp_open3d_clustered_pointmap:main',
+            'localization_open3d_clustered_novel = localization.icp_open3d_clustered_novel_pointmap:main',
+            'localization_open3d_clustered_novel_fallback = localization.icp_open3d_clustered_novel_fallback_pointmap:main'
         ],
     },
 )

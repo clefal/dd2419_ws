@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Standalone ROS 2 node for 2D LaserScan scan-to-map point-cloud ICP using Open3D.
+Standalone ROS 2 node for 2D LaserScan scan-to-map point-cloud ICP using Open3D, with significant-cluster filtering and optional novel-point map insertion.
 
 What it does
 ------------
@@ -8,7 +8,10 @@ What it does
 - Uses odom->base and base->laser TF as the motion prior.
 - Accumulates scans until enough motion/time has passed.
 - Builds a point-cloud map in the map frame.
-- Runs Open3D ICP from the accumulated scan to the point-cloud map.
+- Filters scan points into significant clusters before ICP/map insertion.
+- Optionally inserts only points that are novel with respect to the current map,
+  avoiding repeated insertion of already-mapped walls.
+- Runs Open3D ICP from the accumulated filtered scan to the point-cloud map.
 - If the ICP result is accepted, updates and broadcasts map->odom.
 - Publishes RViz-friendly PointCloud2 topics:
     * /localization/open3d_point_map
@@ -243,9 +246,9 @@ class IcpOutcome:
     converged: bool
 
 
-class Open3DPointMapLocalization(Node):
+class Open3DClusteredPointMapLocalization(Node):
     def __init__(self) -> None:
-        super().__init__("open3d_pointmap_localization")
+        super().__init__("open3d_clustered_novel_fallback_pointmap_localization")
 
         # Topics and frames
         self.declare_parameter("scan_topic", "/localization/preprocessed_scan")
@@ -263,49 +266,65 @@ class Open3DPointMapLocalization(Node):
 
         # Scan preprocessing
         self.declare_parameter("range_min_clip", 0.15)
-        self.declare_parameter("range_max_clip", 3.5)
+        self.declare_parameter("range_max_clip", 5.0)
         self.declare_parameter("scan_stride", 1)
         self.declare_parameter("min_scan_points", 80)
 
+        # Cluster filtering
+        self.declare_parameter("enable_cluster_filter", True)
+        self.declare_parameter("cluster_jump_thresh_near", 0.16)
+        self.declare_parameter("cluster_jump_thresh_far", 0.55)
+        self.declare_parameter("cluster_min_points", 8)
+        self.declare_parameter("cluster_min_extent", 0.40)
+        self.declare_parameter("cluster_max_mean_range", 5.0)
+
         # Motion-trigger accumulation
-        self.declare_parameter("trigger_translation", 0.15)
-        self.declare_parameter("trigger_rotation_deg", 4.0)
-        self.declare_parameter("trigger_max_scans", 6)
+        self.declare_parameter("trigger_translation", 0.20)
+        self.declare_parameter("trigger_rotation_deg", 5.0)
+        self.declare_parameter("trigger_max_scans", 14)
         self.declare_parameter("publish_wait_debug", True)
 
-        # Open3D ICP
-        self.declare_parameter("open3d_max_corr_dist", 0.10)
-        self.declare_parameter("open3d_max_iters", 40)
-        self.declare_parameter("open3d_source_voxel", 0.04)
+        # Open3D ICP — more flexible
+        self.declare_parameter("open3d_max_corr_dist", 0.30)
+        self.declare_parameter("open3d_max_iters", 70)
+        self.declare_parameter("open3d_source_voxel", 0.035)
         self.declare_parameter("open3d_target_voxel", 0.08)
-        self.declare_parameter("open3d_min_fitness", 0.55)
-        self.declare_parameter("open3d_max_rmse", 0.08)
-        self.declare_parameter("icp_accept_max_translation", 0.10)
-        self.declare_parameter("icp_accept_max_rotation_deg", 4.0)
+        self.declare_parameter("open3d_min_fitness", 0.30)
+        self.declare_parameter("open3d_max_rmse", 0.13)
+        self.declare_parameter("icp_accept_max_translation", 0.38)
+        self.declare_parameter("icp_accept_max_rotation_deg", 8.0)
         self.declare_parameter("pose_smoothing_alpha", 0.06)
 
         # Point map maintenance
-        self.declare_parameter("pointmap_voxel", 0.08)
+        self.declare_parameter("pointmap_voxel", 0.04)
         self.declare_parameter("pointmap_max_points", 40000)
         self.declare_parameter("pointmap_min_points", 200)
+
+        # ICP-corrected map update gate — still stricter than localization
         self.declare_parameter("map_update_min_translation", 0.30)
-        self.declare_parameter("map_update_min_rotation_deg", 12.0)
+        self.declare_parameter("map_update_min_rotation_deg", 10.0)
+        self.declare_parameter("map_update_min_fitness", 0.60)
+        self.declare_parameter("map_update_max_rmse", 0.085)
+        self.declare_parameter("map_update_max_correction_translation", 0.12)
+        self.declare_parameter("map_update_max_correction_rotation_deg", 3.5)
 
-        # Strict gate for adding ICP-corrected scan points into the map.
-        # Localization can be accepted while map update is rejected.
-        self.declare_parameter("map_update_min_fitness", 0.75)
-        self.declare_parameter("map_update_max_rmse", 0.065)
-        self.declare_parameter("map_update_max_correction_translation", 0.06)
-        self.declare_parameter("map_update_max_correction_rotation_deg", 2.0)
+        # Novel-point insertion
+        self.declare_parameter("insert_only_novel_points", True)
+        self.declare_parameter("novel_point_min_dist", 0.12)
+        self.declare_parameter("novel_point_max_dist", 5.0)
+        self.declare_parameter("novel_min_points", 8)
 
-        # Exploration fallback: when ICP is rejected because the robot is seeing
-        # mostly unmapped space, add points using the odometry prior only.
-        # This does NOT correct map->odom; it only grows the point map.
+        # Novel fallback
+        self.declare_parameter("allow_novel_update_when_map_update_rejected", True)
+        self.declare_parameter("novel_update_min_fitness", 0.45)
+        self.declare_parameter("novel_update_max_rmse", 0.11)
+
+        # Odom-only map update fallback
         self.declare_parameter("allow_odom_map_update_when_icp_rejected", True)
-        self.declare_parameter("odom_map_update_min_translation", 0.25)
+        self.declare_parameter("odom_map_update_min_translation", 0.30)
         self.declare_parameter("odom_map_update_min_rotation_deg", 10.0)
-        self.declare_parameter("odom_map_update_max_fitness", 0.60)
-        self.declare_parameter("odom_map_update_min_corr", 30)
+        self.declare_parameter("odom_map_update_max_fitness", 0.08)
+        self.declare_parameter("odom_map_update_min_corr", 0)
 
         # Debug
         self.declare_parameter("log_icp_debug", True)
@@ -327,6 +346,13 @@ class Open3DPointMapLocalization(Node):
         self.scan_stride = int(self.get_parameter("scan_stride").value)
         self.min_scan_points = int(self.get_parameter("min_scan_points").value)
 
+        self.enable_cluster_filter = bool(self.get_parameter("enable_cluster_filter").value)
+        self.cluster_jump_thresh_near = float(self.get_parameter("cluster_jump_thresh_near").value)
+        self.cluster_jump_thresh_far = float(self.get_parameter("cluster_jump_thresh_far").value)
+        self.cluster_min_points = int(self.get_parameter("cluster_min_points").value)
+        self.cluster_min_extent = float(self.get_parameter("cluster_min_extent").value)
+        self.cluster_max_mean_range = float(self.get_parameter("cluster_max_mean_range").value)
+
         self.trigger_translation = float(self.get_parameter("trigger_translation").value)
         self.trigger_rotation_deg = float(self.get_parameter("trigger_rotation_deg").value)
         self.trigger_max_scans = max(1, int(self.get_parameter("trigger_max_scans").value))
@@ -345,6 +371,15 @@ class Open3DPointMapLocalization(Node):
         self.pointmap_voxel = float(self.get_parameter("pointmap_voxel").value)
         self.pointmap_max_points = int(self.get_parameter("pointmap_max_points").value)
         self.pointmap_min_points = int(self.get_parameter("pointmap_min_points").value)
+        self.insert_only_novel_points = bool(self.get_parameter("insert_only_novel_points").value)
+        self.novel_point_min_dist = float(self.get_parameter("novel_point_min_dist").value)
+        self.novel_point_max_dist = float(self.get_parameter("novel_point_max_dist").value)
+        self.novel_min_points = int(self.get_parameter("novel_min_points").value)
+        self.allow_novel_update_when_map_update_rejected = bool(
+            self.get_parameter("allow_novel_update_when_map_update_rejected").value
+        )
+        self.novel_update_min_fitness = float(self.get_parameter("novel_update_min_fitness").value)
+        self.novel_update_max_rmse = float(self.get_parameter("novel_update_max_rmse").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
         self.map_update_min_fitness = float(self.get_parameter("map_update_min_fitness").value)
@@ -355,7 +390,6 @@ class Open3DPointMapLocalization(Node):
         self.map_update_max_correction_rotation_deg = float(
             self.get_parameter("map_update_max_correction_rotation_deg").value
         )
-
         self.allow_odom_map_update_when_icp_rejected = bool(
             self.get_parameter("allow_odom_map_update_when_icp_rejected").value
         )
@@ -369,7 +403,6 @@ class Open3DPointMapLocalization(Node):
             self.get_parameter("odom_map_update_max_fitness").value
         )
         self.odom_map_update_min_corr = int(self.get_parameter("odom_map_update_min_corr").value)
-
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
         self.tf_buffer = Buffer()
@@ -391,7 +424,7 @@ class Open3DPointMapLocalization(Node):
         self.aligned_scan_pub = self.create_publisher(PointCloud2, self.aligned_scan_topic, 10)
 
         self.get_logger().info(
-            "Open3D point-map localization started | "
+            "Open3D clustered novel-fallback point-map localization started | "
             f"scan_topic={self.scan_topic} map_frame={self.map_frame} "
             f"odom_frame={self.odom_frame} base_frame={self.base_frame} "
             f"point_map_topic={self.point_map_topic}"
@@ -503,16 +536,105 @@ class Open3DPointMapLocalization(Node):
             reasons.append("num_scans")
         return len(reasons) > 0, "+".join(reasons), trans, rot_deg
 
-    def add_points_to_map(self, points_map: np.ndarray) -> None:
+    def filter_significant_clusters(self, points: np.ndarray) -> np.ndarray:
+        """Keep scan-ordered clusters that look like real, spatially significant objects.
+
+        The input points are assumed to be in LaserScan angular order. The split
+        threshold grows with range so a far wall is not broken into many tiny
+        clusters simply because angular beam spacing increases with distance.
+        """
+        if not self.enable_cluster_filter or points.shape[0] == 0:
+            return points.copy()
+
+        clusters = []
+        start = 0
+        range_norm = max(self.range_max_clip, 1e-6)
+
+        for i in range(1, points.shape[0]):
+            r_prev = float(np.linalg.norm(points[i - 1]))
+            r_curr = float(np.linalg.norm(points[i]))
+            r = 0.5 * (r_prev + r_curr)
+            alpha = float(np.clip(r / range_norm, 0.0, 1.0))
+            jump_thresh = (
+                (1.0 - alpha) * self.cluster_jump_thresh_near
+                + alpha * self.cluster_jump_thresh_far
+            )
+            if float(np.linalg.norm(points[i] - points[i - 1])) > jump_thresh:
+                if i - start > 0:
+                    clusters.append(points[start:i])
+                start = i
+
+        if points.shape[0] - start > 0:
+            clusters.append(points[start:])
+
+        kept = []
+        for cl in clusters:
+            if cl.shape[0] < self.cluster_min_points:
+                continue
+            mean_range = float(np.mean(np.linalg.norm(cl, axis=1)))
+            if mean_range > self.cluster_max_mean_range:
+                continue
+            extent = float(np.linalg.norm(np.max(cl, axis=0) - np.min(cl, axis=0)))
+            if extent < self.cluster_min_extent:
+                continue
+            kept.append(cl)
+
+        if not kept:
+            return np.zeros((0, 2), dtype=float)
+        return np.vstack(kept)
+
+    def select_novel_points_for_map(self, points_map: np.ndarray) -> np.ndarray:
+        """Return only points that are genuinely new relative to the current map.
+
+        This prevents repeatedly inserting the same wall with slightly different
+        poses, which is the main cause of thick/ghost walls. A point is novel if
+        its nearest existing map point is farther than novel_point_min_dist.
+        Points beyond novel_point_max_dist from the robot/map frame are ignored
+        as a simple far-noise guard.
+        """
         if points_map.shape[0] == 0:
-            return
+            return points_map.copy()
+        if not self.insert_only_novel_points:
+            return points_map.copy()
+
+        ranges = np.linalg.norm(points_map[:, :2], axis=1)
+        candidate_mask = ranges <= self.novel_point_max_dist
+        candidates = points_map[candidate_mask]
+        if candidates.shape[0] == 0:
+            return np.zeros((0, 2), dtype=float)
+
+        if self.point_map.shape[0] == 0:
+            return candidates.copy()
+
+        # Query nearest existing map point. Open3D's KDTreeFlann operates on 3D
+        # point clouds, so convert both clouds to z=0.
+        map_cloud = points2d_to_o3d(self.point_map)
+        kdtree = o3d.geometry.KDTreeFlann(map_cloud)
+
+        keep = []
+        min_dist2 = self.novel_point_min_dist * self.novel_point_min_dist
+        for p in candidates:
+            query = np.array([float(p[0]), float(p[1]), 0.0], dtype=float)
+            _, _, d2 = kdtree.search_knn_vector_3d(query, 1)
+            if not d2 or float(d2[0]) >= min_dist2:
+                keep.append(p)
+
+        if len(keep) == 0:
+            return np.zeros((0, 2), dtype=float)
+        return np.asarray(keep, dtype=float).reshape((-1, 2))
+
+    def add_points_to_map(self, points_map: np.ndarray) -> int:
+        if points_map.shape[0] == 0:
+            return 0
         if self.point_map.shape[0] == 0:
             merged = points_map.copy()
         else:
             merged = np.vstack((self.point_map, points_map))
+        before = self.point_map.shape[0]
         merged = voxel_downsample_2d(merged, self.pointmap_voxel)
         merged = limit_points(merged, self.pointmap_max_points)
         self.point_map = merged
+        return max(0, int(self.point_map.shape[0] - before))
 
     def should_update_map(self, T_map_base: np.ndarray) -> bool:
         if self.last_map_update_base_pose is None:
@@ -523,42 +645,39 @@ class Open3DPointMapLocalization(Node):
             or abs(math.degrees(dth)) >= self.map_update_min_rotation_deg
         )
 
-    def should_odom_update_map(self, T_map_base_odom_prior: np.ndarray) -> bool:
-        if self.last_map_update_base_pose is None:
-            return True
-        dx, dy, dth = relative_pose(self.last_map_update_base_pose, T_map_base_odom_prior)
-        return (
-            math.hypot(dx, dy) >= self.odom_map_update_min_translation
-            or abs(math.degrees(dth)) >= self.odom_map_update_min_rotation_deg
-        )
-
-    def accept_map_update(self, T_init: np.ndarray, result: IcpOutcome) -> bool:
-        if not result.converged:
-            return False
+    def should_update_map_with_icp(
+        self,
+        T_init: np.ndarray,
+        result: IcpOutcome,
+        T_map_base_smoothed: np.ndarray,
+    ) -> bool:
         if result.fitness < self.map_update_min_fitness:
             return False
         if not math.isfinite(result.rmse) or result.rmse > self.map_update_max_rmse:
             return False
-
         dx, dy, dth = relative_pose(T_init, result.T_map_laser)
         if math.hypot(dx, dy) > self.map_update_max_correction_translation:
             return False
         if abs(math.degrees(dth)) > self.map_update_max_correction_rotation_deg:
             return False
-        return True
+        return self.should_update_map(T_map_base_smoothed)
 
-    def accept_odom_map_update(self, result: IcpOutcome, T_map_base_odom_prior: np.ndarray) -> bool:
+    def should_update_map_with_odom(self, T_map_base_odom: np.ndarray, result: IcpOutcome) -> bool:
         if not self.allow_odom_map_update_when_icp_rejected:
             return False
-        if self.is_turning:
-            return False
+        # If fitness is high, ICP probably sees known map but requested a large/ambiguous correction;
+        # do not insert odom points in that case, or we may duplicate/blur existing walls.
         if result.fitness > self.odom_map_update_max_fitness:
             return False
         if result.correspondences < self.odom_map_update_min_corr:
             return False
-        if not self.should_odom_update_map(T_map_base_odom_prior):
-            return False
-        return True
+        if self.last_map_update_base_pose is None:
+            return True
+        dx, dy, dth = relative_pose(self.last_map_update_base_pose, T_map_base_odom)
+        return (
+            math.hypot(dx, dy) >= self.odom_map_update_min_translation
+            or abs(math.degrees(dth)) >= self.odom_map_update_min_rotation_deg
+        )
 
     def run_open3d_icp(
         self,
@@ -609,6 +728,7 @@ class Open3DPointMapLocalization(Node):
         )
 
     def accept_icp_result(self, T_init: np.ndarray, result: IcpOutcome) -> bool:
+        """Gate for using ICP to correct localization / map->odom."""
         if not result.converged:
             return False
         if result.correspondences < self.min_scan_points:
@@ -624,6 +744,22 @@ class Open3DPointMapLocalization(Node):
         if math.hypot(dx, dy) > self.icp_accept_max_translation:
             return False
         if abs(math.degrees(dth)) > self.icp_accept_max_rotation_deg:
+            return False
+        return True
+
+    def accept_map_update_result(self, T_init: np.ndarray, result: IcpOutcome) -> bool:
+        """Stricter gate for inserting aligned scan points into the point map."""
+        if not self.accept_icp_result(T_init, result):
+            return False
+        if result.fitness < self.map_update_min_fitness:
+            return False
+        if result.rmse > self.map_update_max_rmse:
+            return False
+
+        dx, dy, dth = relative_pose(T_init, result.T_map_laser)
+        if math.hypot(dx, dy) > self.map_update_max_correction_translation:
+            return False
+        if abs(math.degrees(dth)) > self.map_update_max_correction_rotation_deg:
             return False
         return True
 
@@ -650,12 +786,13 @@ class Open3DPointMapLocalization(Node):
             self.publish_map_to_odom(stamp)
             return
 
-        current_points_laser = scan_to_points(
+        raw_points_laser = scan_to_points(
             scan,
             self.range_min_clip,
             self.range_max_clip,
             self.scan_stride,
         )
+        current_points_laser = self.filter_significant_clusters(raw_points_laser)
         if current_points_laser.shape[0] < self.min_scan_points:
             self.publish_map_to_odom(stamp)
             self.publish_debug_clouds(stamp)
@@ -699,13 +836,13 @@ class Open3DPointMapLocalization(Node):
 
         result = self.run_open3d_icp(stacked_laser, self.point_map, T_map_laser_init)
         loc_accepted = self.accept_icp_result(T_map_laser_init, result)
-        map_update_accepted = False
-        odom_map_update_accepted = False
 
         aligned_map = transform_points(result.T_map_laser, stacked_laser)
         self.publish_debug_clouds(stamp, stacked_laser, T_map_laser_init, aligned_map)
 
-        dx, dy, dth = relative_pose(T_map_laser_init, result.T_map_laser)
+        map_update_accepted = False
+        odom_map_update_accepted = False
+        novel_points_for_update = 0
 
         if loc_accepted:
             T_map_base_est = result.T_map_laser @ T_laser_base
@@ -715,27 +852,53 @@ class Open3DPointMapLocalization(Node):
             T_map_laser_smoothed = self.T_map_odom @ T_odom_laser
             T_map_base_smoothed = self.T_map_odom @ T_odom_base
 
-            map_update_accepted = (
-                self.should_update_map(T_map_base_smoothed)
-                and self.accept_map_update(T_map_laser_init, result)
+            map_update_accepted = self.should_update_map_with_icp(
+                T_map_laser_init,
+                result,
+                T_map_base_smoothed,
             )
-            if map_update_accepted:
-                new_points_map = transform_points(T_map_laser_smoothed, stacked_laser)
-                self.add_points_to_map(new_points_map)
-                self.last_map_update_base_pose = T_map_base_smoothed.copy()
+            # Always compute candidate map points after accepted localization.
+            # If the strict full map-update gate passes, insert normally.
+            # If it fails, we can still insert only novel points, which expands
+            # the map without thickening already-known walls.
+            new_points_map_all = transform_points(T_map_laser_smoothed, stacked_laser)
 
+            if map_update_accepted:
+                new_points_map = self.select_novel_points_for_map(new_points_map_all)
+                novel_points_for_update = int(new_points_map.shape[0])
+                if (not self.insert_only_novel_points) or new_points_map.shape[0] >= self.novel_min_points:
+                    self.add_points_to_map(new_points_map)
+                    self.last_map_update_base_pose = T_map_base_smoothed.copy()
+                else:
+                    map_update_accepted = False
+            elif self.allow_novel_update_when_map_update_rejected:
+                if (
+                    result.fitness >= self.novel_update_min_fitness
+                    and math.isfinite(result.rmse)
+                    and result.rmse <= self.novel_update_max_rmse
+                ):
+                    new_points_map = self.select_novel_points_for_map(new_points_map_all)
+                    novel_points_for_update = int(new_points_map.shape[0])
+                    if new_points_map.shape[0] >= self.novel_min_points:
+                        self.add_points_to_map(new_points_map)
+                        self.last_map_update_base_pose = T_map_base_smoothed.copy()
         else:
-            # Exploration fallback: ICP was rejected, but the scan may be mostly
-            # new space. Add it to the map using only the odometry prior. This
-            # deliberately does not correct map->odom.
-            T_map_base_odom_prior = T_map_laser_init @ T_laser_base
-            odom_map_update_accepted = self.accept_odom_map_update(result, T_map_base_odom_prior)
+            # Exploration fallback: when ICP fails because we are seeing mostly unmapped space,
+            # insert the scan with the odometry prior. Do not correct map->odom in this branch.
+            T_map_base_odom = T_map_laser_init @ T_laser_base
+            odom_map_update_accepted = self.should_update_map_with_odom(T_map_base_odom, result)
             if odom_map_update_accepted:
-                odom_points_map = transform_points(T_map_laser_init, stacked_laser)
-                self.add_points_to_map(odom_points_map)
-                self.last_map_update_base_pose = T_map_base_odom_prior.copy()
+                odom_points_map_all = transform_points(T_map_laser_init, stacked_laser)
+                odom_points_map = self.select_novel_points_for_map(odom_points_map_all)
+                novel_points_for_update = int(odom_points_map.shape[0])
+                if (not self.insert_only_novel_points) or odom_points_map.shape[0] >= self.novel_min_points:
+                    self.add_points_to_map(odom_points_map)
+                    self.last_map_update_base_pose = T_map_base_odom.copy()
+                else:
+                    odom_map_update_accepted = False
 
         if self.log_icp_debug:
+            dx, dy, dth = relative_pose(T_map_laser_init, result.T_map_laser)
             self.get_logger().info(
                 "Open3D ICP | "
                 f"reasons={trigger_reasons} dist={trigger_trans:.3f}m rot={trigger_rot_deg:.2f}deg "
@@ -745,6 +908,8 @@ class Open3DPointMapLocalization(Node):
                 f"loc_accepted={loc_accepted} "
                 f"map_update_accepted={map_update_accepted} "
                 f"odom_map_update_accepted={odom_map_update_accepted} "
+                f"filtered_points={current_points_laser.shape[0]} raw_points={raw_points_laser.shape[0]} "
+                f"novel_points={novel_points_for_update} "
                 f"map_points={self.point_map.shape[0]}"
             )
 
@@ -755,7 +920,7 @@ class Open3DPointMapLocalization(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = Open3DPointMapLocalization()
+    node = Open3DClusteredPointMapLocalization()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
