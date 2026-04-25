@@ -28,6 +28,7 @@ setup(
             'localization_motion_triggered = localization.icp_scan_to_line_motion_triggered:main',
             'filter_scan = localization.filter_scan:main',
             'map_odom_freezer = localization.map_odom_freezer:main',
+            'localization_open3d = localization.icp_open3d_pointmap_standalone:main'
         ],
     },
 )
