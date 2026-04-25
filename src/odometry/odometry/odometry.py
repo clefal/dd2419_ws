@@ -233,22 +233,6 @@ class Odometry(Node):
     def broadcast_transform(self, stamp, x, y, yaw, temp=False):
         #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
         tfs: List[TransformStamped] = []
-        t = TransformStamped()
-        t.header.stamp = stamp
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_link'
-
-        t.transform.translation.x = x
-        t.transform.translation.y = y
-        t.transform.translation.z = 0.0
-
-        q = quaternion_from_euler(0.0, 0.0, yaw)
-        t.transform.rotation.x = q[0]
-        t.transform.rotation.y = q[1]
-        t.transform.rotation.z = q[2]
-        t.transform.rotation.w = q[3]
-        tfs.append(t)
-
 
         # Temporary odom frame
         if temp:
@@ -266,6 +250,23 @@ class Odometry(Node):
             t_temp.transform.rotation.z = q[2]
             t_temp.transform.rotation.w = q[3]
             tfs.append(t_temp)
+
+
+        t = TransformStamped()
+        t.header.stamp = stamp
+        t.header.frame_id = 'odom'
+        t.child_frame_id = 'base_link'
+
+        t.transform.translation.x = x
+        t.transform.translation.y = y
+        t.transform.translation.z = 0.0
+
+        q = quaternion_from_euler(0.0, 0.0, yaw)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        tfs.append(t)
 
         self._tf_broadcaster.sendTransform(tfs)
 
