@@ -9,6 +9,7 @@ from collections import deque
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
 from sensor_msgs.msg import LaserScan
 from sensor_msgs.msg import PointCloud2, PointField
@@ -29,6 +30,10 @@ def wrap_angle(a: float) -> float:
     while a < -math.pi:
         a += 2.0 * math.pi
     return a
+
+
+def ros_stamp_to_sec(stamp) -> float:
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
 def pose_to_matrix(x: float, y: float, theta: float) -> np.ndarray:
@@ -619,6 +624,7 @@ class IcpScanToLine(Node):
         # Minimum base rotation required before adding more lines to the map.
         self.declare_parameter("map_update_min_rotation_deg", 15.0)
         self.declare_parameter("tf_lookup_timeout_sec", 0.2)
+        self.declare_parameter("max_scan_age_sec", 0.5)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
@@ -664,6 +670,7 @@ class IcpScanToLine(Node):
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
         self.tf_lookup_timeout_sec = float(self.get_parameter("tf_lookup_timeout_sec").value)
+        self.max_scan_age_sec = float(self.get_parameter("max_scan_age_sec").value)
 
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
@@ -686,7 +693,12 @@ class IcpScanToLine(Node):
         self.last_map_update_base_pose: Optional[np.ndarray] = None
 
         # IO
-        self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
+        scan_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
+        self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, scan_qos)
         self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 10)
         self.stacked_points_pub = self.create_publisher(PointCloud2, self.stacked_points_topic, 10)
@@ -759,6 +771,22 @@ class IcpScanToLine(Node):
         except TransformException as ex:
             self.get_logger().warn(f"TF lookup failed {target} <- {source}: {ex}")
             return None
+
+    def scan_age_sec(self, stamp) -> float:
+        return ros_stamp_to_sec(self.get_clock().now().to_msg()) - ros_stamp_to_sec(stamp)
+
+    def should_drop_scan(self, stamp) -> bool:
+        if self.max_scan_age_sec <= 0.0:
+            return False
+
+        age_sec = self.scan_age_sec(stamp)
+        if age_sec <= self.max_scan_age_sec:
+            return False
+
+        self.get_logger().warn(
+            f"Dropping stale scan age={age_sec:.3f}s stamp={ros_stamp_to_sec(stamp):.6f}"
+        )
+        return True
 
     def preprocess_scan(self, scan: LaserScan) -> Tuple[LaserScan, np.ndarray]:
         # Scan-level filtering is done upstream (see `filter_scan` node). Here we only
@@ -995,6 +1023,8 @@ class IcpScanToLine(Node):
     def scan_callback(self, scan: LaserScan) -> None:
         init_time = time.time()
         stamp = scan.header.stamp
+        if self.should_drop_scan(stamp):
+            return
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
             if self.mto_initialized:
