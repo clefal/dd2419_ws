@@ -3,6 +3,7 @@
 import math
 import rclpy
 from rclpy.node import Node
+from typing import List
 
 from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
@@ -191,7 +192,7 @@ class Odometry(Node):
         # # ----------------------------------
 
         # Publish TF at IMU rate for smooth orientation
-        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
+        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, False)
 
 
     def encoder_callback(self, msg: Encoders):
@@ -224,13 +225,14 @@ class Odometry(Node):
 
         # Publish TF
         stamp = msg.header.stamp
-        self.broadcast_transform(stamp, self._x, self._y, self._yaw)
+        self.broadcast_transform(stamp, self._x, self._y, self._yaw, True)
 
         # Path at encoder rate
         self.publish_path(stamp, self._x, self._y, self._yaw)
 
-    def broadcast_transform(self, stamp, x, y, yaw):
+    def broadcast_transform(self, stamp, x, y, yaw, temp=False):
         #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
+        tfs: List[TransformStamped] = []
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'
@@ -245,25 +247,27 @@ class Odometry(Node):
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
+        tfs.append(t)
 
 
         # Temporary odom frame
-        t_temp = TransformStamped()
-        t_temp.header.stamp = stamp
-        t_temp.header.frame_id = 'odom_temp'
-        t_temp.child_frame_id = 'base_link_temp'
+        if temp:
+            t_temp = TransformStamped()
+            t_temp.header.stamp = stamp
+            t_temp.header.frame_id = 'odom_temp'
+            t_temp.child_frame_id = 'base_link_temp'
 
-        t_temp.transform.translation.x = x
-        t_temp.transform.translation.y = y
-        t_temp.transform.translation.z = 0.0
+            t_temp.transform.translation.x = x
+            t_temp.transform.translation.y = y
+            t_temp.transform.translation.z = 0.0
 
-        t_temp.transform.rotation.x = q[0]
-        t_temp.transform.rotation.y = q[1]
-        t_temp.transform.rotation.z = q[2]
-        t_temp.transform.rotation.w = q[3]
+            t_temp.transform.rotation.x = q[0]
+            t_temp.transform.rotation.y = q[1]
+            t_temp.transform.rotation.z = q[2]
+            t_temp.transform.rotation.w = q[3]
+            tfs.append(t_temp)
 
-        self._tf_broadcaster.sendTransform(t_temp)
-        self._tf_broadcaster.sendTransform(t)
+        self._tf_broadcaster.sendTransform(tfs)
 
     def publish_path(self, stamp, x, y, yaw):
         self._path.header.stamp = stamp
