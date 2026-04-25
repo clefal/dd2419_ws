@@ -190,7 +190,12 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
                 self.publish_map_to_odom(stamp)
             return
 
-        T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
+        T_odom_base = self.lookup_T(
+            self.odom_frame,
+            self.base_frame,
+            stamp,
+            fallback_to_latest=True,
+        )
         if T_odom_base is None:
             self.publish_map_to_odom(stamp)
             return

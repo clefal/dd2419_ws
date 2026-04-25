@@ -750,7 +750,7 @@ class IcpScanToLine(Node):
             self.get_logger().warn(f"Could not initialize map->odom from TF, using identity: {ex}")
             return False
 
-    def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
+    def lookup_T(self, target: str, source: str, stamp, *, fallback_to_latest: bool = False) -> Optional[np.ndarray]:
         try:
             timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
             if not self.tf_buffer.can_transform(
@@ -763,7 +763,22 @@ class IcpScanToLine(Node):
                     f"TF not ready {target} <- {source} at scan stamp "
                     f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
                 )
-                return None
+                if not fallback_to_latest:
+                    return None
+
+                latest_tf = self.tf_buffer.lookup_transform(
+                    target,
+                    source,
+                    rclpy.time.Time(),
+                    timeout=timeout,
+                )
+                latest_stamp = latest_tf.header.stamp
+                self.get_logger().warn(
+                    f"Using latest TF {target} <- {source} at "
+                    f"{ros_stamp_to_sec(latest_stamp):.6f} for scan stamp "
+                    f"{ros_stamp_to_sec(stamp):.6f}"
+                )
+                return tfmsg_to_matrix(latest_tf)
             tf_msg = self.tf_buffer.lookup_transform(
                 target, source, stamp, timeout=timeout
             )
@@ -1037,7 +1052,12 @@ class IcpScanToLine(Node):
                 self.publish_map_to_odom(stamp)
             return
 
-        T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
+        T_odom_base = self.lookup_T(
+            self.odom_frame,
+            self.base_frame,
+            stamp,
+            fallback_to_latest=True,
+        )
         if T_odom_base is None:
             self.publish_map_to_odom(stamp)
             return
