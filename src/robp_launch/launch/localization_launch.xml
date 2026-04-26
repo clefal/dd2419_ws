@@ -12,8 +12,8 @@
   </include>
 
   <!-- Hardware/sensors -->
-  <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
-  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
+  <!-- <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/> -->
 
   <!-- Localization stack -->
   <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>

@@ -723,13 +723,13 @@ class IcpScanToLine(Node):
     def try_initialize_mto(self, stamp) -> bool:
         try:
             timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
-            if not self.tf_buffer.can_transform(
-                self.map_frame,
-                "start",
-                stamp,
-                timeout=timeout,
-            ):
-                return False
+            # if not self.tf_buffer.can_transform(
+            #     self.map_frame,
+            #     "start",
+            #     stamp,
+            #     timeout=timeout,
+            # ):
+            #     return False
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
@@ -737,7 +737,6 @@ class IcpScanToLine(Node):
                 timeout=timeout
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
-            self.mto_initialized = True
             self.get_logger().info(f"Initialized {self.map_frame}->{self.odom_frame} from {self.map_frame}->start")
 
             tf_map_odom = TransformStamped()
@@ -746,6 +745,7 @@ class IcpScanToLine(Node):
             tf_map_odom.child_frame_id = self.odom_frame
             tf_map_odom.transform = tf.transform
             self.tf_broadcaster.sendTransform(tf_map_odom)
+            self.mto_initialized = True
             return True
         except TransformException as ex:
             self.T_map_odom = np.eye(3, dtype=float)
@@ -756,17 +756,17 @@ class IcpScanToLine(Node):
     def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
             timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
-            if not self.tf_buffer.can_transform(
-                target,
-                source,
-                stamp,
-                timeout=timeout,
-            ):
-                self.get_logger().warn(
-                    f"TF not ready {target} <- {source} at scan stamp "
-                    f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
-                )
-                return None
+            # if not self.tf_buffer.can_transform(
+            #     target,
+            #     source,
+            #     stamp,
+            #     timeout=timeout,
+            # ):
+            #     self.get_logger().warn(
+            #         f"TF not ready {target} <- {source} at scan stamp "
+            #         f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
+            #     )
+            #     return None
             tf_msg = self.tf_buffer.lookup_transform(
                 target, source, stamp, timeout=timeout
             )
@@ -774,22 +774,6 @@ class IcpScanToLine(Node):
         except TransformException as ex:
             self.get_logger().warn(f"TF lookup failed {target} <- {source}: {ex}")
             return None
-
-    def scan_age_sec(self, stamp) -> float:
-        return ros_stamp_to_sec(self.get_clock().now().to_msg()) - ros_stamp_to_sec(stamp)
-
-    def should_drop_scan(self, stamp) -> bool:
-        if self.max_scan_age_sec <= 0.0:
-            return False
-
-        age_sec = self.scan_age_sec(stamp)
-        if age_sec <= self.max_scan_age_sec:
-            return False
-
-        self.get_logger().warn(
-            f"Dropping stale scan age={age_sec:.3f}s stamp={ros_stamp_to_sec(stamp):.6f}"
-        )
-        return True
 
     def preprocess_scan(self, scan: LaserScan) -> Tuple[LaserScan, np.ndarray]:
         # Scan-level filtering is done upstream (see `filter_scan` node). Here we only
@@ -1026,8 +1010,6 @@ class IcpScanToLine(Node):
     def scan_callback(self, scan: LaserScan) -> None:
         init_time = time.time()
         stamp = scan.header.stamp
-        if self.should_drop_scan(stamp):
-            return
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
             if self.mto_initialized:
