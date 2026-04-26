@@ -5,6 +5,7 @@ from enum import Enum
 import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from robp_interfaces.msg import ArmControl
 from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
@@ -121,8 +122,13 @@ class ArmControlNode(Node):
         self.latest_detection_time = None
         self.detection_history = deque(maxlen=REQUIRED_DETECTIONS)
 
+        qos = QoSProfile(
+            depth=10,
+            reliability=ReliabilityPolicy.RELIABLE 
+        )
+
         #Publishers
-        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
+        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, qos)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
         self.holding_pub = self.create_publisher(String, HOLDING_CHECK_TOPIC, 10)
 
