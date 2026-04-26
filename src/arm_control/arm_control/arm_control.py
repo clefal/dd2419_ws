@@ -270,11 +270,13 @@ class ArmControlNode(Node):
         target_position[0] = angle
         self.publish_arm_control(target_position)
 
-    def command_planar_target(self, rho: float, alpha_deg: float, z: float):
+    def command_planar_target(self, rho: float, alpha_deg: float, z: float, wrist_angle = None):
         planar_target = make_planar_target(rho=rho, alpha_deg=alpha_deg, z=z)
         joint_target = planar_to_joint_target(planar_target)
 
         target_position = self.position.copy()
+        if wrist_angle is not None:
+            target_position[1] = wrist_angle
         target_position[2] = joint_target.wrist
         target_position[3] = joint_target.elbow
         target_position[4] = joint_target.shoulder
@@ -295,7 +297,7 @@ class ArmControlNode(Node):
 
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
-        error_magnitude = abs(error_x) + abs(error_y)
+        angle = None
 
         aligned = abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE
 
@@ -313,6 +315,7 @@ class ArmControlNode(Node):
                 new_z = FINAL_PICKUP_Z
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
+                angle = detection.angle
         
         else:
             # Above ALIGNMENT_Z: align step-by-step
@@ -333,7 +336,8 @@ class ArmControlNode(Node):
             self.command_planar_target(
                 rho=rho,
                 alpha_deg=alpha,
-                z=new_z
+                z=new_z,
+                wrist_angle=angle
             )
         except ValueError as exc:
             if self.current_target_z > FINAL_PICKUP_Z:

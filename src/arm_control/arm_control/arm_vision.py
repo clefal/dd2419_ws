@@ -10,7 +10,7 @@ from std_msgs.msg import String
 
 MIN_CONTOUR_AREA = 450.0
 MIN_HOLDING_WIDTH = 130
-HOLDING_TIMEOUT_SEC = 3.0
+HOLDING_TIMEOUT_SEC = 2.0
 
 #TOPICS
 IMAGE_TOPIC = '/arm/camera/image_raw'
@@ -26,7 +26,7 @@ HOLDING_SUCCESS_MSG = 'HOLDING_SUCCESS'
 HOLDING_FAIL_MSG = 'HOLDING_FAIL'
 
 #DEBUG
-DEBUG_COLOR_PICKER_ENABLED = False
+DEBUG_COLOR_PICKER_ENABLED = True
 
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
@@ -37,7 +37,7 @@ ARM_COLORS_RGB = {
 TOLERANCES = {
     'green': 0.25,
     'red': 0.225,
-    'blue': 0.11
+    'blue': 0.13
 }
 
 L_BOUNDS = {
@@ -111,13 +111,11 @@ class ArmVisionNode(Node):
             result = String()
             result.data = HOLDING_FAIL_MSG
             self.holding_pub.publish(result)
-            self.get_logger().info("Timeout triggered")
             self.holding = False
 
         if self.holding_timer is not None:
             self.holding_timer.cancel()
             self.holding_timer = None
-            self.get_logger().info("Timer reset")
 
     def image_callback_color(self, msg: Image):
         frame = self._ros_image_to_bgr(msg)
