@@ -28,10 +28,10 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
     def __init__(self):
         super().__init__()
 
-        self.declare_parameter("trigger_translation", 0.25)
-        self.declare_parameter("trigger_rotation_deg", 10.0)
-        self.declare_parameter("trigger_max_scans", 14)
-        self.declare_parameter("init_seed_min_lines", 3)
+        self.declare_parameter("trigger_translation", 0.15)
+        self.declare_parameter("trigger_rotation_deg", 8.0)
+        self.declare_parameter("trigger_max_scans", 8)
+        self.declare_parameter("init_seed_min_lines", 2)
         self.declare_parameter("init_min_angle_separation_deg", 30.0)
         self.declare_parameter("publish_wait_debug", False)
 

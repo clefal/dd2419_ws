@@ -563,15 +563,15 @@ class IcpScanToLine(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 6.0)
+        self.declare_parameter("range_max_clip", 5.0)
         # Number of consecutive scans stacked together in the current laser frame.
         self.declare_parameter("stack_scans", 35)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
-        self.declare_parameter("cluster_jump_thresh", 0.25)
+        self.declare_parameter("cluster_jump_thresh", 0.10)
         # Split-and-merge deviation threshold; smaller values produce more, shorter segments.
-        self.declare_parameter("split_thresh", 0.05)
+        self.declare_parameter("split_thresh", 0.10)
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
@@ -604,13 +604,13 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_max_lines", 50)
         # Maximum angle difference (deg) for considering a new line similar to an existing one
         # during insertion filtering. Smaller values reject more near-duplicate lines.
-        self.declare_parameter("map_insert_max_angle_deg", 10.0)
+        self.declare_parameter("map_insert_max_angle_deg", 15.0)
         # Maximum perpendicular offset (m) for considering a new line similar to an existing one
         # during insertion filtering. Smaller values reject more parallel nearby duplicates.
-        self.declare_parameter("map_insert_max_perp_dist", 0.25)
+        self.declare_parameter("map_insert_max_perp_dist", 0.30)
         # Minimum midpoint separation (m) between two already-similar lines before the new line
         # is rejected as a duplicate. Larger values make insertion more conservative.
-        self.declare_parameter("map_insert_min_separation", 0.5)
+        self.declare_parameter("map_insert_min_separation", 0.8)
         # If true, merge near-duplicate collinear segments into a longer segment.
         self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
