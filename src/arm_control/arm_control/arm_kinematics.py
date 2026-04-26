@@ -14,19 +14,20 @@ OPEN_GRIPPER_ANGLE = 10.0
 CLOSED_GRIPPER_ANGLE = 105.0
 BASE_SERVO_CENTER = 120.0
 WRIST_DOWN_ORIENTATION_DEG = -90.0
+WRIST_BASE_ANGLE = 120.0
 
 BASE_LIMITS = (100.0, 140.0)        # P5: straight at 120°, initial: 120
 SHOULDER_LIMITS = (30.0, 120.0)     # P4: straight at 120°         initial: 180
 ELBOW_LIMITS = (100.0, 210.0)       # P3: straight at 120°    initial: 220
 WRIST_LIMITS = (25.0, 170.0)        # P2: straight at 120°      initial:30
-ORIENTATION_WRIST = (17.0, 140.0)   #P1: straight at 120°   initial: 120
+ORIENTATION_WRIST = (70.0, 170.0)   #P1: straight at 120°   initial: 120
 GRIPPER_LIMITS = (10.0, 100.0)      #P0 open: 10°, close: 100°  initial: 40
 
 INITIAL_POSITION =      [40, 120, 30, 220, 180, 120]
 
 START_SAFE_POSITION =   {'p0': 40.0, 'p1': 120.0, 'p2': 30.0, 'p3': 166.4, 'p4': 180.0, 'p5': 120.0}
 IDLE_POSE =             {'p0': 10.0, 'p1': 120.0, 'p2': 16.6, 'p3': 166.4, 'p4': 89.8, 'p5': 120.0}
-LIFTING_POSE =          {'p4': 120.0, 'p5': 120.0}
+LIFTING_POSE =          {'p1': 120.0, 'p4': 120.0, 'p5': 120.0}
 HOLDING_POSE =          {'p2': 30.0, 'p3': 170.0}
 DROP_POSE =             {'p2': 60.0, 'p4': 80.0} 
 

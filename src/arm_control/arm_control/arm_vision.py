@@ -37,12 +37,12 @@ ARM_COLORS_RGB = {
 TOLERANCES = {
     'green': 0.25,
     'red': 0.225,
-    'blue': 0.13
+    'blue': 0.12
 }
 
 L_BOUNDS = {
     "red": (0.2, 0.85),
-    "green": (0.2, 0.8),
+    "green": (0.1, 0.8),
     "blue": (0.2, 0.9)
 }
 
@@ -157,7 +157,6 @@ class ArmVisionNode(Node):
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG
                     self.holding_pub.publish(msg)
-                    self.get_logger().info("Holding cube!")
                     self.holding = False
 
             self.draw_detection(debug_image, detection, self.box_colors[color_name])
@@ -185,7 +184,7 @@ class ArmVisionNode(Node):
         chroma_confidence = np.clip(chroma_confidence, 0, 1)
         chroma_u8 = (chroma_confidence * 255).astype(np.uint8)
 
-        chroma_blurred = cv2.GaussianBlur(chroma_u8, (7, 7), 0)
+        chroma_blurred = cv2.GaussianBlur(chroma_u8, (5, 5), 0)
         edges = cv2.Canny(chroma_blurred, CANNY_THRESH['low'], CANNY_THRESH['high'])
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))

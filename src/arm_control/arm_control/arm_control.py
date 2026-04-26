@@ -23,6 +23,7 @@ from arm_control.arm_kinematics import (
     INITIAL_POSITION,
     START_SAFE_POSITION,
     BASE_MIN_RHO,
+    WRIST_BASE_ANGLE,
     make_planar_target,
     planar_to_joint_target,
 )
@@ -315,8 +316,7 @@ class ArmControlNode(Node):
                 new_z = FINAL_PICKUP_Z
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
-                angle = detection.angle
-        
+                angle = WRIST_BASE_ANGLE + detection.angle
         else:
             # Above ALIGNMENT_Z: align step-by-step
             if aligned:
