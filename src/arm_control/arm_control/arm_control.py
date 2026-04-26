@@ -178,7 +178,7 @@ class ArmControlNode(Node):
         if self.state == State.CHECK_HOLDING:
             msg = String()
             msg.data = CHECK_HOLDING_MSG
-            self.result_pub.publish(msg)
+            self.holding_pub.publish(msg)
             self.transition_to(State.WAITING_FOR_HOLD_CONFIRM)
             return
 
