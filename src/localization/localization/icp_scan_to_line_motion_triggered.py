@@ -176,8 +176,6 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
     def scan_callback(self, scan: LaserScan) -> None:
         init_time = time.time()
         stamp = scan.header.stamp
-        if self.should_drop_scan(stamp):
-            return
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
             if self.mto_initialized:
