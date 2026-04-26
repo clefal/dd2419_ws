@@ -554,6 +554,8 @@ class IcpScanToLine(Node):
         self.declare_parameter("stacked_points_topic", "/localization/stacked_points")
         # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link_temp")
+        # Rigid mount frame used to relate the laser frame to the robot body.
+        self.declare_parameter("laser_mount_frame", "base_link")
         # Odometry frame used as the short-term motion prior.
         self.declare_parameter("odom_frame", "odom_temp")  # changed to odom_temp
         # Global frame where the line map is expressed.
@@ -636,6 +638,7 @@ class IcpScanToLine(Node):
         self.map_lines_topic = self.get_parameter("map_lines_topic").value
         self.stacked_points_topic = self.get_parameter("stacked_points_topic").value
         self.base_frame = self.get_parameter("base_frame").value
+        self.laser_mount_frame = self.get_parameter("laser_mount_frame").value
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
 
@@ -750,7 +753,7 @@ class IcpScanToLine(Node):
             self.get_logger().warn(f"Could not initialize map->odom from TF, using identity: {ex}")
             return False
 
-    def lookup_T(self, target: str, source: str, stamp, *, fallback_to_latest: bool = False) -> Optional[np.ndarray]:
+    def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
             timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
             if not self.tf_buffer.can_transform(
@@ -763,22 +766,7 @@ class IcpScanToLine(Node):
                     f"TF not ready {target} <- {source} at scan stamp "
                     f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
                 )
-                if not fallback_to_latest:
-                    return None
-
-                latest_tf = self.tf_buffer.lookup_transform(
-                    target,
-                    source,
-                    rclpy.time.Time(),
-                    timeout=timeout,
-                )
-                latest_stamp = latest_tf.header.stamp
-                self.get_logger().warn(
-                    f"Using latest TF {target} <- {source} at "
-                    f"{ros_stamp_to_sec(latest_stamp):.6f} for scan stamp "
-                    f"{ros_stamp_to_sec(stamp):.6f}"
-                )
-                return tfmsg_to_matrix(latest_tf)
+                return None
             tf_msg = self.tf_buffer.lookup_transform(
                 target, source, stamp, timeout=timeout
             )
@@ -1052,18 +1040,13 @@ class IcpScanToLine(Node):
                 self.publish_map_to_odom(stamp)
             return
 
-        T_odom_base = self.lookup_T(
-            self.odom_frame,
-            self.base_frame,
-            stamp,
-            fallback_to_latest=True,
-        )
+        T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
         if T_odom_base is None:
             self.publish_map_to_odom(stamp)
             return
 
         laser_frame = scan.header.frame_id
-        T_base_laser = self.lookup_T("base_link", laser_frame, stamp)
+        T_base_laser = self.lookup_T(self.laser_mount_frame, laser_frame, stamp)
         if T_base_laser is None:
             self.publish_map_to_odom(stamp)
             return
@@ -1100,7 +1083,7 @@ class IcpScanToLine(Node):
             return
 
         # Robust ICP
-        self.publish_stacked_points(stacked_points_laser, "lidar_link_temp", stamp)
+        self.publish_stacked_points(stacked_points_laser, laser_frame, stamp)
         result = icp_point_to_line_robust(
             stacked_points_laser,
             self.map_lines,

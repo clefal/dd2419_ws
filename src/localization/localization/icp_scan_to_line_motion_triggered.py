@@ -190,18 +190,13 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
                 self.publish_map_to_odom(stamp)
             return
 
-        T_odom_base = self.lookup_T(
-            self.odom_frame,
-            self.base_frame,
-            stamp,
-            fallback_to_latest=True,
-        )
+        T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
         if T_odom_base is None:
             self.publish_map_to_odom(stamp)
             return
 
         laser_frame = scan.header.frame_id
-        T_base_laser = self.lookup_T("base_link", laser_frame, stamp)
+        T_base_laser = self.lookup_T(self.laser_mount_frame, laser_frame, stamp)
         if T_base_laser is None:
             self.publish_map_to_odom(stamp)
             return
