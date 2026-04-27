@@ -9,6 +9,7 @@ from collections import deque
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
 from sensor_msgs.msg import LaserScan
 from sensor_msgs.msg import PointCloud2, PointField
@@ -29,6 +30,10 @@ def wrap_angle(a: float) -> float:
     while a < -math.pi:
         a += 2.0 * math.pi
     return a
+
+
+def ros_stamp_to_sec(stamp) -> float:
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
 def pose_to_matrix(x: float, y: float, theta: float) -> np.ndarray:
@@ -549,6 +554,8 @@ class IcpScanToLine(Node):
         self.declare_parameter("stacked_points_topic", "/localization/stacked_points")
         # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link_temp")
+        # Rigid mount frame used to relate the laser frame to the robot body.
+        self.declare_parameter("laser_mount_frame", "base_link")
         # Odometry frame used as the short-term motion prior.
         self.declare_parameter("odom_frame", "odom_temp")  # changed to odom_temp
         # Global frame where the line map is expressed.
@@ -556,15 +563,15 @@ class IcpScanToLine(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 6.0)
+        self.declare_parameter("range_max_clip", 5.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 5)
+        self.declare_parameter("stack_scans", 35)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
-        self.declare_parameter("cluster_jump_thresh", 0.25)
+        self.declare_parameter("cluster_jump_thresh", 0.10)
         # Split-and-merge deviation threshold; smaller values produce more, shorter segments.
-        self.declare_parameter("split_thresh", 0.05)
+        self.declare_parameter("split_thresh", 0.10)
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
@@ -597,27 +604,29 @@ class IcpScanToLine(Node):
         self.declare_parameter("map_max_lines", 50)
         # Maximum angle difference (deg) for considering a new line similar to an existing one
         # during insertion filtering. Smaller values reject more near-duplicate lines.
-        self.declare_parameter("map_insert_max_angle_deg", 10.0)
+        self.declare_parameter("map_insert_max_angle_deg", 15.0)
         # Maximum perpendicular offset (m) for considering a new line similar to an existing one
         # during insertion filtering. Smaller values reject more parallel nearby duplicates.
-        self.declare_parameter("map_insert_max_perp_dist", 0.15)
+        self.declare_parameter("map_insert_max_perp_dist", 0.30)
         # Minimum midpoint separation (m) between two already-similar lines before the new line
         # is rejected as a duplicate. Larger values make insertion more conservative.
-        self.declare_parameter("map_insert_min_separation", 0.35)
+        self.declare_parameter("map_insert_min_separation", 0.8)
         # If true, merge near-duplicate collinear segments into a longer segment.
         self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
         self.declare_parameter("map_merge_angle_deg", 5.0)
         # Maximum perpendicular distance (m) between segments for merging.
-        self.declare_parameter("map_merge_perp_dist", 0.1)
+        self.declare_parameter("map_merge_perp_dist", 0.03)
         # Maximum allowed along-line gap (m) between segment intervals for merging.
         self.declare_parameter("map_merge_max_gap", 0.25)
         # Minimum number of stored lines before the node switches from map seeding to ICP tracking.
         self.declare_parameter("init_min_lines", 2)
         # Minimum base translation required before adding more lines to the map.
-        self.declare_parameter("map_update_min_translation", 0.15)
+        self.declare_parameter("map_update_min_translation", 0.30)
         # Minimum base rotation required before adding more lines to the map.
-        self.declare_parameter("map_update_min_rotation_deg", 8.0)
+        self.declare_parameter("map_update_min_rotation_deg", 15.0)
+        self.declare_parameter("tf_lookup_timeout_sec", 0.2)
+        self.declare_parameter("max_scan_age_sec", 0.5)
 
         # Debug
         # Enable per-scan ICP logging with residual and correction information.
@@ -629,6 +638,7 @@ class IcpScanToLine(Node):
         self.map_lines_topic = self.get_parameter("map_lines_topic").value
         self.stacked_points_topic = self.get_parameter("stacked_points_topic").value
         self.base_frame = self.get_parameter("base_frame").value
+        self.laser_mount_frame = self.get_parameter("laser_mount_frame").value
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
 
@@ -662,12 +672,14 @@ class IcpScanToLine(Node):
         self.init_min_lines = int(self.get_parameter("init_min_lines").value)
         self.map_update_min_translation = float(self.get_parameter("map_update_min_translation").value)
         self.map_update_min_rotation_deg = float(self.get_parameter("map_update_min_rotation_deg").value)
+        self.tf_lookup_timeout_sec = float(self.get_parameter("tf_lookup_timeout_sec").value)
+        self.max_scan_age_sec = float(self.get_parameter("max_scan_age_sec").value)
 
         self.log_icp_debug = bool(self.get_parameter("log_icp_debug").value)
 
         # TF
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         # State
@@ -684,7 +696,12 @@ class IcpScanToLine(Node):
         self.last_map_update_base_pose: Optional[np.ndarray] = None
 
         # IO
-        self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
+        scan_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+        )
+        self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, scan_qos)
         self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 10)
         self.stacked_points_pub = self.create_publisher(PointCloud2, self.stacked_points_topic, 10)
@@ -705,14 +722,21 @@ class IcpScanToLine(Node):
 
     def try_initialize_mto(self, stamp) -> bool:
         try:
+            timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
+            # if not self.tf_buffer.can_transform(
+            #     self.map_frame,
+            #     "start",
+            #     stamp,
+            #     timeout=timeout,
+            # ):
+            #     return False
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
                 stamp,
-                timeout=rclpy.time.Duration(seconds=1)
+                timeout=timeout
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
-            self.mto_initialized = True
             self.get_logger().info(f"Initialized {self.map_frame}->{self.odom_frame} from {self.map_frame}->start")
 
             tf_map_odom = TransformStamped()
@@ -721,6 +745,7 @@ class IcpScanToLine(Node):
             tf_map_odom.child_frame_id = self.odom_frame
             tf_map_odom.transform = tf.transform
             self.tf_broadcaster.sendTransform(tf_map_odom)
+            self.mto_initialized = True
             return True
         except TransformException as ex:
             self.T_map_odom = np.eye(3, dtype=float)
@@ -730,10 +755,20 @@ class IcpScanToLine(Node):
 
     def lookup_T(self, target: str, source: str, stamp) -> Optional[np.ndarray]:
         try:
-            # future = self.tf_buffer.wait_for_transform_async(target, source, stamp)
-            # rclpy.spin_until_future_complete(self, future, timeout_sec=1.0)
+            timeout = rclpy.time.Duration(seconds=self.tf_lookup_timeout_sec)
+            # if not self.tf_buffer.can_transform(
+            #     target,
+            #     source,
+            #     stamp,
+            #     timeout=timeout,
+            # ):
+            #     self.get_logger().warn(
+            #         f"TF not ready {target} <- {source} at scan stamp "
+            #         f"{float(stamp.sec) + float(stamp.nanosec) * 1e-9:.6f}"
+            #     )
+            #     return None
             tf_msg = self.tf_buffer.lookup_transform(
-                target, source, stamp, timeout=rclpy.time.Duration(seconds=1)
+                target, source, stamp, timeout=timeout
             )
             return tfmsg_to_matrix(tf_msg)
         except TransformException as ex:
@@ -974,33 +1009,42 @@ class IcpScanToLine(Node):
 
     def scan_callback(self, scan: LaserScan) -> None:
         init_time = time.time()
+        stamp = scan.header.stamp
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
+            if self.mto_initialized:
+                self.publish_map_to_odom(stamp)
             return
-
-        stamp = scan.header.stamp
 
         if not self.mto_initialized:
             self.try_initialize_mto(stamp)
+            if self.mto_initialized:
+                self.publish_map_to_odom(stamp)
             return
 
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
         if T_odom_base is None:
+            self.publish_map_to_odom(stamp)
             return
 
         laser_frame = scan.header.frame_id
-        T_base_laser = self.lookup_T("base_link", laser_frame, stamp)
+        T_base_laser = self.lookup_T(self.laser_mount_frame, laser_frame, stamp)
         if T_base_laser is None:
+            self.publish_map_to_odom(stamp)
             return
 
         T_odom_laser = T_odom_base @ T_base_laser
 
         _, current_points_laser = self.preprocess_scan(scan)
-        if current_points_laser.shape[0] < 20:
+        if current_points_laser.shape[0] < 100:
+            self.get_logger().warn("Ignoring scan with too few points")
+            self.publish_map_to_odom(stamp)
             return
 
         stacked_points_laser = self.build_stacked_points(current_points_laser, T_odom_laser)
-        if stacked_points_laser.shape[0] < 20:
+        if stacked_points_laser.shape[0] < 100:
+            self.get_logger().warn("Ignoring scan with too few stacked points")
+            self.publish_map_to_odom(stamp)
             return
 
         T_map_laser_init = self.T_map_odom @ T_odom_laser
@@ -1021,7 +1065,7 @@ class IcpScanToLine(Node):
             return
 
         # Robust ICP
-        self.publish_stacked_points(stacked_points_laser, "lidar_link_temp", stamp)
+        # self.publish_stacked_points(stacked_points_laser, laser_frame, stamp)
         result = icp_point_to_line_robust(
             stacked_points_laser,
             self.map_lines,
