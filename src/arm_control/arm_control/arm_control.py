@@ -37,9 +37,9 @@ from arm_control.arm_vision import (
 ) 
 
 #Time for joint movements 
-MS_PER_DEGREE = 45
+MS_PER_DEGREE = 35
 MIN_TIME_MS = 150
-MAX_TIME_MS = 2000
+MAX_TIME_MS = 3000
 
 #TOPICS 
 VISION_TOPIC = '/arm/vision/cube_center'
@@ -51,17 +51,20 @@ CONTROL_RATE_HZ = 10.0
 
 TARGET_PIXEL_X = 310
 TARGET_PIXEL_Y = 420 #400
+LARGEST_START_PIXEL_Y = 410
+SMALLEST_START_PIXEL_Y = 280
+
 ALIGN_X_TOLERANCE = 15  #25
-ALIGN_Y_TOLERANCE = 10
+ALIGN_Y_TOLERANCE = 15
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
 MAX_RHO_STEP_MM = 6.0
 MAX_ALPHA_STEP_DEG = 1.0    #2.0
 
-DESCENT_STEP_MM = 5.0
+DESCENT_STEP_MM = 10.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
-START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
-ALIGNMENT_Z = FINAL_PICKUP_Z + 10.0  # stop aligning below this Z to avoid vision issues
+START_PICKUP_Z = IDLE_Z - 55.0  # higher starting point
+ALIGNMENT_Z = FINAL_PICKUP_Z + 20.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
 REQUIRED_DETECTIONS = 4 #3
@@ -122,6 +125,8 @@ class ArmControlNode(Node):
         self.latest_detection = None
         self.latest_detection_time = None
         self.detection_history = deque(maxlen=REQUIRED_DETECTIONS)
+
+        self.is_initial_out_of_reach_check_done = False
 
         qos = QoSProfile(
             depth=10,
@@ -302,11 +307,20 @@ class ArmControlNode(Node):
 
         aligned = abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE
 
-        if self.current_target_z <= FINAL_PICKUP_Z:
+        if self.current_target_z == START_PICKUP_Z:
+            if detection.center_y > LARGEST_START_PIXEL_Y or detection.center_y < SMALLEST_START_PIXEL_Y:
+                self.transition_to(State.RETURN_TO_IDLE)
+                self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
+                return
+            else:
+                new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                rho = self.current_target_rho
+                alpha = self.current_target_alpha
+
+        elif self.current_target_z <= FINAL_PICKUP_Z:
             self.command_gripper(CLOSED_GRIPPER_ANGLE)
             self.transition_to(State.CLOSING_GRIPPER)
             return
-        
         elif self.current_target_z <= ALIGNMENT_Z:
             if not aligned:
                 self.transition_to(State.RETURN_TO_IDLE)
