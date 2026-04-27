@@ -193,7 +193,7 @@ class Odometry(Node):
 
         # Publish both odom trees at IMU rate so scan-timestamped TF lookups do not
         # outrun the latest encoder-stamped odom_temp sample between encoder updates.
-        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, True)
+        self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, False)
 
 
     def encoder_callback(self, msg: Encoders):
