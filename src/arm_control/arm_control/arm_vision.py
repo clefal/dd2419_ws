@@ -27,17 +27,18 @@ HOLDING_FAIL_MSG = 'HOLDING_FAIL'
 
 #DEBUG
 DEBUG_COLOR_PICKER_ENABLED = False
+DEBUG_PUBLISH_MASKS = False
 
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
     'red': np.array([255, 0, 0]),
-    'blue': np.array([0, 200, 255])
+    'blue': np.array([0, 230, 255])
 }
 
 TOLERANCES = {
     'green': 0.25,
-    'red': 0.225,
-    'blue': 0.12
+    'red': 0.21,
+    'blue': 0.105
 }
 
 L_BOUNDS = {
@@ -76,18 +77,18 @@ class ArmVisionNode(Node):
         self.box_colors = BOX_COLORS
 
         self.center_publisher = self.create_publisher(Int32MultiArray, CENTER_TOPIC, 10)
-        self.mask_publishers = {
-            color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color), 10)
-            for color in ARM_COLORS_RGB
-        }
+        if DEBUG_PUBLISH_MASKS:
+            self.mask_publishers = {
+                color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color), 10)
+                for color in ARM_COLORS_RGB
+            }
 
-        self.edge_mask_publishers = {
-            color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color) + '_edges', 10)
-            for color in ARM_COLORS_RGB
-        }
+            self.edge_mask_publishers = {
+                color: self.create_publisher(Image, MASK_TOPIC_TEMPLATE.format(color=color) + '_edges', 10)
+                for color in ARM_COLORS_RGB
+            }
 
-        self.mask_publisher = self.create_publisher(Image, '/arm/vision/edge_mask', 10)
-        self.debug_image_pub = self.create_publisher(Image, DEBUG_IMAGE_TOPIC, 10)
+            self.debug_image_pub = self.create_publisher(Image, DEBUG_IMAGE_TOPIC, 10)
 
         self.image_subscription = self.create_subscription(
             Image,
@@ -138,19 +139,23 @@ class ArmVisionNode(Node):
         xyz = co.sRGB_to_XYZ(rgb)
         oklab = co.XYZ_to_Oklab(xyz)
 
+        detections = []
         for color_name in ARM_COLORS_RGB.keys():
             detection = self.detect_cube_color(oklab, color_name)
-            self.mask_publishers[color_name].publish(
-                self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
-            )
+            if DEBUG_PUBLISH_MASKS:
+                self.mask_publishers[color_name].publish(
+                    self.bridge.cv2_to_imgmsg(detection['mask'], encoding='mono8')
+                )
 
-            if detection['edges'] is not None:
+            if DEBUG_PUBLISH_MASKS and detection['edges'] is not None:
                 self.edge_mask_publishers[color_name].publish(
                     self.bridge.cv2_to_imgmsg(detection['edges'], encoding='mono8')
                 )
 
             if detection['center'] is None:
                 continue
+
+            detections.append({'detection': detection, 'color': color_name, 'confidence': detection['confidence']})
 
             if self.holding:
                 if detection['box_w'] >= MIN_HOLDING_WIDTH:
@@ -159,17 +164,24 @@ class ArmVisionNode(Node):
                     self.holding_pub.publish(msg)
                     self.holding = False
 
-            self.draw_detection(debug_image, detection, self.box_colors[color_name])
+        if detections:
+            best = max(detections, key=lambda x: x['confidence'])
+            best_detection = best['detection']
+            best_color = best['color']
+
+            if DEBUG_PUBLISH_MASKS:
+                self.draw_detection(debug_image, best_detection, self.box_colors[best_color])
 
             center_msg = Int32MultiArray()
             center_msg.data = [
-                detection['center'][0],
-                detection['center'][1],
-                int(detection['angle']),  
+                best_detection['center'][0],
+                best_detection['center'][1],
+                int(best_detection['angle']),  
             ]
             self.center_publisher.publish(center_msg)
 
-        self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
+        if DEBUG_PUBLISH_MASKS:
+            self.debug_image_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
     def chroma_edges(self, oklab, color_name):
         ref = self.oklab_refs[color_name]
@@ -184,7 +196,7 @@ class ArmVisionNode(Node):
         chroma_confidence = np.clip(chroma_confidence, 0, 1)
         chroma_u8 = (chroma_confidence * 255).astype(np.uint8)
 
-        chroma_blurred = cv2.GaussianBlur(chroma_u8, (5, 5), 0)
+        chroma_blurred = cv2.GaussianBlur(chroma_u8, (3, 3), 0)
         edges = cv2.Canny(chroma_blurred, CANNY_THRESH['low'], CANNY_THRESH['high'])
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -223,7 +235,7 @@ class ArmVisionNode(Node):
             return {'mask': mask, 'center': None, 'bbox': None, 'box_w': 0, 'angle': 0, 'box_points': None, 'edges': edges}
 
         best_contour = max(valid_contours, key=self.squareness)
-        if self.squareness(best_contour) < 0.2:
+        if self.squareness(best_contour) < 0.4:
             self.smoothed_angles[color_name] = None 
             return {'mask': mask, 'center': None, 'bbox': None, 'box_w': 0, 'angle': 0, 'box_points': None, 'edges': edges}
 
@@ -261,7 +273,8 @@ class ArmVisionNode(Node):
             'box_w': box_w,          
             'angle': angle,          
             'box_points': box_points, 
-            'edges': edges,  
+            'edges': edges,
+            'confidence': self.squareness(best_contour),
         }
     
     def squareness(self,contour):
