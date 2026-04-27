@@ -33,6 +33,7 @@ class AutoState(Enum):
     RETURN_BOX_FINAL = 'RETURN_BOX_FINAL'
     BACKUP_AFTER_DROP = 'BACKUP_AFTER_DROP'
     WAIT_DROP_RESULT = 'WAIT_DROP_RESULT'
+    WAIT_ARM_IDLE = 'WAIT_ARM_IDLE'
 
 
 class GoalManager(Node):
@@ -215,14 +216,12 @@ class GoalManager(Node):
         if self._state == AutoState.WAIT_PICKUP_RESULT:
             if msg.data == 'PICK_UP_SUCCESS':
                 self.get_logger().info('Arm pickup succeeded. Returning to box.')
-
                 # Remove picked cube from list (best-effort) and clear current target
                 if self._target_ is not None:
                     self.set_status(reason='cube_picked') # set status of the current target to unavailable snce the pick up succeeded
 
                 self._target_ = None
      
-
                 self.request_box_goal_candidates(reason='pickup_success')
             elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
                 self.get_logger().warn('Arm reported cube out of reach. Backing up before retrying final approach.')
@@ -237,10 +236,18 @@ class GoalManager(Node):
                 self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
                 self._skip_current_target()
             elif msg.data in ('NO_HOLDING', 'PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_HOLD'):
-                self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Retrying pickup.')
-                self.publish_arm_status('PICK_UP')
+                self._state = AutoState.WAIT_ARM_IDLE
+                self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
             else:
                 self.get_logger().info(f'Arm result received while waiting for pickup: {msg.data}')
+            return
+        if self._state == AutoState.WAIT_ARM_IDLE:
+            if msg.data == 'IDLE_SUCCESS':
+                self.get_logger().info('Arm is now idle. Continuing with pickup retry.')
+                self.publish_arm_status('PICK_UP')
+                self._state = AutoState.WAIT_PICKUP_RESULT
+            else:
+                self.get_logger().info(f'Arm result received while waiting for arm to become idle: {msg.data}')
             return
 
         if self._state == AutoState.WAIT_DROP_RESULT:
