@@ -538,7 +538,7 @@ class Detection(Node):
         tol_green = 0.015
         tol_blue = 0.02
         tol_wood = 0.011
-        tol_box = 0.02  
+        tol_box = 0.0002  
 
         # strict thresholds
         # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
