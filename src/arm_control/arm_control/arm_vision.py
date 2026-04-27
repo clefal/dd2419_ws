@@ -31,13 +31,13 @@ DEBUG_COLOR_PICKER_ENABLED = False
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
     'red': np.array([255, 0, 0]),
-    'blue': np.array([0, 200, 255])
+    'blue': np.array([0, 230, 255])
 }
 
 TOLERANCES = {
     'green': 0.25,
     'red': 0.225,
-    'blue': 0.12
+    'blue': 0.1
 }
 
 L_BOUNDS = {
@@ -184,7 +184,7 @@ class ArmVisionNode(Node):
         chroma_confidence = np.clip(chroma_confidence, 0, 1)
         chroma_u8 = (chroma_confidence * 255).astype(np.uint8)
 
-        chroma_blurred = cv2.GaussianBlur(chroma_u8, (5, 5), 0)
+        chroma_blurred = cv2.GaussianBlur(chroma_u8, (3, 3), 0)
         edges = cv2.Canny(chroma_blurred, CANNY_THRESH['low'], CANNY_THRESH['high'])
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -223,7 +223,7 @@ class ArmVisionNode(Node):
             return {'mask': mask, 'center': None, 'bbox': None, 'box_w': 0, 'angle': 0, 'box_points': None, 'edges': edges}
 
         best_contour = max(valid_contours, key=self.squareness)
-        if self.squareness(best_contour) < 0.2:
+        if self.squareness(best_contour) < 0.4:
             self.smoothed_angles[color_name] = None 
             return {'mask': mask, 'center': None, 'bbox': None, 'box_w': 0, 'angle': 0, 'box_points': None, 'edges': edges}
 
