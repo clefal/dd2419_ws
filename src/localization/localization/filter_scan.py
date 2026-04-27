@@ -67,8 +67,6 @@ class ScanPreprocessor(Node):
         filtered_scan.range_max = min(scan.range_max, self.range_max_filter_scan)
         filtered_scan.intensities = scan.intensities
 
-        self.get_logger().info(f"Angle min: {filtered_scan.angle_min}, Angle max: {filtered_scan.angle_max}")
-
         filtered_ranges = self.median_filter_ranges(scan.ranges, kernel_size=self.median_kernel_size)
         filtered_ranges = self.reject_range_spikes(filtered_ranges, jump_thresh=self.range_jump_thresh)
 
