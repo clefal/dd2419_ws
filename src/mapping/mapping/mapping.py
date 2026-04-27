@@ -24,14 +24,26 @@ class Mapping(Node):
         self.declare_parameter("exploration_grid_resolution", 0.10) # m/cell
         self.declare_parameter("min_exploration_view_angle", -30) #deg   
         self.declare_parameter("range_exploration_view_angle", 60) #deg 
-        self.declare_parameter("exploration_range_max_update", 1.5) # m
+        self.declare_parameter("exploration_range_max_update", 2.0) # m
 
         # LaserScan input topic. Default assumes an upstream scan preprocessor node.
         self.declare_parameter("lidar_topic", "/localization/preprocessed_scan")
         # If true, the incoming LaserScan is assumed to already be filtered upstream.
         # If false, this node will filter ranges using `median_filter_scan()` before mapping.
         self.declare_parameter("input_is_preprocessed", True)
-        self.declare_parameter("scans_to_skip", 3)
+        self.declare_parameter("scans_to_skip", 2)
+        self.declare_parameter("range_min", 0.1)
+        self.declare_parameter("range_max", 3.0)
+        self.declare_parameter("range_max_free_update", 2.0)
+        self.declare_parameter("median_filter_kernel_size", 5)
+        self.declare_parameter("log_odds_increase_occ", 1.2)
+        self.declare_parameter("log_odds_decrease_free", -0.25)
+        self.declare_parameter("log_odds_min", -5.0)
+        self.declare_parameter("log_odds_max", 5.0)
+        self.declare_parameter("hit_thickening_enabled", False)
+        self.declare_parameter("hit_thickening_radius", 0.04)
+        self.declare_parameter("ignored_scan_angle_min_deg", -122.0)
+        self.declare_parameter("ignored_scan_angle_max_deg", -58.0)
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         self.declare_parameter("workspace_topic", "/workspace")
         self.declare_parameter("grid_size", 12)
@@ -54,18 +66,27 @@ class Mapping(Node):
         # Lidar params
         self.scans_to_skip = self.get_parameter("scans_to_skip").value
         self.input_is_preprocessed = bool(self.get_parameter("input_is_preprocessed").value)
-        self.range_min = 0.1
-        self.range_max = 5.0
-        self.range_max_free_update = 3.0
+        self.range_min = float(self.get_parameter("range_min").value)
+        self.range_max = float(self.get_parameter("range_max").value)
+        self.range_max_free_update = float(self.get_parameter("range_max_free_update").value)
 
         # Filter params
-        self.median_filter_kernel_size = 5
+        self.median_filter_kernel_size = int(self.get_parameter("median_filter_kernel_size").value)
 
         # Log-odds params
-        self.log_odds_increse_occ = 0.9
-        self.log_odds_decrease_free = -0.45
-        self.log_odds_min = -5
-        self.log_odds_max = 5
+        self.log_odds_increse_occ = float(self.get_parameter("log_odds_increase_occ").value)
+        self.log_odds_decrease_free = float(self.get_parameter("log_odds_decrease_free").value)
+        self.log_odds_min = float(self.get_parameter("log_odds_min").value)
+        self.log_odds_max = float(self.get_parameter("log_odds_max").value)
+        self.hit_thickening_enabled = bool(self.get_parameter("hit_thickening_enabled").value)
+        self.hit_thickening_radius = float(self.get_parameter("hit_thickening_radius").value)
+        self.ignored_scan_angle_min_deg = float(self.get_parameter("ignored_scan_angle_min_deg").value)
+        self.ignored_scan_angle_max_deg = float(self.get_parameter("ignored_scan_angle_max_deg").value)
+        self.ignored_scan_angle_min = math.radians(self.ignored_scan_angle_min_deg)
+        self.ignored_scan_angle_max = math.radians(self.ignored_scan_angle_max_deg)
+        self.ignore_scan_angle_range = (
+            abs(self.ignored_scan_angle_min_deg - self.ignored_scan_angle_max_deg) > 1e-9
+        )
 
         
         # --------------------------------------------------
@@ -130,10 +151,25 @@ class Mapping(Node):
             f"Mapping node started | lidar_topic={lidar_topic}, "
             f"input_is_preprocessed={self.input_is_preprocessed}"
         )
+        if self.ignore_scan_angle_range:
+            self.get_logger().info(
+                "Ignoring scan angle range for mapping: "
+                f"{self.ignored_scan_angle_min_deg:.1f}..{self.ignored_scan_angle_max_deg:.1f} deg"
+            )
 
         # TF listener
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+
+    def scan_angle_is_ignored(self, angle):
+        if not self.ignore_scan_angle_range:
+            return False
+
+        a0 = self.ignored_scan_angle_min
+        a1 = self.ignored_scan_angle_max
+        if a0 <= a1:
+            return a0 <= angle <= a1
+        return angle >= a0 or angle <= a1
 
     def workspace_callback(self, msg: PolygonStamped):
         if not msg.polygon.points:
@@ -293,6 +329,10 @@ class Mapping(Node):
         for i in range(len(filtered_ranges)):
             r = filtered_ranges[i]
             last_cell_occupied = True
+            ang = msg.angle_min + i * msg.angle_increment
+
+            if self.scan_angle_is_ignored(ang):
+                continue
 
             if math.isinf(r) or math.isnan(r) or r > self.range_max :
                 r = self.range_max_free_update
@@ -301,7 +341,6 @@ class Mapping(Node):
             if r < self.range_min:
                 continue
 
-            ang = msg.angle_min + i * msg.angle_increment
             x_scan = r * math.cos(ang)
             y_scan = r * math.sin(ang)
             # Rotate scan into map frame and translate by robot pose
@@ -310,7 +349,12 @@ class Mapping(Node):
             if np.isnan(x) or np.isnan(y):
                 continue
             # self.grid.update(x, y, occupied=True)
-            self.grid.update_ray(x_robot, y_robot, x, y, last_cell_occupied)
+            hit_thickening_radius = (
+                self.hit_thickening_radius
+                if self.hit_thickening_enabled and last_cell_occupied
+                else 0.0
+            )
+            self.grid.update_ray(x_robot, y_robot, x, y, last_cell_occupied, hit_thickening_radius)
 
             if ang > np.deg2rad(self.min_exploration_view_angle) and ang < np.deg2rad(self.min_exploration_view_angle + self.range_exploration_view_angle):
                 exploration_r = min(r, self.exploration_range_max_update)
@@ -497,6 +541,39 @@ class OcupancyGridData:
             self.l_max
         )
 
+    def update_disk_grid(self, x_center, y_center, radius_m, occupied=True):
+        radius_m = float(radius_m)
+        if radius_m <= 0.0:
+            self._update_grid_cell(x_center, y_center, occupied)
+            return
+
+        radius_cells = int(math.ceil(radius_m / self.resolution))
+        radius_cells = max(0, radius_cells)
+        radius2 = radius_m * radius_m
+
+        for dy in range(-radius_cells, radius_cells + 1):
+            for dx in range(-radius_cells, radius_cells + 1):
+                if (dx * self.resolution) ** 2 + (dy * self.resolution) ** 2 > radius2:
+                    continue
+                self._update_grid_cell(x_center + dx, y_center + dy, occupied)
+
+    def _update_grid_cell(self, x, y, occupied=True):
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            return
+        if self.inside_workspace_mask is not None and not self.inside_workspace_mask[y, x]:
+            return
+
+        if occupied:
+            self.log_odds[y, x] += self.l_occ
+        else:
+            self.log_odds[y, x] += self.l_free
+
+        self.log_odds[y, x] = np.clip(
+            self.log_odds[y, x],
+            self.l_min,
+            self.l_max
+        )
+
     def get_data(self):
         probs = 1 - 1 / (1 + np.exp(self.log_odds))  # sigmoid
 
@@ -537,29 +614,17 @@ class OcupancyGridData:
         cells.append((x1, y1))
         return cells
     
-    def update_ray(self, x_robot, y_robot, x_hit, y_hit, last_occupied=True):
+    def update_ray(self, x_robot, y_robot, x_hit, y_hit, last_occupied=True, hit_thickening_radius=0.0):
         x0, y0 = self.world_to_grid(x_robot, y_robot)
         x1, y1 = self.world_to_grid(x_hit, y_hit)
 
         cells = self.bresenham(x0, y0, x1, y1)
 
         for i, (x, y) in enumerate(cells):
-            if x < 0 or x >= self.width or y < 0 or y >= self.height:
-                continue
-            if self.inside_workspace_mask is not None and not self.inside_workspace_mask[y, x]:
-                continue
-
             if last_occupied:
-                # First cell → occupied
                 if i == len(cells) - 1:
-                    self.log_odds[y, x] += self.l_occ
+                    self.update_disk_grid(x, y, hit_thickening_radius, occupied=True)
                 else:
-                    self.log_odds[y, x] += self.l_free
+                    self._update_grid_cell(x, y, occupied=False)
             else:
-                self.log_odds[y, x] += self.l_free
-
-            self.log_odds[y, x] = np.clip(
-                self.log_odds[y, x],
-                self.l_min,
-                self.l_max
-            )
+                self._update_grid_cell(x, y, occupied=False)

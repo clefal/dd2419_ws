@@ -32,12 +32,14 @@ class Detection(Node):
         self.declare_parameter("eps", 0.03)
         self.declare_parameter("obj_width", 0.03)
         self.declare_parameter("box_min_width", 0.16)
-        self.declare_parameter("box_max_width", 0.23)
+        self.declare_parameter("box_max_width", 0.26)
         self.declare_parameter("obj_tolerance", 0.03)
         self.declare_parameter("buffer_size", 3)
-        self.declare_parameter("max_general_counter", 5000)
+        self.declare_parameter("max_general_counter", 12000)
         self.declare_parameter("obstacle_distance_m", 0.15)
         self.declare_parameter("occupancy_threshold", 90) # threshold used for occupancy grid check
+        self.min_samples_box = 100
+        self.eps_box = 0.02
 
         # Topic params
         self.declare_parameter("input_cloud_topic", "/realsense/depth/color/points")
@@ -341,7 +343,10 @@ class Detection(Node):
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
         Output: List of centroids [x, y, z] for valid objects
         """
-        dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+        if box:
+            dbscan = DBSCAN(eps=self.eps_box, min_samples=self.min_samples_box)
+        else:
+            dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
 
         if len(points_3d) < self.min_samples:  #TODO use thsi parameter as tuning and define it in the __init__
             return []
@@ -480,7 +485,7 @@ class Detection(Node):
             [140, 45, 35], #red
             [0, 70, 57], #green
             [0, 83, 125], # blue
-            [71, 93, 102] # grey box
+            [71, 80, 80] # grey box  rgba(81, 77, 70) rgba(65, 65, 61) rgba(75, 85, 88)
             ])
                 
         comp_colors_rgb = comp_colors_rgb / 255.0
@@ -491,11 +496,11 @@ class Detection(Node):
         # define tolerances
         # loose thresholds tol_red = 0.04    tol_green = 0.02 tol_blue = 0.025 tol_wood = 0.012 tol_box = 0.02    
   
-        # medium trehsholds
-        tol_red = 0.03   
-        tol_green = 0.01
-        tol_blue = 0.018
-        tol_box = 0.02  
+        # used trehsholds
+        tol_red = 0.035   
+        tol_green = 0.015
+        tol_blue = 0.017
+        tol_box = 0.02
 
         # strict thresholds
         # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
@@ -521,8 +526,8 @@ class Detection(Node):
         thresh_blue_b_low = comp_colors_oklab[2,2] - tol_blue
         thresh_blue_b_high = comp_colors_oklab[2,2] + tol_blue
 
-        thresh_box_L_low = 0.45
-        thresh_box_L_high = 0.52
+        thresh_box_L_low = 0.42
+        thresh_box_L_high = 0.6
         thresh_box_a_low = comp_colors_oklab[3,1] - tol_box
         thresh_box_a_high = comp_colors_oklab[3,1] + tol_box
         thresh_box_b_low = comp_colors_oklab[3,2] - tol_box

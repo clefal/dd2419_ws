@@ -11,6 +11,7 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import PointCloud2, PointField
 from geometry_msgs.msg import Point, TransformStamped
 from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformListener, TransformBroadcaster
@@ -59,9 +60,34 @@ def invert_transform(T: np.ndarray) -> np.ndarray:
 def transform_points(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
     if pts.shape[0] == 0:
         return pts
-    homog = np.hstack([pts, np.ones((pts.shape[0], 1), dtype=float)])
-    out = (T @ homog.T).T
-    return out[:, :2]
+    return pts @ T[:2, :2].T + T[:2, 2]
+
+
+def points_to_pointcloud2(points: np.ndarray, frame_id: str, stamp) -> PointCloud2:
+    msg = PointCloud2()
+    msg.header.stamp = stamp
+    msg.header.frame_id = frame_id
+    msg.height = 1
+    msg.width = int(points.shape[0])
+    msg.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+    ]
+    msg.is_bigendian = False
+    msg.point_step = 12
+    msg.row_step = msg.point_step * msg.width
+    msg.is_dense = True
+
+    if points.shape[0] == 0:
+        msg.data = b""
+        return msg
+
+    xyz = np.empty((points.shape[0], 3), dtype=np.float32)
+    xyz[:, :2] = points.astype(np.float32, copy=False)
+    xyz[:, 2] = 0.0
+    msg.data = xyz.tobytes()
+    return msg
 
 
 def tfmsg_to_matrix(tf_msg: TransformStamped) -> np.ndarray:
@@ -146,6 +172,16 @@ class IcpResult:
     time: float
 
 
+@dataclass
+class LineMapCache:
+    p1: np.ndarray
+    q: np.ndarray
+    n: np.ndarray
+    d: np.ndarray
+    mid: np.ndarray
+    length: np.ndarray
+
+
 # =========================
 # Line segment creation
 # =========================
@@ -182,47 +218,31 @@ def scan_to_points(
     range_max_clip: Optional[float] = None,
     stride: int = 1
 ) -> np.ndarray:
-    pts = []
     rmax = scan.range_max if range_max_clip is None else min(scan.range_max, range_max_clip)
-
-    angle = scan.angle_min
-    for i, r in enumerate(scan.ranges):
-        if i % stride != 0:
-            angle += scan.angle_increment
-            continue
-
-        if not math.isfinite(r):
-            angle += scan.angle_increment
-            continue
-
-        if r < max(scan.range_min, range_min_clip) or r > rmax:
-            angle += scan.angle_increment
-            continue
-
-        pts.append([r * math.cos(angle), r * math.sin(angle)])
-        angle += scan.angle_increment
-
-    if len(pts) == 0:
+    ranges = np.asarray(scan.ranges, dtype=float)
+    if ranges.size == 0:
         return np.zeros((0, 2), dtype=float)
 
-    return np.array(pts, dtype=float)
+    valid = np.isfinite(ranges)
+    valid &= ranges >= max(scan.range_min, range_min_clip)
+    valid &= ranges <= rmax
 
-def remove_isolated_points_ordered(points: np.ndarray, neighbor_dist_thresh: float = 0.12) -> np.ndarray:
-    if points.shape[0] < 3:
-        return points
+    if stride > 1:
+        stride_mask = np.zeros(ranges.shape[0], dtype=bool)
+        stride_mask[::stride] = True
+        valid &= stride_mask
 
-    keep = np.zeros(points.shape[0], dtype=bool)
-    keep[0] = np.linalg.norm(points[1] - points[0]) < neighbor_dist_thresh
-    keep[-1] = np.linalg.norm(points[-1] - points[-2]) < neighbor_dist_thresh
+    if not np.any(valid):
+        return np.zeros((0, 2), dtype=float)
 
-    for i in range(1, points.shape[0] - 1):
-        d_prev = np.linalg.norm(points[i] - points[i - 1])
-        d_next = np.linalg.norm(points[i] - points[i + 1])
-        if d_prev < neighbor_dist_thresh or d_next < neighbor_dist_thresh:
-            keep[i] = True
+    idx = np.nonzero(valid)[0]
+    ranges = ranges[idx]
+    angles = scan.angle_min + idx.astype(float) * scan.angle_increment
 
-    return points[keep]
-
+    pts = np.empty((idx.shape[0], 2), dtype=float)
+    pts[:, 0] = ranges * np.cos(angles)
+    pts[:, 1] = ranges * np.sin(angles)
+    return pts
 
 # =========================
 # Split-and-merge line extraction
@@ -313,6 +333,20 @@ def extract_lines_from_scan(
     return segments
 
 
+def build_line_map_cache(map_lines: List[LineSegment]) -> Optional[LineMapCache]:
+    if len(map_lines) == 0:
+        return None
+
+    return LineMapCache(
+        p1=np.array([line.p1 for line in map_lines], dtype=float),
+        q=np.array([line.q for line in map_lines], dtype=float),
+        n=np.array([line.n for line in map_lines], dtype=float),
+        d=np.array([line.d for line in map_lines], dtype=float),
+        mid=np.array([line.mid for line in map_lines], dtype=float),
+        length=np.array([line.length for line in map_lines], dtype=float),
+    )
+
+
 # =========================
 # Point-to-line association
 # =========================
@@ -367,7 +401,10 @@ def icp_point_to_line_robust(
     max_perp_dist: float = 0.12,
     huber_delta: float = 0.05,
     max_step_translation: float = 0.05,
-    max_step_rotation_deg: float = 2.0
+    max_step_rotation_deg: float = 2.0,
+    line_cache: Optional[LineMapCache] = None,
+    endpoint_margin: float = 0.08,
+    local_radius: float = 4.0,
 ) -> IcpResult:
     init_time = time.time()
     if points_laser.shape[0] == 0 or len(map_lines) == 0:
@@ -377,7 +414,8 @@ def icp_point_to_line_robust(
             mean_abs_residual=float("inf"),
             median_abs_residual=float("inf"),
             converged=False,
-            iterations=0
+            iterations=0,
+            time=(time.time() - init_time) * 1000
         )
 
     x, y, th = matrix_to_pose(T_init)
@@ -387,6 +425,19 @@ def icp_point_to_line_robust(
     final_median_abs = float("inf")
     converged = False
     max_step_rot = math.radians(max_step_rotation_deg)
+    I3 = np.eye(3, dtype=float)
+    cache = line_cache if line_cache is not None else build_line_map_cache(map_lines)
+    if cache is None:
+        return IcpResult(
+            T=T_init.copy(),
+            num_corr=0,
+            mean_abs_residual=float("inf"),
+            median_abs_residual=float("inf"),
+            converged=False,
+            iterations=0,
+            time=(time.time() - init_time) * 1000
+        )
+    local_radius_sq = local_radius * local_radius
 
     for it in range(max_iters):
         c = math.cos(th)
@@ -394,44 +445,49 @@ def icp_point_to_line_robust(
         R = np.array([[c, -s], [s, c]], dtype=float)
         t = np.array([x, y], dtype=float)
 
-        J_rows = []
-        e_rows = []
+        Rp_all = points_laser @ R.T
+        p_map_all = Rp_all + t
 
-        for p in points_laser:
-            Rp = R @ p
-            p_map = Rp + t
+        rel_mid = p_map_all[:, None, :] - cache.mid[None, :, :]
+        mid_dist_sq = np.einsum("ijk,ijk->ij", rel_mid, rel_mid)
 
-            line = closest_line_for_point(
-                p_map,
-                map_lines,
-                max_perp_dist=max_perp_dist
-            )
-            if line is None:
-                continue
+        rel_p1 = p_map_all[:, None, :] - cache.p1[None, :, :]
+        along = np.einsum("ijk,jk->ij", rel_p1, cache.d)
 
-            e = float(line.n @ (p_map - line.q))
-            dtheta = np.array([-Rp[1], Rp[0]], dtype=float)
-            J = np.array([
-                line.n[0],
-                line.n[1],
-                float(line.n @ dtheta)
-            ], dtype=float)
+        rel_q = p_map_all[:, None, :] - cache.q[None, :, :]
+        perp_signed = np.einsum("ijk,jk->ij", rel_q, cache.n)
+        perp_abs = np.abs(perp_signed)
 
-            J_rows.append(J)
-            e_rows.append(e)
+        valid = mid_dist_sq <= local_radius_sq
+        valid &= along >= -endpoint_margin
+        valid &= along <= (cache.length[None, :] + endpoint_margin)
+        valid &= perp_abs <= max_perp_dist
 
-        final_num_corr = len(J_rows)
+        scores = np.where(valid, perp_abs, np.inf)
+        best_idx = np.argmin(scores, axis=1)
+        point_idx = np.arange(points_laser.shape[0])
+        matched = np.isfinite(scores[point_idx, best_idx])
+
+        final_num_corr = int(np.count_nonzero(matched))
         if final_num_corr < min_corr:
             break
 
-        J = np.vstack(J_rows)
-        e = np.array(e_rows, dtype=float)
+        sel_points = point_idx[matched]
+        sel_lines = best_idx[matched]
+        matched_Rp = Rp_all[matched]
+        matched_n = cache.n[sel_lines]
+        e = perp_signed[sel_points, sel_lines]
+
+        dtheta = np.column_stack((-matched_Rp[:, 1], matched_Rp[:, 0]))
+        J = np.empty((final_num_corr, 3), dtype=float)
+        J[:, :2] = matched_n
+        J[:, 2] = np.einsum("ij,ij->i", matched_n, dtheta)
 
         abs_e = np.abs(e)
         final_mean_abs = float(np.mean(abs_e))
         final_median_abs = float(np.median(abs_e))
 
-        W = np.array([huber_weight(v, huber_delta) for v in abs_e], dtype=float)
+        W = np.where(abs_e <= huber_delta, 1.0, huber_delta / np.maximum(abs_e, 1e-12))
         sqrtW = np.sqrt(W)
 
         Jw = J * sqrtW[:, None]
@@ -439,7 +495,7 @@ def icp_point_to_line_robust(
 
         H = Jw.T @ Jw
         g = Jw.T @ ew
-        H += 1e-6 * np.eye(3)
+        H += 1e-6 * I3
 
         try:
             dx = -np.linalg.solve(H, g)
@@ -474,142 +530,6 @@ def icp_point_to_line_robust(
         time=(time.time() - init_time) * 1000
     )
 
-# def icp_point_to_line_robust(
-#     points_laser: np.ndarray,
-#     map_lines: List[LineSegment],
-#     T_init: np.ndarray,
-#     max_iters: int = 15,
-#     min_corr: int = 20,
-#     max_perp_dist: float = 0.12,
-#     huber_delta: float = 0.05,
-#     max_step_translation: float = 0.05,
-#     max_step_rotation_deg: float = 2.0
-# ) -> IcpResult:
-#     init_time = time.time()
-#     if points_laser.shape[0] == 0 or len(map_lines) == 0:
-#         return IcpResult(
-#             T=T_init.copy(),
-#             num_corr=0,
-#             mean_abs_residual=float("inf"),
-#             median_abs_residual=float("inf"),
-#             converged=False,
-#             iterations=0
-#         )
-
-#     x, y, th = matrix_to_pose(T_init)
-
-#     final_num_corr = 0
-#     final_mean_abs = float("inf")
-#     final_median_abs = float("inf")
-#     converged = False
-#     max_step_rot = math.radians(max_step_rotation_deg)
-
-#     # Pre-allocate
-#     I3 = np.eye(3, dtype=float)
-
-#     for it in range(max_iters):
-#         c = math.cos(th)
-#         s = math.sin(th)
-
-#         # Avoid recreating full matrices when possible
-#         R = np.array([[c, -s], [s, c]], dtype=float)
-#         t = np.array([x, y], dtype=float)
-
-#         # Vectorized transform
-#         Rp_all = (R @ points_laser.T).T
-#         p_map_all = Rp_all + t
-
-#         J_rows = []
-#         e_rows = []
-
-#         for i in range(points_laser.shape[0]):
-#             Rp = Rp_all[i]
-#             p_map = p_map_all[i]
-
-#             line = closest_line_for_point(
-#                 p_map,
-#                 map_lines,
-#                 max_perp_dist=max_perp_dist
-#             )
-#             if line is None:
-#                 continue
-
-#             # residual
-#             e = float(line.n @ (p_map - line.q))
-
-#             # Jacobian
-#             dtheta = np.array([-Rp[1], Rp[0]], dtype=float)
-#             J = np.array([
-#                 line.n[0],
-#                 line.n[1],
-#                 float(line.n @ dtheta)
-#             ], dtype=float)
-
-#             J_rows.append(J)
-#             e_rows.append(e)
-
-#         final_num_corr = len(J_rows)
-#         if final_num_corr < min_corr:
-#             break
-
-#         J = np.vstack(J_rows)
-#         e = np.array(e_rows, dtype=float)
-
-#         abs_e = np.abs(e)
-#         final_mean_abs = float(np.mean(abs_e))
-#         final_median_abs = float(np.median(abs_e))
-
-#         # Vectorized Huber weights
-#         W = np.where(
-#             abs_e <= huber_delta,
-#             1.0,
-#             huber_delta / np.maximum(abs_e, 1e-12)
-#         )
-#         sqrtW = np.sqrt(W)
-
-#         # Weighted least squares
-#         Jw = J * sqrtW[:, None]
-#         ew = e * sqrtW
-
-#         H = Jw.T @ Jw
-#         g = Jw.T @ ew
-#         H += 1e-6 * I3  # reuse identity
-
-#         try:
-#             dx = -np.linalg.solve(H, g)
-#         except np.linalg.LinAlgError:
-#             break
-
-#         # Step clamp
-#         trans_step = float(np.linalg.norm(dx[:2]))
-#         rot_step = abs(float(dx[2]))
-
-#         if trans_step > max_step_translation:
-#             dx[:2] *= max_step_translation / max(trans_step, 1e-12)
-
-#         if rot_step > max_step_rot:
-#             dx[2] *= max_step_rot / max(rot_step, 1e-12)
-
-#         x += float(dx[0])
-#         y += float(dx[1])
-#         th = wrap_angle(th + float(dx[2]))
-
-#         # Convergence check
-#         if trans_step < 1e-4 and rot_step < math.radians(0.05):
-#             converged = True
-#             break
-
-#     return IcpResult(
-#         T=pose_to_matrix(x, y, th),
-#         num_corr=final_num_corr,
-#         mean_abs_residual=final_mean_abs,
-#         median_abs_residual=final_median_abs,
-#         converged=converged,
-#         iterations=it + 1 if max_iters > 0 else 0,
-#         time=(time.time() - init_time) * 1000
-#     )
-
-
 # =========================
 # Main ROS2 node
 # =========================
@@ -625,6 +545,8 @@ class IcpScanToLine(Node):
         self.declare_parameter("is_turning_topic", "/nav/is_turning")
         # Debug visualization topic for publishing the current map lines.
         self.declare_parameter("map_lines_topic", "/localization/map_lines")
+        # Debug point cloud topic for publishing stacked scan points used by ICP.
+        self.declare_parameter("stacked_points_topic", "/localization/stacked_points")
         # Robot base frame used when composing poses.
         self.declare_parameter("base_frame", "base_link_temp")
         # Odometry frame used as the short-term motion prior.
@@ -634,11 +556,9 @@ class IcpScanToLine(Node):
 
         # Preprocessing
         # Maximum range kept when turning scan beams into points for mapping and ICP.
-        self.declare_parameter("range_max_clip", 4.0)
+        self.declare_parameter("range_max_clip", 6.0)
         # Number of consecutive scans stacked together in the current laser frame.
-        self.declare_parameter("stack_scans", 3)
-        # Remove points whose immediate scan-order neighbors are both farther than this distance.
-        self.declare_parameter("neighbor_dist_thresh", 0.10)
+        self.declare_parameter("stack_scans", 5)
 
         # Line extraction
         # Split ordered points into separate clusters when consecutive points are farther apart than this.
@@ -648,7 +568,7 @@ class IcpScanToLine(Node):
         # Minimum number of points required before a candidate segment is accepted as a line.
         self.declare_parameter("line_min_points", 20)
         # Minimum line length required before a detected segment is kept.
-        self.declare_parameter("line_min_length", 0.40)
+        self.declare_parameter("line_min_length", 0.15)
 
         # ICP
         # Maximum number of scan-to-line ICP iterations per callback.
@@ -675,10 +595,17 @@ class IcpScanToLine(Node):
         # Map maintenance
         # Hard cap on the number of stored map line segments.
         self.declare_parameter("map_max_lines", 50)
-        # Minimum midpoint separation before a similar detected line is inserted into the map.
+        # Maximum angle difference (deg) for considering a new line similar to an existing one
+        # during insertion filtering. Smaller values reject more near-duplicate lines.
+        self.declare_parameter("map_insert_max_angle_deg", 10.0)
+        # Maximum perpendicular offset (m) for considering a new line similar to an existing one
+        # during insertion filtering. Smaller values reject more parallel nearby duplicates.
+        self.declare_parameter("map_insert_max_perp_dist", 0.15)
+        # Minimum midpoint separation (m) between two already-similar lines before the new line
+        # is rejected as a duplicate. Larger values make insertion more conservative.
         self.declare_parameter("map_insert_min_separation", 0.35)
         # If true, merge near-duplicate collinear segments into a longer segment.
-        self.declare_parameter("map_merge_lines", True)
+        self.declare_parameter("map_merge_lines", False)
         # Maximum orientation difference (deg) for merging collinear segments.
         self.declare_parameter("map_merge_angle_deg", 5.0)
         # Maximum perpendicular distance (m) between segments for merging.
@@ -700,13 +627,13 @@ class IcpScanToLine(Node):
         self.scan_topic = self.get_parameter("scan_topic").value
         self.is_turning_topic = self.get_parameter("is_turning_topic").value
         self.map_lines_topic = self.get_parameter("map_lines_topic").value
+        self.stacked_points_topic = self.get_parameter("stacked_points_topic").value
         self.base_frame = self.get_parameter("base_frame").value
         self.odom_frame = self.get_parameter("odom_frame").value
         self.map_frame = self.get_parameter("map_frame").value
 
         self.range_max_clip = float(self.get_parameter("range_max_clip").value)
         self.stack_scans = max(1, int(self.get_parameter("stack_scans").value))
-        self.neighbor_dist_thresh = float(self.get_parameter("neighbor_dist_thresh").value)
 
         self.cluster_jump_thresh = float(self.get_parameter("cluster_jump_thresh").value)
         self.split_thresh = float(self.get_parameter("split_thresh").value)
@@ -725,6 +652,8 @@ class IcpScanToLine(Node):
         self.pose_smoothing_alpha = float(self.get_parameter("pose_smoothing_alpha").value)
 
         self.map_max_lines = int(self.get_parameter("map_max_lines").value)
+        self.map_insert_max_angle_deg = float(self.get_parameter("map_insert_max_angle_deg").value)
+        self.map_insert_max_perp_dist = float(self.get_parameter("map_insert_max_perp_dist").value)
         self.map_insert_min_separation = float(self.get_parameter("map_insert_min_separation").value)
         self.map_merge_lines = bool(self.get_parameter("map_merge_lines").value)
         self.map_merge_angle_deg = float(self.get_parameter("map_merge_angle_deg").value)
@@ -746,6 +675,7 @@ class IcpScanToLine(Node):
         self.mto_initialized = False
 
         self.map_lines: List[LineSegment] = []
+        self.line_map_cache: Optional[LineMapCache] = None
         self.initialized = False
 
         self.scan_buffer = deque(maxlen=max(0, self.stack_scans - 1))
@@ -757,6 +687,7 @@ class IcpScanToLine(Node):
         self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
         self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 10)
+        self.stacked_points_pub = self.create_publisher(PointCloud2, self.stacked_points_topic, 10)
 
         self.get_logger().info(
             f"scan_to_line_slam started | scan_topic={self.scan_topic}, "
@@ -772,12 +703,12 @@ class IcpScanToLine(Node):
             self.scan_buffer.clear()
             self.get_logger().info("Turning ended: cleared stacked scan buffer")
 
-    def try_initialize_mto(self) -> bool:
+    def try_initialize_mto(self, stamp) -> bool:
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.map_frame,
                 "start",
-                rclpy.time.Time(seconds=0),
+                stamp,
                 timeout=rclpy.time.Duration(seconds=1)
             )
             self.T_map_odom = tfmsg_to_matrix(tf)
@@ -785,7 +716,7 @@ class IcpScanToLine(Node):
             self.get_logger().info(f"Initialized {self.map_frame}->{self.odom_frame} from {self.map_frame}->start")
 
             tf_map_odom = TransformStamped()
-            tf_map_odom.header.stamp = self.get_clock().now().to_msg()
+            tf_map_odom.header.stamp = tf.header.stamp
             tf_map_odom.header.frame_id = self.map_frame
             tf_map_odom.child_frame_id = self.odom_frame
             tf_map_odom.transform = tf.transform
@@ -811,13 +742,11 @@ class IcpScanToLine(Node):
 
     def preprocess_scan(self, scan: LaserScan) -> Tuple[LaserScan, np.ndarray]:
         # Scan-level filtering is done upstream (see `filter_scan` node). Here we only
-        # convert to points and apply the point-neighborhood filter.
+        # convert the already preprocessed scan into points.
         points = scan_to_points(
             scan,
             range_max_clip=self.range_max_clip,
         )
-
-        points = remove_isolated_points_ordered(points, neighbor_dist_thresh=self.neighbor_dist_thresh)
         return scan, points
 
     def build_stacked_points(self, current_points_laser: np.ndarray, T_odom_laser_current: np.ndarray) -> np.ndarray:
@@ -844,13 +773,17 @@ class IcpScanToLine(Node):
         )
 
     def should_insert_line(self, line: LineSegment) -> bool:
+        # A new line is rejected only if it is already similar to some existing line in
+        # all three senses: orientation, perpendicular offset, and midpoint proximity.
+        # The `continue` statements are intentional: if one existing line is not similar
+        # enough in angle or perpendicular offset, we skip that candidate and test the next.
         for existing in self.map_lines:
             angle = math.acos(np.clip(abs(existing.d @ line.d), 0.0, 1.0))
-            if angle > math.radians(10.0):
+            if angle > math.radians(self.map_insert_max_angle_deg):
                 continue
 
             perp_dist = abs(existing.n @ (line.mid - existing.q))
-            if perp_dist > 0.15:
+            if perp_dist > self.map_insert_max_perp_dist:
                 continue
 
             if np.linalg.norm(existing.mid - line.mid) < self.map_insert_min_separation:
@@ -932,13 +865,16 @@ class IcpScanToLine(Node):
         if len(self.map_lines) > self.map_max_lines:
             self.map_lines = self.map_lines[-self.map_max_lines:]
 
+        self.line_map_cache = build_line_map_cache(self.map_lines)
+
     def publish_map_lines_markers(self, stamp) -> None:
         markers = MarkerArray()
 
         delete_marker = Marker()
         delete_marker.header.frame_id = self.map_frame
         delete_marker.header.stamp = stamp
-        delete_marker.ns = "map_lines"
+        delete_marker.ns = "map_lines_clear"
+        delete_marker.id = 0
         delete_marker.action = Marker.DELETEALL
         markers.markers.append(delete_marker)
 
@@ -970,6 +906,10 @@ class IcpScanToLine(Node):
             markers.markers.append(marker)
 
         self.map_lines_pub.publish(markers)
+
+    def publish_stacked_points(self, points_laser: np.ndarray, laser_frame: str, stamp) -> None:
+        cloud_msg = points_to_pointcloud2(points_laser, laser_frame, stamp)
+        self.stacked_points_pub.publish(cloud_msg)
 
     def seed_map_from_scan(self, points_laser: np.ndarray, T_map_laser: np.ndarray) -> None:
         raw_lines = extract_lines_from_scan(
@@ -1033,6 +973,7 @@ class IcpScanToLine(Node):
         self.tf_broadcaster.sendTransform(tf_msg)
 
     def scan_callback(self, scan: LaserScan) -> None:
+        init_time = time.time()
         if self.is_turning:
             self.get_logger().warn("Ignoring scan while turning")
             return
@@ -1040,7 +981,7 @@ class IcpScanToLine(Node):
         stamp = scan.header.stamp
 
         if not self.mto_initialized:
-            self.try_initialize_mto()
+            self.try_initialize_mto(stamp)
             return
 
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
@@ -1080,6 +1021,7 @@ class IcpScanToLine(Node):
             return
 
         # Robust ICP
+        self.publish_stacked_points(stacked_points_laser, "lidar_link_temp", stamp)
         result = icp_point_to_line_robust(
             stacked_points_laser,
             self.map_lines,
@@ -1089,7 +1031,8 @@ class IcpScanToLine(Node):
             max_perp_dist=self.icp_max_perp_dist,
             huber_delta=self.icp_huber_delta,
             max_step_translation=self.icp_accept_max_translation,
-            max_step_rotation_deg=self.icp_accept_max_rotation_deg
+            max_step_rotation_deg=self.icp_accept_max_rotation_deg,
+            line_cache=self.line_map_cache,
         )
 
         accepted = self.accept_icp_result(T_map_laser_init, result)
@@ -1145,6 +1088,9 @@ class IcpScanToLine(Node):
         else:
             # Reject frame, keep previous map->odom
             pass
+
+        finish_time = time.time()
+        self.get_logger().info(f"ICP time: {(finish_time - init_time) * 1000.0:.2f}ms")
 
         self.publish_map_to_odom(stamp)
         self.publish_map_lines_markers(stamp)
