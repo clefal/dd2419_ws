@@ -142,8 +142,9 @@ class Controller(Node):
         self._status_pub.publish(msg)
 
     def send_duty(self, left: float, right: float):
-        target_left = float(clamp(left, -1.0, 1.0))
-        target_right = float(clamp(right, -1.0, 1.0))
+        # target_left = float(clamp(left, -1.0, 1.0))
+        # target_right = float(clamp(right, -1.0, 1.0))
+        target_left, target_right = self.enforce_wheel_saturation_pair(left, right)
 
         # Keep stops immediate for safety; otherwise limit per-tick duty jumps.
         if target_left == 0.0 and target_right == 0.0:
@@ -372,6 +373,24 @@ class Controller(Node):
         nx = -math.sin(heading)
         ny = math.cos(heading)
         return tx + offset * nx, ty + offset * ny
+
+    def enforce_wheel_saturation_pair(self, left: float, right: float) -> Tuple[float, float]:
+
+        left = float(left)
+        right = float(right)
+        max_mag = max(abs(left), abs(right))
+        if max_mag <= 1.0:
+            return left, right
+
+        scale = 1.0 / max_mag
+        scaled_left = left * scale
+        scaled_right = right * scale
+        self.get_logger().warn(
+            'Wheel command saturation reached; '
+            f'scaling pair by {scale:.3f} '
+            f'(raw=({left:.3f},{right:.3f}), scaled=({scaled_left:.3f},{scaled_right:.3f}))'
+        )
+        return scaled_left, scaled_right
     
     def enforce_motor_deadzone_pair(self, left: float, right: float, min_dc: float) -> Tuple[float, float]:
         """

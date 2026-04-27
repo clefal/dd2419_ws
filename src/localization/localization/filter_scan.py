@@ -29,6 +29,9 @@ class ScanPreprocessor(Node):
         self.declare_parameter("range_jump_thresh", 0.20)
         # Remove points whose immediate scan-order neighbors are both farther than this distance.
         self.declare_parameter("neighbor_dist_thresh", 0.08)
+        self.declare_parameter("invalid_diagnostics_enabled", False)
+        self.declare_parameter("invalid_diagnostics_window_size", 50)
+        self.declare_parameter("invalid_diagnostics_min_run_length", 3)
 
         self.input_topic = self.get_parameter('input_topic').value
         self.output_topic = self.get_parameter('output_topic').value
@@ -37,6 +40,12 @@ class ScanPreprocessor(Node):
         self.median_kernel_size = int(self.get_parameter("median_kernel_size").value)
         self.range_jump_thresh = float(self.get_parameter("range_jump_thresh").value)
         self.neighbor_dist_thresh = float(self.get_parameter("neighbor_dist_thresh").value)
+        self.invalid_diagnostics_enabled = bool(self.get_parameter("invalid_diagnostics_enabled").value)
+        self.invalid_diagnostics_window_size = int(self.get_parameter("invalid_diagnostics_window_size").value)
+        self.invalid_diagnostics_min_run_length = int(self.get_parameter("invalid_diagnostics_min_run_length").value)
+        self._invalid_diag_count = 0
+        self._raw_invalid_counts = None
+        self._filtered_invalid_counts = None
 
         self.pub = self.create_publisher(LaserScan, self.output_topic, 10)
         self.sub = self.create_subscription(LaserScan, self.input_topic, self.callback, 10)
@@ -58,6 +67,8 @@ class ScanPreprocessor(Node):
         filtered_scan.range_max = min(scan.range_max, self.range_max_filter_scan)
         filtered_scan.intensities = scan.intensities
 
+        self.get_logger().info(f"Angle min: {filtered_scan.angle_min}, Angle max: {filtered_scan.angle_max}")
+
         filtered_ranges = self.median_filter_ranges(scan.ranges, kernel_size=self.median_kernel_size)
         filtered_ranges = self.reject_range_spikes(filtered_ranges, jump_thresh=self.range_jump_thresh)
 
@@ -72,8 +83,79 @@ class ScanPreprocessor(Node):
         ] = np.inf
 
         filtered_scan.ranges = filtered_ranges.tolist()
+        self.update_invalid_diagnostics(scan, filtered_ranges)
         self.pub.publish(filtered_scan)
         return filtered_scan
+
+    def update_invalid_diagnostics(self, scan: LaserScan, filtered_ranges: np.ndarray):
+        if not self.invalid_diagnostics_enabled:
+            return
+
+        raw_ranges = np.array(scan.ranges, dtype=float)
+        if raw_ranges.shape[0] == 0:
+            return
+
+        if (
+            self._raw_invalid_counts is None
+            or self._raw_invalid_counts.shape[0] != raw_ranges.shape[0]
+        ):
+            self._invalid_diag_count = 0
+            self._raw_invalid_counts = np.zeros(raw_ranges.shape[0], dtype=np.int32)
+            self._filtered_invalid_counts = np.zeros(raw_ranges.shape[0], dtype=np.int32)
+
+        self._invalid_diag_count += 1
+        self._raw_invalid_counts += ~np.isfinite(raw_ranges)
+        self._filtered_invalid_counts += ~np.isfinite(filtered_ranges)
+
+        window_size = max(1, self.invalid_diagnostics_window_size)
+        if self._invalid_diag_count < window_size:
+            return
+
+        raw_always_invalid = self._raw_invalid_counts >= self._invalid_diag_count
+        filtered_always_invalid = self._filtered_invalid_counts >= self._invalid_diag_count
+
+        raw_runs = self.invalid_runs_to_text(raw_always_invalid, scan)
+        filtered_runs = self.invalid_runs_to_text(filtered_always_invalid, scan)
+
+        self.get_logger().info(
+            "Invalid scan diagnostics over "
+            f"{self._invalid_diag_count} scans | "
+            f"raw always NaN/Inf: {raw_runs} | "
+            f"filtered always NaN/Inf: {filtered_runs}"
+        )
+
+        self._invalid_diag_count = 0
+        self._raw_invalid_counts.fill(0)
+        self._filtered_invalid_counts.fill(0)
+
+    def invalid_runs_to_text(self, invalid_mask: np.ndarray, scan: LaserScan) -> str:
+        min_run = max(1, self.invalid_diagnostics_min_run_length)
+        runs = []
+        start = None
+
+        for i, is_invalid in enumerate(invalid_mask):
+            if is_invalid and start is None:
+                start = i
+            elif not is_invalid and start is not None:
+                self.append_invalid_run(runs, start, i - 1, min_run, scan)
+                start = None
+
+        if start is not None:
+            self.append_invalid_run(runs, start, len(invalid_mask) - 1, min_run, scan)
+
+        if not runs:
+            return "none"
+        return "; ".join(runs)
+
+    def append_invalid_run(self, runs, start: int, end: int, min_run: int, scan: LaserScan):
+        if end - start + 1 < min_run:
+            return
+
+        angle_start = math.degrees(scan.angle_min + start * scan.angle_increment)
+        angle_end = math.degrees(scan.angle_min + end * scan.angle_increment)
+        runs.append(
+            f"idx {start}-{end}, angle {angle_start:.1f}..{angle_end:.1f} deg"
+        )
     
     def median_filter_ranges(self, ranges, kernel_size: int = 5) -> np.ndarray:
         kernel_size = max(1, int(kernel_size))

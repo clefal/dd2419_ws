@@ -32,12 +32,14 @@ class Detection(Node):
         self.declare_parameter("eps", 0.03)
         self.declare_parameter("obj_width", 0.03)
         self.declare_parameter("box_min_width", 0.16)
-        self.declare_parameter("box_max_width", 0.23)
+        self.declare_parameter("box_max_width", 0.26)
         self.declare_parameter("obj_tolerance", 0.03)
         self.declare_parameter("buffer_size", 3)
-        self.declare_parameter("max_general_counter", 5000)
+        self.declare_parameter("max_general_counter", 12000)
         self.declare_parameter("obstacle_distance_m", 0.15)
         self.declare_parameter("occupancy_threshold", 90) # threshold used for occupancy grid check
+        self.min_samples_box = 100
+        self.eps_box = 0.02
 
         # Topic params
         self.declare_parameter("input_cloud_topic", "/realsense/depth/color/points")
@@ -80,8 +82,8 @@ class Detection(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Initialize the publisher
-        self._pub = self.create_publisher(
-            PointCloud2, output_pointcloud_topic, 10, callback_group=ReentrantCallbackGroup())
+        # self._pub = self.create_publisher(
+        #    PointCloud2, output_pointcloud_topic, 10, callback_group=ReentrantCallbackGroup())
         
         self.red_centroid_pub = self.create_publisher(PointStamped, red_cube_topic, 10, callback_group=ReentrantCallbackGroup())
         self.green_centroid_pub = self.create_publisher(PointStamped, green_cube_topic, 10, callback_group=ReentrantCallbackGroup())
@@ -162,11 +164,11 @@ class Detection(Node):
 
 
         # needed to publish te pointcloud for rviz
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            ]
+        # fields = [
+        #     PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        #     PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        #     PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        #     ]
         centroid_header = Header()
         centroid_header.stamp = msg.header.stamp  #this is a bit sus, since we are buffering the points
         centroid_header.frame_id = 'map'
@@ -190,8 +192,8 @@ class Detection(Node):
                 # self.get_logger().info(f'red: {len(all_red_points)}')
 
                 # only for visualization in rviz
-                msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
-                self._pub.publish(msg_red)
+                #msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
+                #self._pub.publish(msg_red)
 
                 for centroid in red_centroids: 
                     self.publish_detection(centroid, centroid_header, 'red')
@@ -213,8 +215,8 @@ class Detection(Node):
                 # self.get_logger().info(f'green: {len(all_green_points)}')
 
                 # only for visualization in rviz
-                msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
-                self._pub.publish(msg_green)
+                # msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
+                # self._pub.publish(msg_green)
 
                 for centroid in green_centroids: 
                     self.publish_detection(centroid, centroid_header, 'green')
@@ -237,8 +239,8 @@ class Detection(Node):
 
 
                 # only for visualization in rviz
-                msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
-                self._pub.publish(msg_blue)
+                # msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
+                # self._pub.publish(msg_blue)
 
                 for centroid in blue_centroids: 
                     self.publish_detection(centroid, centroid_header, 'blue')
@@ -260,8 +262,8 @@ class Detection(Node):
                 # self.get_logger().info(f'box: {len(all_box_points)}')
 
                 # only for visualization in rviz
-                msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
-                self._pub.publish(msg_box)
+                # msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
+                # self._pub.publish(msg_box)
 
                 for centroid in box_centroids:
                     self.publish_detection(centroid, centroid_header, 'box')
@@ -341,7 +343,10 @@ class Detection(Node):
         Input: points_3d (N, 3) numpy array of filtered XYZ coordinates
         Output: List of centroids [x, y, z] for valid objects
         """
-        dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+        if box:
+            dbscan = DBSCAN(eps=self.eps_box, min_samples=self.min_samples_box)
+        else:
+            dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
 
         if len(points_3d) < self.min_samples:  #TODO use thsi parameter as tuning and define it in the __init__
             return []
@@ -480,7 +485,7 @@ class Detection(Node):
             [140, 45, 35], #red
             [0, 70, 57], #green
             [0, 83, 125], # blue
-            [71, 93, 102] # grey box
+            [71, 80, 80] # grey box  rgba(81, 77, 70) rgba(65, 65, 61) rgba(75, 85, 88)
             ])
                 
         comp_colors_rgb = comp_colors_rgb / 255.0
@@ -494,8 +499,8 @@ class Detection(Node):
         # used trehsholds
         tol_red = 0.035   
         tol_green = 0.015
-        tol_blue = 0.02
-        tol_box = 0.02  
+        tol_blue = 0.017
+        tol_box = 0.02
 
         # strict thresholds
         # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
@@ -521,7 +526,7 @@ class Detection(Node):
         thresh_blue_b_low = comp_colors_oklab[2,2] - tol_blue
         thresh_blue_b_high = comp_colors_oklab[2,2] + tol_blue
 
-        thresh_box_L_low = 0.4
+        thresh_box_L_low = 0.42
         thresh_box_L_high = 0.6
         thresh_box_a_low = comp_colors_oklab[3,1] - tol_box
         thresh_box_a_high = comp_colors_oklab[3,1] + tol_box
