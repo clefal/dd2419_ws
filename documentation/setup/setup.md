@@ -22,6 +22,7 @@ sshpass -p 'group3' ssh group3@192.168.1.63
 sshpass -p 'group3' ssh group3@10.94.192.242
 sshpass -p 'group3' ssh group3@10.238.43.242 
 sshpass -p 'group3' ssh group3@10.72.177.242 
+sshpass -p 'group3' ssh group3@10.82.172.242
 ```
 
 1. Run any launch. For example
