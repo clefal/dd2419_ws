@@ -43,7 +43,7 @@ class Odometry(Node):
         self.declare_parameter('wheel_radius', 0.04921)
         self.declare_parameter('base', 0.308)
         self.declare_parameter('fix_tilt', True)
-        self.declare_parameter('gyro_bias_duration', 0.0)
+        self.declare_parameter('gyro_bias_duration', 3.0)
 
         # -------------------------
         # Robot model constants
