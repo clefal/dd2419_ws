@@ -119,8 +119,6 @@ class Odometry(Node):
 
         t = stamp_to_sec(msg.header.stamp)
 
-
-        self.get_logger().info('callback')
         # Calculate gyro bias        
         if not self._gyro_bias_initialized:
             if self._gyro_bias_duration == 0.0:
