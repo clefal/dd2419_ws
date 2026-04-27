@@ -225,9 +225,7 @@ class ObjectManager(Node):
 
         if self.check_similarity(obj) == 0:  # if object is similar to zero objects then add it to the list
             self.object_list.append(obj)
-            self.get_logger().info(
-                f'New {obj.type} detected: id={obj.id}, x={obj.last_x:.2f}, y={obj.last_y:.2f}'
-            )
+            #self.get_logger().info(f'New {obj.type} detected: id={obj.id}, x={obj.last_x:.2f}, y={obj.last_y:.2f}')
         
 # -------------------------
 
@@ -287,7 +285,7 @@ class ObjectManager(Node):
         closest_obj_y = 0.0
         closest_obj_yaw = 0.0
         for obj in self.object_list:
-            if obj.status == 'available' and obj.type != 'box' and obj.type != 'map_box':
+            if obj.status in ('available', 'isgoal') and obj.type != 'box' and obj.type != 'map_box':
                 if closest_obj_id == None:
                     closest_obj_id = obj.id
                     closest_obj_x = obj.last_x
@@ -304,7 +302,8 @@ class ObjectManager(Node):
             for obj in self.object_list:
                 if obj.id == closest_obj_id:
                     obj.status = 'isgoal'
-                    break
+                elif obj.status == 'isgoal' and obj.type != 'box' and obj.type != 'map_box':
+                    obj.status = 'available'
 
         res.obj_id = closest_obj_id
         res.obj_x = closest_obj_x
@@ -385,7 +384,7 @@ class ObjectManager(Node):
                 res.obj_x = obj.last_x
                 res.obj_y = obj.last_y
                 res.obj_yaw = obj.last_yaw
-                # self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
+                self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
                 return res
 
         self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')

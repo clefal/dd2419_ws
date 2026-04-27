@@ -31,17 +31,18 @@ class GlobalPlannerNode(Node):
 
         # Planning knobs
         self.declare_parameter("w_heuristic", 1.5)          # Weighted A*: f = g + w*h, w=1: normal, w>1: more greedy
-        self.declare_parameter("occ_lethal", 90)            # >= lethal => not traversable (0..100) default: 70
+        self.declare_parameter("occ_lethal", 99)            # >= lethal => not traversable (0..100) default: 70
         self.declare_parameter("occ_cost_scale", 6.0)       # penalty factor for soft costs
-        self.declare_parameter("max_planning_time_ms", 10000) # soft guard for very large maps
+        self.declare_parameter("max_planning_time_ms", 60000) # soft guard for very large maps
+        self.declare_parameter("path_smoothing_enabled", True)
+        self.declare_parameter("path_smoothing_max_shortcut_m", 0.1)
         self.declare_parameter("workspace_border_width", 0.05)
-        self.declare_parameter("coarse_object_standoff", 0.5)
+        self.declare_parameter("coarse_object_standoff", 0.65)
         self.declare_parameter("robot_radius", 0.02)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("soft_halo_m", 0.40)
         self.declare_parameter("cube_size", 0.02)
         self.declare_parameter("box_size", 0.16)
-        self.declare_parameter("box_goal_radius", 0.40)
         self.declare_parameter("replan_check_period_s", 0.5)
         self.declare_parameter("freeze_odom_before_planning", False)
         self.declare_parameter("freeze_odom_service", "/localization/freeze_odom")
@@ -155,6 +156,8 @@ class GlobalPlannerNode(Node):
             occ_lethal=self.get_parameter("occ_lethal").get_parameter_value().integer_value,
             occ_cost_scale=self.get_parameter("occ_cost_scale").get_parameter_value().double_value,
             max_planning_time_ms=self.get_parameter("max_planning_time_ms").get_parameter_value().integer_value,
+            path_smoothing_enabled=self.get_parameter("path_smoothing_enabled").get_parameter_value().bool_value,
+            path_smoothing_max_shortcut_m=self.get_parameter("path_smoothing_max_shortcut_m").get_parameter_value().double_value,
             workspace_border_width=self.get_parameter("workspace_border_width").get_parameter_value().double_value,
             robot_radius=self.get_parameter("robot_radius").get_parameter_value().double_value,
             inflation_margin=self.get_parameter("inflation_margin").get_parameter_value().double_value,
@@ -643,7 +646,7 @@ class GlobalPlannerNode(Node):
         # if self._replan_t0 is not None:
         #     self.get_logger().info(f"replan check elapsed: {(time.perf_counter() - self._replan_t0) * 1000.0:.1f} ms")
         if path_valid:
-            self.get_logger().info("Current global path is valid. --> no replanning")
+            #self.get_logger().info("Current global path is valid. --> no replanning")
             self._replan_in_progress = False
             return
 
