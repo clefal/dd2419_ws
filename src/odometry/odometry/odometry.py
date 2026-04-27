@@ -135,9 +135,13 @@ class Odometry(Node):
             else:
                 self._gyro_bias = self._gyro_bias / self._gyro_bias_count
                 self._gyro_bias_initialized = True
-                self.get_logger().info('--------------------------------')
-                self.get_logger().info('IMU gyro bias calculated: %f with %d samples' % (self._gyro_bias, self._gyro_bias_count))
-                self.get_logger().info('--------------------------------')
+                self.get_logger().error('--------------------------------')
+                self.get_logger().error('--------------------------------')
+                self.get_logger().error('--------------------------------')
+                self.get_logger().error('IMU gyro bias calculated: %f with %d samples' % (self._gyro_bias, self._gyro_bias_count))
+                self.get_logger().error('--------------------------------')
+                self.get_logger().error('--------------------------------')
+                self.get_logger().error('--------------------------------')
         
 
         
