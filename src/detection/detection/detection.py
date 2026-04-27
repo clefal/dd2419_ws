@@ -82,8 +82,8 @@ class Detection(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Initialize the publisher
-        self._pub = self.create_publisher(
-            PointCloud2, output_pointcloud_topic, 10, callback_group=ReentrantCallbackGroup())
+        # self._pub = self.create_publisher(
+        #    PointCloud2, output_pointcloud_topic, 10, callback_group=ReentrantCallbackGroup())
         
         self.red_centroid_pub = self.create_publisher(PointStamped, red_cube_topic, 10, callback_group=ReentrantCallbackGroup())
         self.green_centroid_pub = self.create_publisher(PointStamped, green_cube_topic, 10, callback_group=ReentrantCallbackGroup())
@@ -164,11 +164,11 @@ class Detection(Node):
 
 
         # needed to publish te pointcloud for rviz
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-            ]
+        # fields = [
+        #     PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        #     PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        #     PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        #     ]
         centroid_header = Header()
         centroid_header.stamp = msg.header.stamp  #this is a bit sus, since we are buffering the points
         centroid_header.frame_id = 'map'
@@ -192,8 +192,8 @@ class Detection(Node):
                 # self.get_logger().info(f'red: {len(all_red_points)}')
 
                 # only for visualization in rviz
-                msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
-                self._pub.publish(msg_red)
+                #msg_red = pc2.create_cloud(centroid_header, fields, all_red_points)
+                #self._pub.publish(msg_red)
 
                 for centroid in red_centroids: 
                     self.publish_detection(centroid, centroid_header, 'red')
@@ -215,8 +215,8 @@ class Detection(Node):
                 # self.get_logger().info(f'green: {len(all_green_points)}')
 
                 # only for visualization in rviz
-                msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
-                self._pub.publish(msg_green)
+                # msg_green = pc2.create_cloud(centroid_header, fields, all_green_points)
+                # self._pub.publish(msg_green)
 
                 for centroid in green_centroids: 
                     self.publish_detection(centroid, centroid_header, 'green')
@@ -239,8 +239,8 @@ class Detection(Node):
 
 
                 # only for visualization in rviz
-                msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
-                self._pub.publish(msg_blue)
+                # msg_blue = pc2.create_cloud(centroid_header, fields, all_blue_points)
+                # self._pub.publish(msg_blue)
 
                 for centroid in blue_centroids: 
                     self.publish_detection(centroid, centroid_header, 'blue')
@@ -262,8 +262,8 @@ class Detection(Node):
                 # self.get_logger().info(f'box: {len(all_box_points)}')
 
                 # only for visualization in rviz
-                msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
-                self._pub.publish(msg_box)
+                # msg_box = pc2.create_cloud(centroid_header, fields, all_box_points)
+                # self._pub.publish(msg_box)
 
                 for centroid in box_centroids:
                     self.publish_detection(centroid, centroid_header, 'box')
