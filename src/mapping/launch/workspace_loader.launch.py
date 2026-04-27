@@ -73,6 +73,19 @@ def generate_launch_description():
             ]
         ),
 
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_to_lidar_temp',
+            arguments=[
+                '--x', '0.0',
+                '--y', '0.01',
+                '--z', '0.08',
+                '--frame-id', 'base_link_temp',
+                '--child-frame-id', 'lidar_link_temp'
+            ]
+        ),
+
 
         # --- Static TF: base_link -> camera ---
         Node(

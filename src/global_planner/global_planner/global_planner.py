@@ -8,6 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped, PoseArray, PolygonStamped
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 from robp_interfaces.srv import GetAllObjects
@@ -26,6 +27,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("goal_topic", "/nav/goal")
         self.declare_parameter("goal_candidates_topic", "/nav/goal_candidates")
         self.declare_parameter("path_topic", "/nav/global_path")
+        self.declare_parameter("status_topic", "/nav/status")
         self.declare_parameter("workspace_topic", "/workspace")
 
 
@@ -52,6 +54,7 @@ class GlobalPlannerNode(Node):
         self.goal_topic = self.get_parameter("goal_topic").get_parameter_value().string_value
         self.goal_candidates_topic = self.get_parameter("goal_candidates_topic").get_parameter_value().string_value
         self.path_topic = self.get_parameter("path_topic").get_parameter_value().string_value
+        self.status_topic = self.get_parameter("status_topic").get_parameter_value().string_value
         self.workspace_topic = self.get_parameter("workspace_topic").get_parameter_value().string_value
         
         self.global_frame = "map"
@@ -76,6 +79,7 @@ class GlobalPlannerNode(Node):
         self.sub_goal_candidates = self.create_subscription(
             PoseArray, self.goal_candidates_topic, self.on_goal_candidates, 10
         )
+        self.sub_nav_status = self.create_subscription(String, self.status_topic, self.on_nav_status, 10)
 
         self.cli_get_all_objects = self.create_client(GetAllObjects, '/object_manager/get_all_objects')
         while not self.cli_get_all_objects.wait_for_service(timeout_sec=1.0):
@@ -201,6 +205,21 @@ class GlobalPlannerNode(Node):
 
     def on_goal_candidates(self, msg: PoseArray) -> None:
         self._plan_and_publish_candidates(msg, reason="goal_candidates")
+
+    def on_nav_status(self, msg: String) -> None:
+        if msg.data not in ("REACHED", "FAILED"):
+            return
+
+        if self._current_path_idx is None and self._active_plan_mode is None:
+            return
+
+        self._current_path_idx = None
+        self._active_plan_mode = None
+        self._active_goal_candidates = None
+        self._replan_in_progress = False
+        self._replan_check_pending = False
+        self._reuse_current_planning_grid_once = False
+        self.get_logger().info(f"Navigation status '{msg.data}' received; stopping replan checks until next goal.")
 
 
     # -------------------------
