@@ -120,17 +120,21 @@ class Odometry(Node):
         t = stamp_to_sec(msg.header.stamp)
 
 
+        self.get_logger().info('callback')
         # Calculate gyro bias        
         if not self._gyro_bias_initialized:
             if self._gyro_bias_duration == 0.0:
                 self._gyro_bias = 0.0
                 self._gyro_bias_initialized = True
+                self.get_logger().info('first if')
             elif self._gyro_bias_init_time is None:
                 self._gyro_bias_init_time = t
+                self.get_logger().info('second if')
                 return
             elif t - self._gyro_bias_init_time < self._gyro_bias_duration:
                 self._gyro_bias += msg.angular_velocity.z
                 self._gyro_bias_count += 1
+                self.get_logger().info('third if')
                 return
             else:
                 self._gyro_bias = self._gyro_bias / self._gyro_bias_count
