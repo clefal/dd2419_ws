@@ -40,7 +40,7 @@ class Odometry(Node):
         # -------------------------
         # Parameters
         # -------------------------
-        self.declare_parameter('encoder_correction_gain', 1.0) # Encoder correction gain (0..1). Smaller = trust IMU more.
+        self.declare_parameter('encoder_correction_gain', 0) # Encoder correction gain (0..1). Smaller = trust IMU more.
         self.declare_parameter('ticks_per_rev', 48 * 64) # measured: 3200, not 3074
         self.declare_parameter('wheel_radius', 0.04921)
         self.declare_parameter('base', 0.3075)
