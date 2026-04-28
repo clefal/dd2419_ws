@@ -126,7 +126,7 @@ class PathManager:
             include_box_lethal=include_box_lethal,
         )
         delta = (time.perf_counter()-start_time)*1000
-        self._logger.info(f'replanning took {delta} ms')
+        # self._logger.info(f'replanning took {delta} ms')
         return self._planning_grid
 
     def plan_to_goal(
