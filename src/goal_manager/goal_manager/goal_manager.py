@@ -41,7 +41,7 @@ class GoalManager(Node):
     def __init__(self):
         super().__init__('goal_manager')
 
-        self.manual_goal = True
+        self.manual_goal = False
         
         self._state = AutoState.IDLE
 
