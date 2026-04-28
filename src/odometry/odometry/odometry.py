@@ -35,7 +35,7 @@ class Odometry(Node):
     def __init__(self):
         super().__init__('odometry')
 
-        self._yaw_file = open("yaw_log.txt", "a")
+        #self._yaw_file = open("yaw_log.txt", "a")
 
         # -------------------------
         # Parameters
@@ -186,8 +186,8 @@ class Odometry(Node):
         
         # Predict (integrate gyro)
         self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
-        self._yaw_file.write(f"{dt}: {self._yaw}\n")
-        self._yaw_file.flush()  # ensures it's written immediately
+        # self._yaw_file.write(f"{dt}: {self._yaw}\n")
+        # self._yaw_file.flush()  # ensures it's written immediately
 
 
 
@@ -307,7 +307,7 @@ def main():
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node._yaw_file.close()
+        # node._yaw_file.close()
         pass
     rclpy.shutdown()
 
