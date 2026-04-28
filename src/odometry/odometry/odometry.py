@@ -35,6 +35,8 @@ class Odometry(Node):
     def __init__(self):
         super().__init__('odometry')
 
+        self._yaw_file = open("yaw_log.txt", "a")
+
         # -------------------------
         # Parameters
         # -------------------------
@@ -150,10 +152,15 @@ class Odometry(Node):
             return
 
         dt = t - self._last_imu_t
-        if dt <= 0.0 or dt > 0.5:
+        if dt <= 0.0:
             # Skip weird timing jumps (startup / clock issues)
             self._last_imu_t = t
             return
+        elif dt > 0.5:
+            self._last_imu_t = t
+            self.get_logger().warn('Large dt between IMU messages: %f seconds' % dt)
+            return
+
 
         self._last_imu_t = t
 
@@ -179,6 +186,9 @@ class Odometry(Node):
         
         # Predict (integrate gyro)
         self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+        self._yaw_file.write(f"{dt}: {self._yaw}\n")
+        self._yaw_file.flush()  # ensures it's written immediately
+
 
 
 
@@ -297,6 +307,7 @@ def main():
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
+        node._yaw_file.close()
         pass
     rclpy.shutdown()
 
