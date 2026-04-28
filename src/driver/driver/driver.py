@@ -4,10 +4,15 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from robp_interfaces.msg import DutyCycles
 
+DUTY_CYCLE_MAX = 0.2
+DUTY_CYCLE_MIN = -0.2
+
 class Driver(Node):
     def __init__(self):
         super().__init__('driver')
         self.pub = self.create_publisher(DutyCycles, '/phidgets/motor/duty_cycles', 10)
+        self.left_duty_cycle = 0.0
+        self.right_duty_cycle = 0.0
 
     def send_msg_stop(self):
         #self.get_logger().info(f'send_msg_stop function was entered')
@@ -17,9 +22,16 @@ class Driver(Node):
         self.pub.publish(msg)
 
     def send_msg_change_vel(self, left, right):
+        self.left_duty_cycle += left
+        self.right_duty_cycle += right
+
+        # Clamp the duty cycles to the valid range
+        self.left_duty_cycle = max(DUTY_CYCLE_MIN, min(DUTY_CYCLE_MAX, self.left_duty_cycle))
+        self.right_duty_cycle = max(DUTY_CYCLE_MIN, min(DUTY_CYCLE_MAX, self.right_duty_cycle))
+
         msg = DutyCycles()
-        msg.duty_cycle_left = left
-        msg.duty_cycle_right = right
+        msg.duty_cycle_left = self.left_duty_cycle
+        msg.duty_cycle_right = self.right_duty_cycle
         self.pub.publish(msg)
 
     def on_press(self, key):
@@ -27,15 +39,15 @@ class Driver(Node):
         #self.get_logger().info(f'send_msg_stop function was entered')
         try:
             if key.char == 'q':
-                self.send_msg_change_vel(0, 0)
+                self.send_msg_stop(0, 0)
             elif key.char == 'w':
-                self.send_msg_change_vel(0.2, 0.2)
+                self.send_msg_change_vel(0.1, 0.1)
             elif key.char == 'a':
-                self.send_msg_change_vel(-0.2, 0.2)
+                self.send_msg_change_vel(-0.1, -0.1)
             elif key.char == 'd':
-                self.send_msg_change_vel(0.2, -0.2)
+                self.send_msg_change_vel(0, 0.1)
             elif key.char == 's':
-                self.send_msg_change_vel(-0.2, -0.2)
+                self.send_msg_change_vel(0.1, 0)
         except AttributeError:
             pass
             
