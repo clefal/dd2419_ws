@@ -39,15 +39,16 @@ class Driver(Node):
         #self.get_logger().info(f'send_msg_stop function was entered')
         try:
             if key.char == 'q':
-                self.send_msg_stop(0, 0)
+                self.send_msg_stop()
             elif key.char == 'w':
                 self.send_msg_change_vel(0.1, 0.1)
             elif key.char == 'a':
-                self.send_msg_change_vel(-0.1, -0.1)
+                self.send_msg_change_vel(0.1, 0)
             elif key.char == 'd':
                 self.send_msg_change_vel(0, 0.1)
             elif key.char == 's':
-                self.send_msg_change_vel(0.1, 0)
+                self.send_msg_change_vel(-0.1, -0.1)
+
         except AttributeError:
             pass
             
