@@ -18,7 +18,7 @@
   <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
 
   <!-- Nodes -->
-  <node pkg="odometry" exec="odometry_buffered_imu" name="odometry" output="log"/>
+  <node pkg="odometry" exec="odometry_buffered_imu" name="odometry_buffered_imu" output="log"/>
   <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
   <node pkg="localization" exec="map_odom_freezer" name="map_odom_freezer" output="log" if="$(var use_odom_freezer)"/>
   <node pkg="mapping" exec="mapping" name="mapping" output="log"/>
