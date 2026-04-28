@@ -65,9 +65,10 @@ class GoalManager(Node):
 
 
 
-        self._search_x = 1.0
-        self._search_y = 2.0
-        self._search_yaw = 3.1415/2
+        self._search_x = 0.0
+        self._search_y = 0.0
+        self._search_yaw = 0.0
+        self.disable_exploration = True
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
             min_step_m=1.5,
@@ -564,7 +565,10 @@ class GoalManager(Node):
             self.get_logger().warn('Robot pose unavailable. Cannot pick exploratory waypoint.')
             return
 
-        wx = self._explorer.next_waypoint(robot_xy)
+        if self.disable_exploration:
+            wx = None
+        else:
+            wx = self._explorer.next_waypoint(robot_xy)
         if wx is None:
             gx, gy, gyaw = self._search_x, self._search_y, self._search_yaw
             self._active_search_goal = (gx, gy)
