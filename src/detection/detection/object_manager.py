@@ -291,7 +291,7 @@ class ObjectManager(Node):
 # -----------------------
 
     def get_closest_cube_callback(self,req, res):
-        self.get_logger().info(f'get_closest_CUBE_callback entered')
+        #self.get_logger().info(f'get_closest_CUBE_callback entered')
         closest_obj_id = None
         closest_obj_x = 0.0
         closest_obj_y = 0.0
@@ -327,7 +327,7 @@ class ObjectManager(Node):
 # -----------------------
 
     def get_closest_box_callback(self, req, res):
-        self.get_logger().info(f'get_closest_BOX_callback entered')
+        #self.get_logger().info(f'get_closest_BOX_callback entered')
         closest_obj_id = None
         closest_obj_x = 0.0
         closest_obj_y = 0.0
@@ -396,7 +396,7 @@ class ObjectManager(Node):
                 res.obj_x = obj.last_x
                 res.obj_y = obj.last_y
                 res.obj_yaw = obj.last_yaw
-                self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
+                #self.get_logger().info(f'get_pos_of_obj_callback returned object {(res.obj_x,res.obj_y)}')
                 return res
 
         self.get_logger().warning(f'Object with id {req.obj_id} not found in object_list during service call get_pos_of_obj')
@@ -404,7 +404,7 @@ class ObjectManager(Node):
 # ------------------------
 
     def output_map_file_callback(self, req, res):
-        self.get_logger().info(f'output_map_file_callback entered in object_manager')
+        #self.get_logger().info(f'output_map_file_callback entered in object_manager')
         output_path = Path(self.get_parameter_or('output_map_csv', str(Path.cwd() / 'src' / 'output_map.csv')))
         output_path.parent.mkdir(parents=True, exist_ok=True)
 

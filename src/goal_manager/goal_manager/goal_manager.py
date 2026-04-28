@@ -401,7 +401,7 @@ class GoalManager(Node):
             return
 
         self._target_ = (res.obj_x, res.obj_y)
-        self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
+        # self.get_logger().info(f'Closest cube to robot at {self.get_robot_xy()} is Obj{res.obj_id} at {res.obj_x}, {res.obj_y}')
 
         self._search_retarget_pending = False
 
