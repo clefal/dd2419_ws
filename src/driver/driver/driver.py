@@ -4,8 +4,8 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from robp_interfaces.msg import DutyCycles
 
-DUTY_CYCLE_MAX = 0.2
-DUTY_CYCLE_MIN = -0.2
+DUTY_CYCLE_MAX = 0.3
+DUTY_CYCLE_MIN = -0.3
 
 class Driver(Node):
     def __init__(self):
@@ -43,9 +43,9 @@ class Driver(Node):
             elif key.char == 'w':
                 self.send_msg_change_vel(0.1, 0.1)
             elif key.char == 'a':
-                self.send_msg_change_vel(0.1, 0)
+                self.send_msg_change_vel(-0.1, 0)
             elif key.char == 'd':
-                self.send_msg_change_vel(0, 0.1)
+                self.send_msg_change_vel(0, -0.1)
             elif key.char == 's':
                 self.send_msg_change_vel(-0.1, -0.1)
 
