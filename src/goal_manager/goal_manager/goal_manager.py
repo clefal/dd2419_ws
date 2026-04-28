@@ -227,15 +227,10 @@ class GoalManager(Node):
                 self.get_logger().warn('Arm reported cube out of reach. Backing up before retrying final approach.')
                 self._state = AutoState.BACKUP_BEFORE_PICKUP_RETRY
                 self.publish_backup_distance(0.5)
-            elif msg.data in (
-                'PICK_UP_FAIL_NO_OBJECT',
-                'PICK_UP_FAIL_NO_START',
-                'PICK_UP_FAIL_NO_DETECTION',
-                'PICK_UP_FAIL_TIMEOUT',
-            ):
+            elif msg.data in ('PICK_UP_FAIL_NO_DETECTION'):
                 self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
                 self._skip_current_target()
-            elif msg.data in ('NO_HOLDING', 'PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_HOLD'):
+            elif msg.data in ('PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_IDLE'):
                 self._state = AutoState.WAIT_ARM_IDLE
                 self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
             else:
