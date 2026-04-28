@@ -52,7 +52,7 @@ class Odometry(Node):
         # imu_yaw_weight = 0.0 -> only encoders, 1.0 -> only IMU yaw increment.
         # imu_lowpass_alpha near 1.0 -> less filtering, near 0.0 -> more smoothing.
         self.declare_parameter('imu_yaw_weight', 1.0)
-        self.declare_parameter('imu_lowpass_alpha', 0.8)
+        self.declare_parameter('imu_lowpass_alpha', 0.9)
 
         # -------------------------
         # Robot model constants
