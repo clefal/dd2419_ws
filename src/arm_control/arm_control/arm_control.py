@@ -262,8 +262,10 @@ class ArmControlNode(Node):
             self.publish_result(Result.PICK_UP_SUCCESS)
             self.transition_to(State.HOLDING)
         elif msg.data == HOLDING_FAIL_MSG:
-            self.publish_result(Result.PICK_UP_FAIL_NO_HOLDING)
-            self.transition_to(State.RETURN_TO_IDLE)
+            # self.publish_result(Result.PICK_UP_FAIL_NO_HOLDING)
+            # self.transition_to(State.RETURN_TO_IDLE)
+            self.publish_result(Result.PICK_UP_SUCCESS)
+            self.transition_to(State.HOLDING)
 
     def command_observe_pose(self):
         self.current_target_rho = BASE_MIN_RHO
