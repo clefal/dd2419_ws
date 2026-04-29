@@ -3,7 +3,6 @@
 import math
 import rclpy
 from rclpy.node import Node
-from typing import List
 
 from tf2_ros import TransformBroadcaster
 from tf_transformations import quaternion_from_euler
@@ -38,12 +37,12 @@ class Odometry(Node):
         # -------------------------
         # Parameters
         # -------------------------
-        self.declare_parameter('encoder_correction_gain', 1.0) # Encoder correction gain (0..1). Smaller = trust IMU more.
+        self.declare_parameter('encoder_correction_gain', 0.0) # Encoder correction gain (0..1). Smaller = trust IMU more.
         self.declare_parameter('ticks_per_rev', 48 * 64) # measured: 3200, not 3074
         self.declare_parameter('wheel_radius', 0.04921)
         self.declare_parameter('base', 0.3075)
         self.declare_parameter('fix_tilt', True)
-        self.declare_parameter('gyro_bias_duration', 3.0)
+        self.declare_parameter('gyro_bias_duration', 5.0)
 
         # -------------------------
         # Robot model constants
@@ -111,13 +110,14 @@ class Odometry(Node):
         # -------------------------
         # Robot model constants
         # -------------------------
-        self._ticks_per_rev = self.get_parameter("ticks_per_rev").value   # measured: 3200, not 3074
-        self._wheel_radius = self.get_parameter("wheel_radius").value
-        self._base = self.get_parameter("base").value
+        self._ticks_per_rev = 48 * 64   # measured: 3200, not 3074
+        self._wheel_radius = 0.04921
+        self._base = 0.3075
 
     def imu_callback(self, msg: Imu):
 
         t = stamp_to_sec(msg.header.stamp)
+
 
         # Calculate gyro bias        
         if not self._gyro_bias_initialized:
@@ -225,34 +225,13 @@ class Odometry(Node):
 
         # Publish TF
         stamp = msg.header.stamp
-        self.broadcast_transform(stamp, self._x, self._y, self._yaw, True)
+        self.broadcast_transform(stamp, self._x, self._y, self._yaw)
 
         # Path at encoder rate
         self.publish_path(stamp, self._x, self._y, self._yaw)
 
-    def broadcast_transform(self, stamp, x, y, yaw, temp=False):
+    def broadcast_transform(self, stamp, x, y, yaw):
         #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
-        tfs: List[TransformStamped] = []
-        q = quaternion_from_euler(0.0, 0.0, yaw)
-
-        # Temporary odom frame
-        if temp:
-            t_temp = TransformStamped()
-            t_temp.header.stamp = stamp
-            t_temp.header.frame_id = 'odom_temp'
-            t_temp.child_frame_id = 'base_link_temp'
-
-            t_temp.transform.translation.x = x
-            t_temp.transform.translation.y = y
-            t_temp.transform.translation.z = 0.0
-
-            t_temp.transform.rotation.x = q[0]
-            t_temp.transform.rotation.y = q[1]
-            t_temp.transform.rotation.z = q[2]
-            t_temp.transform.rotation.w = q[3]
-            tfs.append(t_temp)
-
-
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'
@@ -262,13 +241,13 @@ class Odometry(Node):
         t.transform.translation.y = y
         t.transform.translation.z = 0.0
 
+        q = quaternion_from_euler(0.0, 0.0, yaw)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
-        tfs.append(t)
 
-        self._tf_broadcaster.sendTransform(tfs)
+        self._tf_broadcaster.sendTransform(t)
 
     def publish_path(self, stamp, x, y, yaw):
         self._path.header.stamp = stamp

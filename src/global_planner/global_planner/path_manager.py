@@ -414,8 +414,8 @@ class PathManager:
 
     def inflate_static_obstacles(self, data, meta, r_lethal, r_soft, lethal_thresh):
         """
-        Hard constraint: within r_lethal -> 100 (lethal)
-        Soft halo: r_lethal < dist <= r_soft -> descending cost
+        Any positive occupancy value contributes a soft halo that decays to 0 at r_soft.
+        Near-lethal cells additionally keep the existing hard lethal core within r_lethal.
         """
         inflated = list(data)
         cache_key = (r_lethal, r_soft)
@@ -432,15 +432,10 @@ class PathManager:
                     dist2 = dx * dx + dy * dy
                     if dist2 > r_soft2:
                         continue
-
-                    if dist2 <= r_lethal2:
-                        cost = 100
-                    else:
-                        d = math.sqrt(dist2)
-                        t = (d - r_lethal) / max(1e-6, (r_soft - r_lethal))
-                        cost = int(99 * (1.0 - t))
-
-                    offsets.append((dx, dy, cost))
+                    dist = math.sqrt(dist2)
+                    lethal_cost = 100 if dist2 <= r_lethal2 else None
+                    soft_scale = max(0.0, 1.0 - (dist / max(1e-6, float(r_soft))))
+                    offsets.append((dx, dy, lethal_cost, soft_scale))
 
             self._inflation_offsets_cache[cache_key] = offsets
 
@@ -448,21 +443,23 @@ class PathManager:
             for gx in range(meta.width):
                 v = data[gx + gy * meta.width]
 
-                if v < 0:
+                if v <= 0:
                     continue
 
-                if v >= lethal_thresh:
-                    for dx, dy, cost in offsets:
-                        nx = gx + dx
-                        ny = gy + dy
-                        if not (0 <= nx < meta.width and 0 <= ny < meta.height):
-                            continue
+                for dx, dy, lethal_cost, soft_scale in offsets:
+                    nx = gx + dx
+                    ny = gy + dy
+                    if not (0 <= nx < meta.width and 0 <= ny < meta.height):
+                        continue
 
-                        idx = nx + ny * meta.width
-                        if cost == 100:
-                            inflated[idx] = 100
-                        elif cost > inflated[idx]:
-                            inflated[idx] = cost
+                    idx = nx + ny * meta.width
+                    soft_cost = int(round(float(v) * soft_scale))
+
+                    if soft_cost > inflated[idx]:
+                        inflated[idx] = soft_cost
+
+                    if v >= lethal_thresh and lethal_cost == 100:
+                        inflated[idx] = 100
 
         return inflated
 

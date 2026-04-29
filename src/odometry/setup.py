@@ -26,7 +26,8 @@ setup(
         'console_scripts': [
             'odometry = odometry.odometry:main',
             'odometry_comparation = odometry.odometry_comparation:main',
-            'odometry_original = odometry.odometry_original:main'
+            'odometry_original = odometry.odometry_original:main',
+            'odometry_buffered_imu = odometry.odometry_buffered_imu:main'
         ],
     },
 )

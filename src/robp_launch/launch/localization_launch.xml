@@ -12,13 +12,13 @@
   </include>
 
   <!-- Hardware/sensors -->
-  <!-- <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
-  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/> -->
+  <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
 
   <!-- Localization stack -->
   <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>
   <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
   <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
-  <!-- <node pkg="localization" exec="localization" name="localization" output="log"> -->
+  <!-- <node pkg="localization" exec="localization_motion_triggered" name="localization" output="log"/> -->
 
 </launch>

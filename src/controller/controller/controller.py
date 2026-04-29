@@ -67,6 +67,8 @@ class Controller(Node):
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
+        self._last_tf_stale_log_wall = 0.0
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -81,9 +83,9 @@ class Controller(Node):
             self.get_logger().info('get_pos_of_obj service not available, waiting again...')
 
         # Parameters
-        self.declare_parameter('lookahead_distance', 0.24)        # m
-        self.declare_parameter('nominal_linear_speed', 0.35)    # default slower for path tracking 0.25
-        self.declare_parameter('max_angular_speed', 0.17)        # cap turning a bit more conservatively 0.15
+        self.declare_parameter('lookahead_distance', 0.19)        # m
+        self.declare_parameter('nominal_linear_speed', 0.30)    # default slower for path tracking 0.25
+        self.declare_parameter('max_angular_speed', 0.2)        # cap turning a bit more conservatively 0.15
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.06) #0.35
@@ -93,6 +95,7 @@ class Controller(Node):
         self.declare_parameter('turn_gain', 0.2)                # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
+        self.declare_parameter('tf_staleness_warn_s', 0.08)     # s
 
         self.declare_parameter('final_nominal_speed', 0.12)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
@@ -124,6 +127,7 @@ class Controller(Node):
         self._backup_target_m = 0.0
         self._backup_start_xy = None
         self._backup_duty = 0.12
+        self._backup_direction = -1.0
 
         self._final_controller = FinalApproachController(
             nominal_speed=float(self.get_parameter('final_nominal_speed').value),
@@ -178,6 +182,17 @@ class Controller(Node):
             self.get_logger().warn(f'TF lookup failed ({self._fixed_frame}->{self._base_frame}): {ex}')
             return None
 
+        tf_time = rclpy.time.Time.from_msg(t.header.stamp)
+        tf_age = (self.get_clock().now() - tf_time).nanoseconds * 1e-9
+        stale_warn_s = float(self.get_parameter('tf_staleness_warn_s').value)
+        if tf_age > stale_warn_s:
+            now_wall = time.time()
+            if (now_wall - self._last_tf_stale_log_wall) >= 1.0:
+                self.get_logger().warn(
+                    f'TF pose is stale: age={tf_age:.3f} s'
+                )
+                self._last_tf_stale_log_wall = now_wall
+
         x = t.transform.translation.x
         y = t.transform.translation.y
         q = t.transform.rotation
@@ -195,6 +210,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             self.publish_status('FAILED')
             return
 
@@ -203,6 +219,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             self.publish_status('IDLE')
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
             return
@@ -210,6 +227,7 @@ class Controller(Node):
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
         self._start_alignment_pending = True
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
 
         # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
@@ -226,19 +244,22 @@ class Controller(Node):
 
     def backup_callback(self, msg: Float32):
         d = float(msg.data)
-        if d <= 0.0:
-            self.get_logger().warn(f'Ignoring non-positive backup distance: {d:.3f}')
+        if abs(d) <= 1e-6:
+            self.get_logger().warn(f'Ignoring near-zero backup distance: {d:.3f}')
             return
         self._backup_active = True
-        self._backup_target_m = d
+        self._backup_target_m = abs(d)
+        self._backup_direction = -1.0 if d > 0.0 else 1.0
         self._backup_start_xy = None
         self._path_xy = []
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
-        self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
+        maneuver_name = 'backup' if d > 0.0 else 'forward'
+        self.get_logger().info(f'Starting {maneuver_name} maneuver: {abs(d):.3f} m')
 
     def final_approach_enable_callback(self, msg: Bool):
         self._final_approach_enabled = bool(msg.data)
@@ -437,7 +458,8 @@ class Controller(Node):
                 )
                 return
 
-            left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            drive_duty = self._backup_direction * self._backup_duty
+            left, right = self.enforce_motor_deadzone_pair(drive_duty, drive_duty, self._dc_min)
             self.send_duty(left, right)
             return
 
@@ -565,6 +587,7 @@ class Controller(Node):
                     self._path_xy = []
                     self._start_alignment_pending = False
                     self._start_turn_logged = False
+                    self._final_target_behind_logged = False
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
@@ -580,6 +603,7 @@ class Controller(Node):
             self._path_xy = []
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             return
 
         # Lookahead target
@@ -597,7 +621,26 @@ class Controller(Node):
         dy = ty - ry
         cos_y = math.cos(ryaw)
         sin_y = math.sin(ryaw)
+        x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
+
+        is_final_target = (tgt[2] >= len(self._path_xy) - 1)
+        if is_final_target and x_r < 0.0:
+            if not self._final_target_behind_logged:
+                self.get_logger().warn(
+                    'Final path target is behind the robot; switching to turn-in-place recovery.'
+                )
+                self._final_target_behind_logged = True
+
+            yaw_err = wrap_angle(math.atan2(dy, dx) - ryaw)
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
+            return
+        else:
+            self._final_target_behind_logged = False
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
         kappa = (2.0 * y_r) / (lookahead * lookahead)
