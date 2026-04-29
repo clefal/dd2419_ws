@@ -133,7 +133,7 @@ class Odometry(Node):
         if lag > 0.1:
             self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
 
-            t = stamp_to_sec(msg.header.stamp)
+        t = stamp_to_sec(msg.header.stamp)
 
         # Calculate gyro bias        
         if not self._gyro_bias_initialized:
