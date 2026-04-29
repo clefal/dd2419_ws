@@ -67,6 +67,7 @@ class Controller(Node):
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -196,6 +197,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             self.publish_status('FAILED')
             return
 
@@ -204,6 +206,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             self.publish_status('IDLE')
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
             return
@@ -211,6 +214,7 @@ class Controller(Node):
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
         self._start_alignment_pending = True
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
 
         # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
@@ -238,6 +242,7 @@ class Controller(Node):
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._final_target_behind_logged = False
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
         maneuver_name = 'backup' if d > 0.0 else 'forward'
@@ -569,6 +574,7 @@ class Controller(Node):
                     self._path_xy = []
                     self._start_alignment_pending = False
                     self._start_turn_logged = False
+                    self._final_target_behind_logged = False
                     return
 
                 wmax = float(self.get_parameter('max_angular_speed').value)
@@ -584,6 +590,7 @@ class Controller(Node):
             self._path_xy = []
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._final_target_behind_logged = False
             return
 
         # Lookahead target
@@ -601,7 +608,26 @@ class Controller(Node):
         dy = ty - ry
         cos_y = math.cos(ryaw)
         sin_y = math.sin(ryaw)
+        x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
+
+        is_final_target = (tgt[2] >= len(self._path_xy) - 1)
+        if is_final_target and x_r < 0.0:
+            if not self._final_target_behind_logged:
+                self.get_logger().warn(
+                    'Final path target is behind the robot; switching to turn-in-place recovery.'
+                )
+                self._final_target_behind_logged = True
+
+            yaw_err = wrap_angle(math.atan2(dy, dx) - ryaw)
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
+            return
+        else:
+            self._final_target_behind_logged = False
 
         # Pure Pursuit curvature: kappa = 2*y_r / L^2
         kappa = (2.0 * y_r) / (lookahead * lookahead)
