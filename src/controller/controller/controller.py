@@ -68,6 +68,7 @@ class Controller(Node):
         self._start_alignment_pending = False
         self._start_turn_logged = False
         self._final_target_behind_logged = False
+        self._last_tf_stale_log_wall = 0.0
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -94,6 +95,7 @@ class Controller(Node):
         self.declare_parameter('turn_gain', 0.2)                # duty-per-rad for in-place turning
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
+        self.declare_parameter('tf_staleness_warn_s', 0.08)     # s
 
         self.declare_parameter('final_nominal_speed', 0.12)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
@@ -179,6 +181,17 @@ class Controller(Node):
         except Exception as ex:
             self.get_logger().warn(f'TF lookup failed ({self._fixed_frame}->{self._base_frame}): {ex}')
             return None
+
+        tf_time = rclpy.time.Time.from_msg(t.header.stamp)
+        tf_age = (self.get_clock().now() - tf_time).nanoseconds * 1e-9
+        stale_warn_s = float(self.get_parameter('tf_staleness_warn_s').value)
+        if tf_age > stale_warn_s:
+            now_wall = time.time()
+            if (now_wall - self._last_tf_stale_log_wall) >= 1.0:
+                self.get_logger().warn(
+                    f'TF pose is stale: age={tf_age:.3f} s'
+                )
+                self._last_tf_stale_log_wall = now_wall
 
         x = t.transform.translation.x
         y = t.transform.translation.y
