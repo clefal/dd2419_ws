@@ -86,7 +86,7 @@ class Controller(Node):
         self.declare_parameter('max_angular_speed', 0.17)        # cap turning a bit more conservatively 0.15
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
-        self.declare_parameter('steering_gain', 0.06) #0.35
+        self.declare_parameter('steering_gain', 0.1) #0.35
 
 
         self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
@@ -124,6 +124,7 @@ class Controller(Node):
         self._backup_target_m = 0.0
         self._backup_start_xy = None
         self._backup_duty = 0.12
+        self._backup_direction = -1.0
 
         self._final_controller = FinalApproachController(
             nominal_speed=float(self.get_parameter('final_nominal_speed').value),
@@ -226,11 +227,12 @@ class Controller(Node):
 
     def backup_callback(self, msg: Float32):
         d = float(msg.data)
-        if d <= 0.0:
-            self.get_logger().warn(f'Ignoring non-positive backup distance: {d:.3f}')
+        if abs(d) <= 1e-6:
+            self.get_logger().warn(f'Ignoring near-zero backup distance: {d:.3f}')
             return
         self._backup_active = True
-        self._backup_target_m = d
+        self._backup_target_m = abs(d)
+        self._backup_direction = -1.0 if d > 0.0 else 1.0
         self._backup_start_xy = None
         self._path_xy = []
         self._goal_yaw = None
@@ -238,7 +240,8 @@ class Controller(Node):
         self._start_turn_logged = False
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
-        self.get_logger().info(f'Starting backup maneuver: {d:.3f} m')
+        maneuver_name = 'backup' if d > 0.0 else 'forward'
+        self.get_logger().info(f'Starting {maneuver_name} maneuver: {abs(d):.3f} m')
 
     def final_approach_enable_callback(self, msg: Bool):
         self._final_approach_enabled = bool(msg.data)
@@ -437,7 +440,8 @@ class Controller(Node):
                 )
                 return
 
-            left, right = self.enforce_motor_deadzone_pair(-self._backup_duty, -self._backup_duty, self._dc_min)
+            drive_duty = self._backup_direction * self._backup_duty
+            left, right = self.enforce_motor_deadzone_pair(drive_duty, drive_duty, self._dc_min)
             self.send_duty(left, right)
             return
 
