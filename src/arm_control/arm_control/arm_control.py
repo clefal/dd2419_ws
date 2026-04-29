@@ -158,8 +158,10 @@ class ArmControlNode(Node):
                 time.sleep(2.0)
                 self.publish_result(Result.IDLE_SUCCESS)
             elif command == 'PICK_UP':
+                time.sleep(2.0)
                 self.publish_result(Result.PICK_UP_SUCCESS)
             elif command == 'DROP':
+                time.sleep(2.0)
                 self.publish_result(Result.DROP_SUCCESS)
         else:
             if command == 'START':
