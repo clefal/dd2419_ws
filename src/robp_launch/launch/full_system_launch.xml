@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <launch>
 
-  <arg name="publish_workspace_odom_frames" default="true"/>
-  <arg name="use_odom_freezer" default="false"/>
+  <arg name="publish_workspace_odom_frames" default="false"/>
+  <arg name="use_odom_freezer" default="true"/>
 
 
   <!-- Workspace/mapfile TF frames -->
@@ -18,7 +18,7 @@
   <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
 
   <!-- Nodes -->
-  <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
+  <!-- <node pkg="odometry" exec="odometry" name="odometry" output="log"/> -->
   <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
   <node pkg="localization" exec="map_odom_freezer" name="map_odom_freezer" output="log" if="$(var use_odom_freezer)"/>
   <node pkg="mapping" exec="mapping" name="mapping" output="log"/>

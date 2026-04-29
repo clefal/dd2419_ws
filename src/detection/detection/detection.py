@@ -155,7 +155,7 @@ class Detection(Node):
         
         # end callback if we detect too many colorful points (because it is likely that there are a lot of false positives)
         elif general_counter >= self.max_general_counter: 
-            self.get_logger().info(f'many hits {general_counter} by color thresholding, danger of false positives, detection iteration aborted')
+            # self.get_logger().info(f'many hits {general_counter} by color thresholding, danger of false positives, detection iteration aborted')
             self.point_buffers['red'] = []
             self.point_buffers['green'] = []
             self.point_buffers['blue'] = []

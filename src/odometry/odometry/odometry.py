@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
 import math
+
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from typing import List
 
 from tf2_ros import TransformBroadcaster
@@ -46,6 +50,8 @@ class Odometry(Node):
         self.declare_parameter('base', 0.3075)
         self.declare_parameter('fix_tilt', True)
         self.declare_parameter('gyro_bias_duration', 3.0)
+        self.declare_parameter('path_publish_period', 0.1)
+        self.declare_parameter('max_path_poses', 500)
 
         # -------------------------
         # Robot model constants
@@ -59,6 +65,8 @@ class Odometry(Node):
         self._k = self.get_parameter('encoder_correction_gain').value
         self._fix_tilt = self.get_parameter('fix_tilt').value
         self._gyro_bias_duration = self.get_parameter('gyro_bias_duration').value
+        self._path_publish_period = self.get_parameter('path_publish_period').value
+        self._max_path_poses = self.get_parameter('max_path_poses').value
 
 
         # TF broadcaster
@@ -67,13 +75,20 @@ class Odometry(Node):
         # Path publisher
         self._path_pub = self.create_publisher(Path, 'path', 10)
         self._path = Path()
+        self._last_path_pub_t = None
 
+        self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
+        sensor_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
         # Subscriptions
         self.create_subscription(
-            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 20
+            Encoders, '/phidgets/motor/encoders', self.encoder_callback, sensor_qos, callback_group=self.mut_ex_callback_group
         )
         self.create_subscription(
-            Imu, '/phidgets/imu/data_raw', self.imu_callback, 50
+            Imu, '/phidgets/imu/data_raw', self.imu_callback, sensor_qos, callback_group=self.mut_ex_callback_group
         )
 
         # -------------------------
@@ -120,6 +135,13 @@ class Odometry(Node):
         self._base = self.get_parameter("base").value
 
     def imu_callback(self, msg: Imu):
+
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
+
+        if lag > 0.05:
+            self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
 
         t = stamp_to_sec(msg.header.stamp)
 
@@ -208,6 +230,14 @@ class Odometry(Node):
 
 
     def encoder_callback(self, msg: Encoders):
+
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
+
+        if lag > 0.05:
+            self.get_logger().info(f"Encoder callback lag: {lag:.3f} s")
+
         encoder_left = msg.encoder_left
         encoder_right = msg.encoder_right
 
@@ -300,6 +330,11 @@ class Odometry(Node):
         self._tf_broadcaster.sendTransform(tfs)
 
     def publish_path(self, stamp, x, y, yaw):
+        t = stamp_to_sec(stamp)
+        if self._last_path_pub_t is not None and t - self._last_path_pub_t < self._path_publish_period:
+            return
+        self._last_path_pub_t = t
+
         self._path.header.stamp = stamp
         self._path.header.frame_id = 'odom'
 
@@ -317,17 +352,24 @@ class Odometry(Node):
         pose.pose.orientation.w = q[3]
 
         self._path.poses.append(pose)
+        if self._max_path_poses > 0 and len(self._path.poses) > self._max_path_poses:
+            self._path.poses = self._path.poses[-self._max_path_poses:]
         self._path_pub.publish(self._path)
 
 
 def main():
     rclpy.init()
     node = Odometry()
+
+    ex = MultiThreadedExecutor()
+    ex.add_node(node)
+
     try:
-        rclpy.spin(node)
+        # rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
-        # node._yaw_file.close()
         pass
+
     rclpy.shutdown()
 
 
