@@ -65,8 +65,8 @@ class GoalManager(Node):
 
 
 
-        self._search_x = 0.0
-        self._search_y = 0.0
+        self._search_x = 0.49
+        self._search_y = 0.50
         self._search_yaw = 0.0
         self.disable_exploration = True
         self._active_search_goal = None
