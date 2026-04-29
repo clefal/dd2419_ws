@@ -65,6 +65,7 @@ class GoalManager(Node):
         self._pending_startup_check = False
         self._search_retarget_pending = False
         self._pickup_out_of_reach_retries = 0
+        self._snowplow_attempted = False
 
 
 
@@ -223,12 +224,12 @@ class GoalManager(Node):
                 self.publish_backup_distance(0.04)
             elif not self.manual_goal and self._state == AutoState.SNOWPLOW_BACKWARD:
                 if msg.data == 'REACHED':
-                    self.get_logger().info('Snowplow maneuver complete. Skipping cube and continuing search.')
+                    self.get_logger().info('Snowplow maneuver complete. Restarting normal pickup sequence.')
                 else:
                     self.get_logger().warn(
-                        f'Snowplow reverse ended with status={msg.data}. Skipping cube anyway.'
+                        f'Snowplow reverse ended with status={msg.data}. Trying pickup sequence anyway.'
                     )
-                self._skip_current_target()
+                self._retry_final_object_approach()
 
     # ----------------------------
 
@@ -245,6 +246,7 @@ class GoalManager(Node):
 
                 self._target_ = None
                 self._pickup_out_of_reach_retries = 0
+                self._snowplow_attempted = False
      
                 self.request_box_goal_candidates(reason='pickup_success')
             elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
@@ -255,12 +257,18 @@ class GoalManager(Node):
                     )
                     self._state = AutoState.BACKUP_BEFORE_PICKUP_RETRY
                     self.publish_backup_distance(0.5)
-                else:
+                elif not self._snowplow_attempted:
+                    self._snowplow_attempted = True
                     self.get_logger().warn(
                         'Arm reported cube out of reach again. Activating hardcoded snowplow maneuver.'
                     )
                     self._state = AutoState.SNOWPLOW_FORWARD
                     self.publish_backup_distance(-0.06)
+                else:
+                    self.get_logger().warn(
+                        'Arm still reports cube out of reach after snowplow. Skipping target.'
+                    )
+                    self._skip_current_target()
             elif msg.data in ('PICK_UP_FAIL_NO_DETECTION'):
                 self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
                 self._skip_current_target()
@@ -328,6 +336,7 @@ class GoalManager(Node):
         self._target_ = None
         self._target_id = None
         self._pickup_out_of_reach_retries = 0
+        self._snowplow_attempted = False
 
         if future is None:
             self._state = AutoState.SEARCH
@@ -449,6 +458,7 @@ class GoalManager(Node):
 
         self._target_id = res.obj_id
         self._pickup_out_of_reach_retries = 0
+        self._snowplow_attempted = False
         self._active_search_goal = None
         self._state = AutoState.APPROACH_OBJECT_COARSE
         self.publish_goal(res.obj_x, res.obj_y, 0.0)
