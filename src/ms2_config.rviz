@@ -9,6 +9,7 @@ Panels:
         - /Grid1
         - /Path1/Topic1
         - /Map1
+        - /TF1
         - /TF1/Frames1
       Splitter Ratio: 0.5277161598205566
     Tree Height: 658
@@ -145,9 +146,7 @@ Visualization Manager:
           Value: true
         det_box0:
           Value: true
-        det_box8:
-          Value: true
-        det_box9:
+        det_box4:
           Value: true
         det_object0:
           Value: true
@@ -156,8 +155,6 @@ Visualization Manager:
         det_object2:
           Value: true
         det_object3:
-          Value: true
-        det_object4:
           Value: true
         det_object5:
           Value: true
@@ -178,15 +175,15 @@ Visualization Manager:
         odom:
           Value: true
         odom_temp:
-          Value: false
+          Value: true
         realsense_camera_color_frame:
-          Value: true
+          Value: false
         realsense_camera_color_optical_frame:
-          Value: true
+          Value: false
         realsense_camera_depth_frame:
-          Value: true
+          Value: false
         realsense_camera_depth_optical_frame:
-          Value: true
+          Value: false
         realsense_camera_link:
           Value: false
         start:
@@ -202,9 +199,7 @@ Visualization Manager:
             {}
           det_box0:
             {}
-          det_box8:
-            {}
-          det_box9:
+          det_box4:
             {}
           det_object0:
             {}
@@ -213,8 +208,6 @@ Visualization Manager:
           det_object2:
             {}
           det_object3:
-            {}
-          det_object4:
             {}
           det_object5:
             {}
@@ -380,7 +373,7 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
-        {}
+        map_lines: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -457,22 +450,22 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 17.141496658325195
+      Distance: 21.65020179748535
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 1.8043384552001953
-        Y: 6.481175899505615
-        Z: -9.41672420501709
+        X: 3.697840929031372
+        Y: 6.464883327484131
+        Z: -9.45077896118164
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.1097965240478516
+      Pitch: 1.0597965717315674
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
       Yaw: 4.76352596282959
