@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from time import time
+import time
 
 import rclpy
 from rclpy.duration import Duration
