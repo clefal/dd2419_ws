@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 
 import math
+
+from robp_interfaces import msg
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from typing import List
 
 from tf2_ros import TransformBroadcaster
@@ -68,12 +72,13 @@ class Odometry(Node):
         self._path_pub = self.create_publisher(Path, 'path', 10)
         self._path = Path()
 
+        self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
         # Subscriptions
         self.create_subscription(
-            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 20
+            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 20, callback_group=self.mut_ex_callback_group
         )
         self.create_subscription(
-            Imu, '/phidgets/imu/data_raw', self.imu_callback, 50
+            Imu, '/phidgets/imu/data_raw', self.imu_callback, 50, callback_group=self.mut_ex_callback_group
         )
 
         # -------------------------
@@ -121,7 +126,14 @@ class Odometry(Node):
 
     def imu_callback(self, msg: Imu):
 
-        t = stamp_to_sec(msg.header.stamp)
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
+
+        if lag > 0.1:
+            self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
+
+            t = stamp_to_sec(msg.header.stamp)
 
         # Calculate gyro bias        
         if not self._gyro_bias_initialized:
@@ -208,6 +220,14 @@ class Odometry(Node):
 
 
     def encoder_callback(self, msg: Encoders):
+
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
+
+        if lag > 0.1:
+            self.get_logger().warn(f"Encoder callback lag: {lag:.3f} s")
+
         encoder_left = msg.encoder_left
         encoder_right = msg.encoder_right
 
@@ -323,11 +343,16 @@ class Odometry(Node):
 def main():
     rclpy.init()
     node = Odometry()
+
+    # ex = MultiThreadedExecutor()
+    # ex.add_node(node)
+
     try:
         rclpy.spin(node)
+        # ex.spin()
     except KeyboardInterrupt:
-        # node._yaw_file.close()
         pass
+
     rclpy.shutdown()
 
 
