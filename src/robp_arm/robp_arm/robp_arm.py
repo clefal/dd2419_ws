@@ -16,11 +16,11 @@ class Arm(Node):
 
     self.pub = self.create_publisher(ArmFeedback, "/arm/feedback", 10)
 
-    qos = QoSProfile(
-        depth=10,
-        reliability=ReliabilityPolicy.RELIABLE 
-    )
-    self.sub = self.create_subscription(ArmControl, "/arm/control", self.arm_control, qos)
+    # qos = QoSProfile(
+    #     depth=10,
+    #     reliability=ReliabilityPolicy.RELIABLE 
+    # )
+    self.sub = self.create_subscription(ArmControl, "/arm/control", self.arm_control, 10)
     self.reset_sub = self.create_subscription(Empty, "/arm/reset", self.arm_reset, 10)
 
     self.last_msg = None
