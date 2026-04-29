@@ -126,12 +126,12 @@ class Odometry(Node):
 
     def imu_callback(self, msg: Imu):
 
-        now = self.get_clock().now()
-        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
-        lag = (now - msg_time).nanoseconds * 1e-9
+        # now = self.get_clock().now()
+        # msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        # lag = (now - msg_time).nanoseconds * 1e-9
 
-        if lag > 0.1:
-            self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
+        # if lag > 0.1:
+        #     self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
 
         t = stamp_to_sec(msg.header.stamp)
 
