@@ -74,6 +74,10 @@ STABLE_Y_TOLERANCE = 5
 VISION_TIMEOUT_SEC = 2.0 #1 
 
 
+#DEBUG:
+DUMMY_MODE = True
+
+
 class State(Enum):
     START = 'START'
     MOVING_TO_START_SAFE = 'MOVING_TO_START_SAFE'
@@ -148,12 +152,20 @@ class ArmControlNode(Node):
 
     def action_callback(self, msg: String):
         command = msg.data.strip().upper()
-        if command == 'START':
-            self.handle_start_command()
-        elif command == 'PICK_UP':
-            self.handle_pickup_command()
-        elif command == 'DROP':
-            self.handle_drop_command()
+        if DUMMY_MODE:
+            if command == 'START':
+                self.publish_result(Result.IDLE_SUCCESS)
+            elif command == 'PICK_UP':
+                self.publish_result(Result.PICK_UP_SUCCESS)
+            elif command == 'DROP':
+                self.publish_result(Result.DROP_SUCCESS)
+        else:
+            if command == 'START':
+                self.handle_start_command()
+            elif command == 'PICK_UP':
+                self.handle_pickup_command()
+            elif command == 'DROP':
+                self.handle_drop_command()
 
     def control_loop(self):
         if self.is_motion_active():
