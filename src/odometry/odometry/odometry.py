@@ -344,12 +344,12 @@ def main():
     rclpy.init()
     node = Odometry()
 
-    # ex = MultiThreadedExecutor()
-    # ex.add_node(node)
+    ex = MultiThreadedExecutor()
+    ex.add_node(node)
 
     try:
-        rclpy.spin(node)
-        # ex.spin()
+        # rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
         pass
 
