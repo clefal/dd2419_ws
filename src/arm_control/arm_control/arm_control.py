@@ -133,13 +133,13 @@ class ArmControlNode(Node):
 
         self.is_initial_out_of_reach_check_done = False
 
-        qos = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE 
-        )
+        # qos = QoSProfile(
+        #     depth=10,
+        #     reliability=ReliabilityPolicy.RELIABLE 
+        # )
 
         #Publishers
-        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, qos)
+        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
         self.holding_pub = self.create_publisher(String, HOLDING_CHECK_TOPIC, 10)
 
