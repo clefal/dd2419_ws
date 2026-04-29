@@ -68,7 +68,7 @@ class GoalManager(Node):
         self._search_x = 0.49
         self._search_y = 0.50
         self._search_yaw = 0.0
-        self.disable_exploration = True
+        self.disable_exploration = False
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
             min_step_m=1.5,
