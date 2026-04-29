@@ -19,9 +19,22 @@ from localization.icp_scan_to_line import (
     interpolate_pose,
     invert_transform,
     make_line_segment,
+    matrix_to_tf_msg,
     relative_pose,
     transform_points,
 )
+
+
+def add_seconds_to_stamp(stamp, seconds: float):
+    total_nanosec = (
+        int(stamp.sec) * 1_000_000_000
+        + int(stamp.nanosec)
+        + int(round(float(seconds) * 1_000_000_000))
+    )
+    out = type(stamp)()
+    out.sec = total_nanosec // 1_000_000_000
+    out.nanosec = total_nanosec % 1_000_000_000
+    return out
 
 
 class IcpScanToLineMotionTriggered(IcpScanToLine):
@@ -34,6 +47,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
         self.declare_parameter("init_seed_min_lines", 2)
         self.declare_parameter("init_min_angle_separation_deg", 30.0)
         self.declare_parameter("publish_wait_debug", False)
+        self.declare_parameter("map_to_odom_republish_period_sec", 0.05)
 
         self.trigger_translation = float(self.get_parameter("trigger_translation").value)
         self.trigger_rotation_deg = float(self.get_parameter("trigger_rotation_deg").value)
@@ -43,9 +57,16 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             self.get_parameter("init_min_angle_separation_deg").value
         )
         self.publish_wait_debug = bool(self.get_parameter("publish_wait_debug").value)
+        self.map_to_odom_republish_period_sec = float(
+            self.get_parameter("map_to_odom_republish_period_sec").value
+        )
 
         self.accumulated_scans = deque(maxlen=self.trigger_max_scans)
         self.accumulation_start_base_pose: Optional[np.ndarray] = None
+        self.map_to_odom_republish_timer = None
+        self.map_to_odom_timer_transform: Optional[np.ndarray] = None
+        self.map_to_odom_timer_anchor_stamp = None
+        self.map_to_odom_timer_tick = 0
 
         self.get_logger().info(
             "motion-triggered ICP enabled | "
@@ -53,8 +74,45 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             f"trigger_rotation_deg={self.trigger_rotation_deg:.1f} "
             f"trigger_max_scans={self.trigger_max_scans} "
             f"init_seed_min_lines={self.init_seed_min_lines} "
-            f"init_min_angle_separation_deg={self.init_min_angle_separation_deg:.1f}"
+            f"init_min_angle_separation_deg={self.init_min_angle_separation_deg:.1f} "
+            f"map_to_odom_republish_period={self.map_to_odom_republish_period_sec:.3f}s"
         )
+
+    def publish_map_to_odom(self, stamp, T_map_odom: Optional[np.ndarray] = None) -> None:
+        if T_map_odom is None:
+            T_map_odom = self.T_map_odom
+        tf_msg = matrix_to_tf_msg(T_map_odom, self.map_frame, self.odom_frame, stamp)
+        self.tf_broadcaster.sendTransform(tf_msg)
+
+    def restart_map_to_odom_republish_timer(self, stamp) -> None:
+        if self.map_to_odom_republish_period_sec <= 0.0:
+            return
+
+        if self.map_to_odom_republish_timer is not None:
+            self.map_to_odom_republish_timer.cancel()
+            self.destroy_timer(self.map_to_odom_republish_timer)
+
+        self.map_to_odom_timer_transform = self.T_map_odom.copy()
+        self.map_to_odom_timer_anchor_stamp = stamp
+        self.map_to_odom_timer_tick = 0
+        self.map_to_odom_republish_timer = self.create_timer(
+            self.map_to_odom_republish_period_sec,
+            self.republish_map_to_odom_from_timer,
+        )
+
+    def republish_map_to_odom_from_timer(self) -> None:
+        if (
+            self.map_to_odom_timer_transform is None
+            or self.map_to_odom_timer_anchor_stamp is None
+        ):
+            return
+
+        self.map_to_odom_timer_tick += 1
+        stamp = add_seconds_to_stamp(
+            self.map_to_odom_timer_anchor_stamp,
+            self.map_to_odom_timer_tick * self.map_to_odom_republish_period_sec,
+        )
+        self.publish_map_to_odom(stamp, self.map_to_odom_timer_transform)
 
     def is_turning_callback(self, msg) -> None:
         was_turning = self.is_turning
@@ -186,6 +244,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             self.try_initialize_mto(stamp)
             if self.mto_initialized:
                 self.publish_map_to_odom(stamp)
+                self.restart_map_to_odom_republish_timer(stamp)
             return
 
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
@@ -260,6 +319,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             self.last_map_update_base_pose = T_map_laser_init @ T_laser_base
 
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             self.publish_map_lines_markers(stamp)
             self.reset_accumulation(current_points_laser, T_odom_laser, T_odom_base)
 
@@ -316,6 +376,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
                 T_map_odom_est,
                 self.pose_smoothing_alpha
             )
+            self.restart_map_to_odom_republish_timer(stamp)
 
             T_map_laser_smoothed = self.T_map_odom @ T_odom_laser
             T_map_base_smoothed = self.T_map_odom @ T_odom_base
