@@ -75,10 +75,10 @@ class Odometry(Node):
         self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
         # Subscriptions
         self.create_subscription(
-            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 20, callback_group=self.mut_ex_callback_group
+            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 1, callback_group=self.mut_ex_callback_group
         )
         self.create_subscription(
-            Imu, '/phidgets/imu/data_raw', self.imu_callback, 50, callback_group=self.mut_ex_callback_group
+            Imu, '/phidgets/imu/data_raw', self.imu_callback, 1, callback_group=self.mut_ex_callback_group
         )
 
         # -------------------------
