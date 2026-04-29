@@ -68,6 +68,7 @@ class GoalManager(Node):
         self._search_x = 0.49
         self._search_y = 0.50
         self._search_yaw = 0.0
+        self._search_goal_hold_threshold_m = 0.5
         self.disable_exploration = False
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
@@ -571,6 +572,14 @@ class GoalManager(Node):
             wx = self._explorer.next_waypoint(robot_xy)
         if wx is None:
             gx, gy, gyaw = self._search_x, self._search_y, self._search_yaw
+            rx, ry = robot_xy
+            dist_to_search = math.hypot(gx - rx, gy - ry)
+            if dist_to_search <= self._search_goal_hold_threshold_m:
+                self._active_search_goal = None
+                self.get_logger().info(
+                    'Holding at fixed search point; not resending identical fallback goal.'
+                )
+                return
             self._active_search_goal = (gx, gy)
             self.get_logger().warn(
                 'Explorer could not sample valid waypoint. Falling back to fixed search point.'
