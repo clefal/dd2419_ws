@@ -68,12 +68,12 @@ class GoalManager(Node):
         self._search_x = 0.49
         self._search_y = 0.50
         self._search_yaw = 0.0
-        self._search_goal_hold_threshold_m = 0.5
+        self._search_goal_hold_threshold_m = 0.8
         self.disable_exploration = False
         self._active_search_goal = None
         self._explorer = RandomWaypointExplorer(
             min_step_m=1.5,
-            max_step_m=2.5,
+            max_step_m=4.5,
             min_revisit_dist_m=0.8,
             failed_blacklist_radius_m=0.6,
             occ_lethal=90,
