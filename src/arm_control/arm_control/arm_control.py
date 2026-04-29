@@ -76,7 +76,7 @@ VISION_TIMEOUT_SEC = 2.0 #1
 
 
 #DEBUG:
-DUMMY_MODE = True
+DUMMY_MODE = False
 
 
 class State(Enum):
