@@ -225,8 +225,8 @@ class Odometry(Node):
         msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
         lag = (now - msg_time).nanoseconds * 1e-9
 
-        if lag > 0.1:
-            self.get_logger().warn(f"Encoder callback lag: {lag:.3f} s")
+        if lag > 0.005:
+            self.get_logger().info(f"Encoder callback lag: {lag:.3f} s")
 
         encoder_left = msg.encoder_left
         encoder_right = msg.encoder_right
