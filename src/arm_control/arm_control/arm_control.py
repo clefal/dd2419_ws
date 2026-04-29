@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
+from time import time
 
 import rclpy
 from rclpy.duration import Duration
@@ -154,6 +155,7 @@ class ArmControlNode(Node):
         command = msg.data.strip().upper()
         if DUMMY_MODE:
             if command == 'START':
+                time.sleep(2.0)
                 self.publish_result(Result.IDLE_SUCCESS)
             elif command == 'PICK_UP':
                 self.publish_result(Result.PICK_UP_SUCCESS)
