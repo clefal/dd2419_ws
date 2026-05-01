@@ -67,13 +67,13 @@ MAX_ALPHA_STEP_DEG = 1.0    #2.0
 
 DESCENT_STEP_MM = 10.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
-START_PICKUP_Z = IDLE_Z - 45.0  # higher starting point
-ALIGNMENT_Z = FINAL_PICKUP_Z + 10.0  # stop aligning below this Z to avoid vision issues
+START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
+ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
-REQUIRED_DETECTIONS = 3 #3
-STABLE_X_TOLERANCE = 5
-STABLE_Y_TOLERANCE = 5
+REQUIRED_DETECTIONS = 4 #3
+STABLE_X_TOLERANCE = 3
+STABLE_Y_TOLERANCE = 3
 
 VISION_TIMEOUT_SEC = 2.0 #1 
 
@@ -287,10 +287,8 @@ class ArmControlNode(Node):
             self.publish_result(Result.PICK_UP_SUCCESS)
             self.transition_to(State.HOLDING)
         elif msg.data == HOLDING_FAIL_MSG:
-            # self.publish_result(Result.PICK_UP_FAIL_NO_HOLDING)
-            # self.transition_to(State.RETURN_TO_IDLE)
-            self.publish_result(Result.PICK_UP_SUCCESS)
-            self.transition_to(State.HOLDING)
+            self.publish_result(Result.PICK_UP_FAIL_NO_HOLDING)
+            self.transition_to(State.RETURN_TO_IDLE)
 
     def command_observe_pose(self):
         self.current_target_rho = BASE_MIN_RHO
@@ -397,6 +395,7 @@ class ArmControlNode(Node):
                 wrist_angle=angle
             )
         except ValueError as exc:
+            #self.get_logger().warn(f'Alignment error: {exc}')
             if self.current_target_z > FINAL_PICKUP_Z:
                 # If joint limits reached at high Z, descend and try again at lower height
                 fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)

@@ -11,7 +11,7 @@ import colour as co
 from std_msgs.msg import String
 
 MIN_CONTOUR_AREA = 450.0
-MIN_HOLDING_WIDTH = 120.0
+MIN_HOLDING_SIZE = 130.0
 HOLDING_TIMEOUT_SEC = 2.0
 
 #TOPICS
@@ -35,7 +35,7 @@ HOLDING_FAIL_MSG = 'HOLDING_FAIL'
 
 #DEBUG
 DEBUG_COLOR_PICKER_ENABLED = False
-DEBUG_PUBLISH_MASKS = False
+DEBUG_PUBLISH_MASKS = True
 
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
@@ -183,7 +183,8 @@ class ArmVisionNode(Node):
             detections.append({'detection': detection, 'color': color_name, 'confidence': detection['confidence']})
 
             if self.state == State.CHECK_HOLDING:
-                if detection['box_w'] >= MIN_HOLDING_WIDTH:
+                box_size = max(detection['box_w'], detection['box_h'])
+                if box_size >= MIN_HOLDING_SIZE:
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG
                     self.holding_pub.publish(msg)
@@ -295,7 +296,8 @@ class ArmVisionNode(Node):
             'mask': mask,
             'center': center,
             'bbox': cv2.boundingRect(largest_contour),  
-            'box_w': box_w,          
+            'box_w': box_w, 
+            'box_h': box_h,
             'angle': angle,          
             'box_points': box_points, 
             'edges': edges,
