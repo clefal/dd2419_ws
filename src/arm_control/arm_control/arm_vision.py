@@ -11,7 +11,7 @@ import colour as co
 from std_msgs.msg import String
 
 MIN_CONTOUR_AREA = 450.0
-MIN_HOLDING_WIDTH = 130
+MIN_HOLDING_WIDTH = 120.0
 HOLDING_TIMEOUT_SEC = 2.0
 
 #TOPICS
@@ -35,7 +35,7 @@ HOLDING_FAIL_MSG = 'HOLDING_FAIL'
 
 #DEBUG
 DEBUG_COLOR_PICKER_ENABLED = False
-DEBUG_PUBLISH_MASKS = False
+DEBUG_PUBLISH_MASKS = True
 
 ARM_COLORS_RGB = {
     'green': np.array([0, 255, 0]),
@@ -150,7 +150,7 @@ class ArmVisionNode(Node):
 
         if self.state == State.CHECK_HOLDING:
             h, w = frame.shape[:2]
-            frame = frame[h // 2:, int(w * 0.3):int(w * 0.8)]
+            frame = frame[h // 2:, int(w * 0.2):int(w * 0.8)]
 
         if DEBUG_COLOR_PICKER_ENABLED:
             cv2.imshow("debug", frame)
@@ -187,7 +187,7 @@ class ArmVisionNode(Node):
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG
                     self.holding_pub.publish(msg)
-                    self.holding = False
+                    self.state = State.IDLE
 
         if detections:
             best = max(detections, key=lambda x: x['confidence'])

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 BASE_MIN_RHO = 155  #160.0
 MAX_RHO = 195       #190.0
-DEFAULT_PICKUP_Z = 0.0
+DEFAULT_PICKUP_Z = 10.0
 IDLE_Z = 105.0
 
 L1 = 101.0
@@ -16,7 +16,7 @@ BASE_SERVO_CENTER = 120.0
 WRIST_DOWN_ORIENTATION_DEG = -90.0
 WRIST_BASE_ANGLE = 120.0
 
-BASE_LIMITS = (100.0, 140.0)        # P5: straight at 120°, initial: 120
+BASE_LIMITS = (95.0, 145.0)        # P5: straight at 120°, initial: 120
 SHOULDER_LIMITS = (30.0, 120.0)     # P4: straight at 120°         initial: 180
 ELBOW_LIMITS = (100.0, 210.0)       # P3: straight at 120°    initial: 220
 WRIST_LIMITS = (25.0, 170.0)        # P2: straight at 120°      initial:30
