@@ -7,7 +7,7 @@ import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from robp_interfaces.msg import ArmControl
+from robp_interfaces.msg import ArmControl, ArmFeedback
 from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
 
@@ -47,6 +47,9 @@ VISION_TOPIC = '/arm/vision/cube_center'
 ACTION_TOPIC = '/arm/action'
 RESULT_TOPIC = '/arm/result'
 CONTROL_TOPIC = '/arm/control'
+FEEDBACK_TOPIC = '/arm/feedback'
+
+FEEDBACK_ERROR_TOLERANCE = 5.0  #Prob needs tuning 
 
 CONTROL_RATE_HZ = 10.0
 
@@ -118,9 +121,12 @@ class ArmControlNode(Node):
         super().__init__('arm_control')
 
         self.state = State.START
+        self.old_position = [float(value) for value in INITIAL_POSITION]
         self.position = [float(value) for value in INITIAL_POSITION]
         self.new_position = self.position.copy()
         self.motion_complete_time = self.get_clock().now()
+
+        self.feedback_positions = [None] * 6
 
         self.current_target_rho = None
         self.current_target_alpha = None
@@ -147,6 +153,7 @@ class ArmControlNode(Node):
         self.create_subscription(String, HOLDING_ANSWER_TOPIC, self.holding_answer_callback, 10)
         self.create_subscription(String, ACTION_TOPIC, self.action_callback, 10)
         self.create_subscription(Int32MultiArray, VISION_TOPIC, self.vision_callback, 10)
+        self.sub = self.create_subscription(ArmFeedback, FEEDBACK_TOPIC, self.feedback_callback, 10)
 
         #Control timer
         self.control_timer = self.create_timer(1.0 / CONTROL_RATE_HZ, self.control_loop)
@@ -175,14 +182,28 @@ class ArmControlNode(Node):
         if self.is_motion_active():
             return
         
-        if self.state == State.MOVING_TO_START_SAFE or self.state == State.RETURN_TO_IDLE:
+        if self.state == State.MOVING_TO_START_SAFE:
+            if self.at_target():
+                self.command_named_pose(IDLE_POSE)
+                self.transition_to(State.MOVING_TO_IDLE)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.START)
+                self.handle_start_command()
+            return
+        
+        if self.state == State.RETURN_TO_IDLE:
             self.command_named_pose(IDLE_POSE)
             self.transition_to(State.MOVING_TO_IDLE)
             return
 
         if self.state == State.MOVING_TO_IDLE:
-            self.transition_to(State.IDLE)
-            self.publish_result(Result.IDLE_SUCCESS)
+            if self.at_target():
+                self.transition_to(State.IDLE)
+                self.publish_result(Result.IDLE_SUCCESS)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.RETURN_TO_IDLE)
             return
 
         if self.state == State.MOVING_TO_OBSERVE:
@@ -211,8 +232,13 @@ class ArmControlNode(Node):
             return
 
         if self.state == State.MOVING_TO_DROP:
-            self.command_gripper(OPEN_GRIPPER_ANGLE)
-            self.transition_to(State.OPENING_FOR_DROP)
+            if self.at_target():
+                self.command_gripper(OPEN_GRIPPER_ANGLE)
+                self.transition_to(State.OPENING_FOR_DROP)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.HOLDING)
+                self.handle_drop_command()
             return
 
         if self.state == State.OPENING_FOR_DROP:
@@ -245,7 +271,6 @@ class ArmControlNode(Node):
         self.command_named_pose(DROP_POSE)
         self.transition_to(State.MOVING_TO_DROP)
 
-    #TODO: rotation
     def vision_callback(self, msg: Int32MultiArray):
         if len(msg.data) < 2:
             return
@@ -394,6 +419,7 @@ class ArmControlNode(Node):
         msg.time = self.compute_move_times(self.position, self.new_position)
         self.control_pub.publish(msg)
 
+        self.old_position = self.position.copy()
         self.position = self.new_position.copy()
         max_move_time_ms = max(msg.time) if len(msg.time) > 0 else MIN_TIME_MS
         self.motion_complete_time = self.get_clock().now() + Duration(seconds=max_move_time_ms / 1000.0)
@@ -407,7 +433,6 @@ class ArmControlNode(Node):
             move_times.append(move_time)
         return move_times
 
-    #TODO: add rotation 
     def get_stable_detection(self):
         if len(self.detection_history) < REQUIRED_DETECTIONS:
             return None
@@ -457,6 +482,17 @@ class ArmControlNode(Node):
         msg.data = text.value
         self.result_pub.publish(msg)
         self.get_logger().info(f'Arm result: {text.value}')
+
+    def feedback_callback(self, msg: ArmFeedback):
+        if self.state not in [State.MOVING_TO_IDLE, State.MOVING_TO_START_SAFE, State.MOVING_TO_DROP]:
+            return
+        self.feedback_positions = msg.position
+
+    def at_target(self, tolerance: float = FEEDBACK_ERROR_TOLERANCE) -> bool:
+        return all(
+            abs(pos - feedback_pos) < tolerance
+            for pos, feedback_pos in zip(self.position, self.feedback_positions)
+        )
 
 def main():
     rclpy.init()
