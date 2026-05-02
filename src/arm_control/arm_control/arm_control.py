@@ -49,31 +49,31 @@ RESULT_TOPIC = '/arm/result'
 CONTROL_TOPIC = '/arm/control'
 FEEDBACK_TOPIC = '/arm/feedback'
 
-FEEDBACK_ERROR_TOLERANCE = 5.0  #Prob needs tuning 
+FEEDBACK_ERROR_TOLERANCE = 10.0  #Prob needs tuning 
 
 CONTROL_RATE_HZ = 10.0
 
-TARGET_PIXEL_X = 310
+TARGET_PIXEL_X = 300
 TARGET_PIXEL_Y = 420 #400
 LARGEST_START_PIXEL_Y = 410
-SMALLEST_START_PIXEL_Y = 280
+SMALLEST_START_PIXEL_Y = 200
 
-ALIGN_X_TOLERANCE = 15  #25
-ALIGN_Y_TOLERANCE = 15
+ALIGN_X_TOLERANCE = 25  #25
+ALIGN_Y_TOLERANCE = 20
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
-MAX_RHO_STEP_MM = 6.0
+MAX_RHO_STEP_MM = 5.0 #4.0
 MAX_ALPHA_STEP_DEG = 1.0    #2.0
 
 DESCENT_STEP_MM = 10.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
-START_PICKUP_Z = IDLE_Z - 55.0  # higher starting point
-ALIGNMENT_Z = FINAL_PICKUP_Z + 20.0  # stop aligning below this Z to avoid vision issues
+START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
+ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
 REQUIRED_DETECTIONS = 4 #3
-STABLE_X_TOLERANCE = 5
-STABLE_Y_TOLERANCE = 5
+STABLE_X_TOLERANCE = 3
+STABLE_Y_TOLERANCE = 3
 
 VISION_TIMEOUT_SEC = 2.0 #1 
 
@@ -81,7 +81,7 @@ PICKUP_TIMEOUT_SEC = 20.0
 
 
 #DEBUG:
-DUMMY_MODE = True
+DUMMY_MODE = False
 
 
 class State(Enum):
@@ -410,6 +410,7 @@ class ArmControlNode(Node):
                 wrist_angle=angle
             )
         except ValueError as exc:
+            #self.get_logger().warn(f'Alignment error: {exc}')
             if self.current_target_z > FINAL_PICKUP_Z:
                 # If joint limits reached at high Z, descend and try again at lower height
                 fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)

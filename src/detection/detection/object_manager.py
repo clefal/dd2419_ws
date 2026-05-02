@@ -74,6 +74,7 @@ class ObjectManager(Node):
         self.create_timer(5, self.get_points_from_csv_once)
         #self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
+        self.box_similarity_threshold = 0.45 # boxes are larger, so allow looser box-to-box/map-box matching
         self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
 
 # ----------------------------------
@@ -105,31 +106,31 @@ class ObjectManager(Node):
         If object is similar to another object then this object will be updated.'''
         similarity_counter = 0
         cube_types = ('red_cube', 'green_cube', 'blue_cube', 'cube', 'map_cube')
+        box_types = ('box', 'map_box')
 
         if obj.type in cube_types:
             for o in self.object_list:
-                if o.type in ('box', 'map_box') and math.hypot(o.last_x - obj.last_x, o.last_y - obj.last_y) < self.cube_box_exclusion_threshold:
+                if o.type in box_types and math.hypot(o.last_x - obj.last_x, o.last_y - obj.last_y) < self.cube_box_exclusion_threshold:
                     return 1
 
         # maybe this can be done quicker with pandas or something like that, so if it becomes a problem then i can look into that again
         if len(self.object_list)>0:
             for idx, o in enumerate(self.object_list):
-                if o.type == obj.type or o.type == 'map_cube' or o.type=='map_box':
-                    # since we dont know the colors of the cubes from the map file we only do position comparison to check for similar objects
-                    if o.type == 'map_cube' and (obj.type == 'box' or obj.type == 'map_box'):
-                        continue
+                same_type = o.type == obj.type
+                cube_match = o.type in cube_types and obj.type in cube_types and ('map_cube' in (o.type, obj.type) or same_type)
+                box_match = o.type in box_types and obj.type in box_types
 
-                    if o.type == 'map_box' and obj.type != 'box' and obj.type != 'map_box':
-                        continue
-                        
-                    if abs(o.first_x - obj.first_x) < self.similarity_threshold and abs(o.first_y - obj.first_y) < self.similarity_threshold:
+                if same_type or cube_match or box_match:
+                    threshold = self.box_similarity_threshold if box_match else self.similarity_threshold
+                    if math.hypot(o.first_x - obj.first_x, o.first_y - obj.first_y) < threshold:
                         # if the object is similar (=close to another object and of same type)
                         updated_obj = o.copy()
                         updated_obj.last_x = obj.last_x
                         updated_obj.last_y = obj.last_y
                         updated_obj.last_yaw = obj.last_yaw
                         updated_obj.confidence = updated_obj.confidence + 1 # increase confidence by 1 every time we spot an object                         
-                        updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
+                        if obj.type not in ('map_cube', 'map_box'):
+                            updated_obj.type = obj.type # also update the obj type (e.g. from map_cube to red_cube)
                         if updated_obj.status == 'unavailable' and obj.type not in ('map_cube', 'map_box'):
                             updated_obj.status = 'available'
 
