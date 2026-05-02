@@ -249,7 +249,7 @@ class GoalManager(Node):
                 self._snowplow_attempted = False
      
                 self.request_box_goal_candidates(reason='pickup_success')
-            elif msg.data == 'PICK_UP_FAIL_OUT_OF_REACH':
+            elif msg.data in ('PICK_UP_FAIL_OUT_OF_REACH', 'PICK_UP_FAIL_TIMEOUT'):
                 if self._pickup_out_of_reach_retries == 0:
                     self._pickup_out_of_reach_retries = 1
                     self.get_logger().warn(
