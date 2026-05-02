@@ -77,6 +77,8 @@ STABLE_Y_TOLERANCE = 5
 
 VISION_TIMEOUT_SEC = 2.0 #1 
 
+PICKUP_TIMEOUT_SEC = 20.0
+
 
 #DEBUG:
 DUMMY_MODE = True
@@ -108,6 +110,7 @@ class Result(Enum):
     PICK_UP_FAIL_NO_HOLDING = 'PICK_UP_FAIL_NO_HOLDING'
     PICK_UP_FAIL_NO_DETECTION = 'PICK_UP_FAIL_NO_DETECTION'
     PICK_UP_FAIL_OUT_OF_REACH = 'PICK_UP_FAIL_OUT_OF_REACH'
+    PICK_UP_FAIL_TIMEOUT = 'PICK_UP_FAIL_TIMEOUT'
     DROP_FAIL_NO_OBJECT = 'DROP_FAIL_NO_OBJECT'
 
 @dataclass
@@ -174,9 +177,21 @@ class ArmControlNode(Node):
             if command == 'START':
                 self.handle_start_command()
             elif command == 'PICK_UP':
+                self.pickup_timer = self.create_timer(
+                PICKUP_TIMEOUT_SEC, self.pickup_timeout
+                )
                 self.handle_pickup_command()
             elif command == 'DROP':
                 self.handle_drop_command()
+
+    def pickup_timeout(self):
+        if self.state in [State.ALIGNING]:
+            self.publish_result(Result.PICK_UP_FAIL_TIMEOUT)
+            self.transition_to(State.RETURN_TO_IDLE)
+
+        if self.pickup_timer is not None:
+            self.pickup_timer.cancel()
+            self.pickup_timer = None
 
     def control_loop(self):
         if self.is_motion_active():
