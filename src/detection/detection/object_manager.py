@@ -436,9 +436,9 @@ class ObjectManager(Node):
 
             rows.append([
                 map_type,
-                int(round(obj.last_x * 100.0)),
-                int(round(obj.last_y * 100.0)),
-                int(round(math.degrees(obj.last_yaw))),
+                int(round(obj.first_x * 100.0)),
+                int(round(obj.first_y * 100.0)),
+                int(round(math.degrees(obj.first_yaw))),
             ])
 
         with output_path.open('w', newline='') as csv_file:
