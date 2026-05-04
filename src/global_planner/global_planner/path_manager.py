@@ -656,7 +656,7 @@ class PathManager:
     def cell_penalty(self, gx: int, gy: int, occ: OccupancyGrid, meta: GridMeta) -> float:
         v = occ.data[self.idx_to_flat(gx, gy, meta)]
         if v < 0:
-            return 0.2 * self._config.occ_cost_scale
+            return 0.1 * self._config.occ_cost_scale
         return (float(v) / 100.0) * self._config.occ_cost_scale
 
     def path_total_cost(self, path_idx: List[GridIndex], occ: OccupancyGrid, meta: GridMeta) -> float:
