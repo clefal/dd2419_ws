@@ -85,7 +85,7 @@ class Controller(Node):
         # Parameters
         self.declare_parameter('lookahead_distance', 0.19)        # m
         self.declare_parameter('nominal_linear_speed', 0.30)    # default slower for path tracking 0.25
-        self.declare_parameter('max_angular_speed', 0.2)        # cap turning a bit more conservatively 0.15
+        self.declare_parameter('max_angular_speed', 0.18)        # cap turning a bit more conservatively 0.15
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.06) #0.35
@@ -160,6 +160,9 @@ class Controller(Node):
             out_left = clamp(target_left, self._last_left_cmd - max_delta, self._last_left_cmd + max_delta)
             out_right = clamp(target_right, self._last_right_cmd - max_delta, self._last_right_cmd + max_delta)
 
+        if max(abs(out_left), abs(out_right)) > 0.30:
+            self.get_logger().info(f'High wheel duty: left={out_left:.3f}, right={out_right:.3f}')
+            
         m = DutyCycles()
         m.duty_cycle_left = out_left
         m.duty_cycle_right = out_right
