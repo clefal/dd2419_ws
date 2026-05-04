@@ -249,7 +249,7 @@ class GoalManager(Node):
                 self._snowplow_attempted = False
      
                 self.request_box_goal_candidates(reason='pickup_success')
-            elif msg.data in ('PICK_UP_FAIL_OUT_OF_REACH', 'PICK_UP_FAIL_TIMEOUT'):
+            elif msg.data in ('PICK_UP_FAIL_OUT_OF_REACH', 'PICK_UP_FAIL_TIMEOUT', 'PICK_UP_FAIL_NO_HOLDING'):
                 if self._pickup_out_of_reach_retries == 0:
                     self._pickup_out_of_reach_retries = 1
                     self.get_logger().warn(
@@ -272,9 +272,9 @@ class GoalManager(Node):
             elif msg.data in ('PICK_UP_FAIL_NO_DETECTION'):
                 self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
                 self._skip_current_target()
-            elif msg.data in ('PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_IDLE'):
-                self._state = AutoState.WAIT_ARM_IDLE
-                self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
+            # elif msg.data in ('PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_IDLE'):
+            #     self._state = AutoState.WAIT_ARM_IDLE
+            #     self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
             else:
                 self.get_logger().info(f'Arm result received while waiting for pickup: {msg.data}')
             return

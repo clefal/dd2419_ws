@@ -77,7 +77,7 @@ STABLE_Y_TOLERANCE = 10
 
 VISION_TIMEOUT_SEC = 2.0 #1 
 
-PICKUP_TIMEOUT_SEC = 15.0
+PICKUP_TIMEOUT_SEC = 20.0
 
 
 #DEBUG:
@@ -364,9 +364,9 @@ class ArmControlNode(Node):
                 self.publish_result(Result.PICK_UP_FAIL_NO_DETECTION)
             return
         
-        # self.get_logger().info(
-        #     f'Using stable detection: x={detection.center_x} y={detection.center_y} angle={detection.angle}'
-        # )
+        self.get_logger().info(
+            f'Using stable detection: x={detection.center_x} y={detection.center_y} angle={detection.angle}'
+        )
 
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
