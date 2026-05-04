@@ -27,7 +27,7 @@ class Obj:
         self.confidence = confidence
 
     def copy(self):
-        return Obj(self.id, self.first_x, self.first_y, self.first_yaw, self.status, self.type)
+        return Obj(self.id, self.first_x, self.first_y, self.first_yaw, self.status, self.type, self.confidence)
 
 
         # things that could be changed in the future: 
@@ -76,6 +76,7 @@ class ObjectManager(Node):
         self.similarity_threshold = 0.2 # distance of detections that are combined into one object
         self.box_similarity_threshold = 0.45 # boxes are larger, so allow looser box-to-box/map-box matching
         self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
+        self.output_map_min_confidence = 4 # only export objects that have been seen at least this many extra times
 
 # ----------------------------------
 
@@ -426,6 +427,9 @@ class ObjectManager(Node):
 
         rows = []
         for obj in sorted_objects:
+            if object_confidence(obj) < self.output_map_min_confidence:
+                continue
+
             map_type = object_type_to_map_type(obj.type)
             if map_type is None:
                 continue
