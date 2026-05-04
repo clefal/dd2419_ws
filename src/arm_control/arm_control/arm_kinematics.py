@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 
 
-BASE_MIN_RHO = 160  #160.0
+BASE_MIN_RHO = 157  #160.0
 MAX_RHO = 195       #190.0
 DEFAULT_PICKUP_Z = 10.0
 IDLE_Z = 105.0
