@@ -425,7 +425,7 @@ class ArmControlNode(Node):
                 wrist_angle=angle
             )
         except ValueError as exc:
-            #self.get_logger().warn(f'Alignment error: {exc}')
+            self.get_logger().warn(f'Alignment error: {exc}')
             if self.current_target_z > FINAL_PICKUP_Z:
                 # If joint limits reached at high Z, descend and try again at lower height
                 fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
@@ -436,7 +436,7 @@ class ArmControlNode(Node):
                         z=fallback_z
                     )
                 except ValueError as exc:
-                    #self.get_logger().warn(f'Fallback alignment error: {exc}')
+                    self.get_logger().warn(f'Fallback alignment error: {exc}')
                     self.transition_to(State.RETURN_TO_IDLE)
                     self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
             else:
