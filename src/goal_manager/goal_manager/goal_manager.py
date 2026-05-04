@@ -272,9 +272,9 @@ class GoalManager(Node):
             elif msg.data in ('PICK_UP_FAIL_NO_DETECTION'):
                 self.get_logger().warn(f'Arm pickup failed with no detected cube: {msg.data}. Skipping target.')
                 self._skip_current_target()
-            # elif msg.data in ('PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_IDLE'):
-            #     self._state = AutoState.WAIT_ARM_IDLE
-            #     self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
+            elif msg.data in ('PICK_UP_FAIL_NO_IDLE'):
+                self._state = AutoState.WAIT_ARM_IDLE
+                self.get_logger().warn(f'Arm saw cube but did not grab it: {msg.data}. Waiting for arm to become idle.')
             else:
                 self.get_logger().info(f'Arm result received while waiting for pickup: {msg.data}')
             return
