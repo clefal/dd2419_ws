@@ -160,7 +160,7 @@ class Controller(Node):
             out_left = clamp(target_left, self._last_left_cmd - max_delta, self._last_left_cmd + max_delta)
             out_right = clamp(target_right, self._last_right_cmd - max_delta, self._last_right_cmd + max_delta)
 
-        if max(abs(out_left), abs(out_right)) > 0.30:
+        if max(abs(out_left), abs(out_right)) > 0.50:
             self.get_logger().info(f'High wheel duty: left={out_left:.3f}, right={out_right:.3f}')
             
         m = DutyCycles()
@@ -400,13 +400,14 @@ class Controller(Node):
 
     def enforce_wheel_saturation_pair(self, left: float, right: float) -> Tuple[float, float]:
 
+        max_allowed = 0.7
         left = float(left)
         right = float(right)
         max_mag = max(abs(left), abs(right))
-        if max_mag <= 1.0:
+        if max_mag <= max_allowed:
             return left, right
 
-        scale = 1.0 / max_mag
+        scale = max_allowed / max_mag
         scaled_left = left * scale
         scaled_right = right * scale
         self.get_logger().warn(
