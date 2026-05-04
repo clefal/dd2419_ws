@@ -9,7 +9,7 @@ from enum import Enum
 
 import rclpy
 from rclpy.node import Node
-
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import PoseStamped, PoseArray, PolygonStamped
 from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String, Float32, Bool, Int64
@@ -96,10 +96,16 @@ class GoalManager(Node):
         self._final_approach_enable_pub = self.create_publisher(Bool, '/nav/final_approach/enable', 10)
         self._final_approach_target_id_pub = self.create_publisher(Int64, '/nav/final_approach/target_id', 10)
 
+        workspace_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         
         self.create_subscription(String, '/nav/status', self.status_callback, 10)
         self.create_subscription(String, '/arm/result', self.arm_result_callback, 10)
-        self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, 10)
+        self.create_subscription(PolygonStamped, '/workspace', self.workspace_callback, workspace_qos)
         self.create_subscription(OccupancyGrid, '/nav/planning_grid', self.planning_grid_callback, 10)
         self.create_subscription(OccupancyGrid, 'map/exploration_grid', self.exploration_grid_callback, 10)
 
