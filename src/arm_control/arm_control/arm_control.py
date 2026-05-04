@@ -175,6 +175,7 @@ class ArmControlNode(Node):
                 self.publish_result(Result.DROP_SUCCESS)
         else:
             if command == 'START':
+                self.get_logger().info('Received START command')
                 self.handle_start_command()
             elif command == 'PICK_UP':
                 self.handle_pickup_command()
