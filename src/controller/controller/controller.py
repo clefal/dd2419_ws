@@ -113,7 +113,7 @@ class Controller(Node):
 
         # Start-of-path heading error threshold for turn-in-place alignment
         self._turn_in_place_yaw_thresh = 0.4  # rad
-        self._yaw_tol = 0.1  # rad for final alignment 0.05 gold
+        self._yaw_tol = 0.075  # rad for final alignment 0.05 gold
 
         # Control loop
               
@@ -162,7 +162,7 @@ class Controller(Node):
 
         if max(abs(out_left), abs(out_right)) > 0.50:
             self.get_logger().info(f'High wheel duty: left={out_left:.3f}, right={out_right:.3f}')
-            
+
         m = DutyCycles()
         m.duty_cycle_left = out_left
         m.duty_cycle_right = out_right
