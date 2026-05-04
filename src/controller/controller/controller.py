@@ -85,7 +85,7 @@ class Controller(Node):
         # Parameters
         self.declare_parameter('lookahead_distance', 0.19)        # m
         self.declare_parameter('nominal_linear_speed', 0.30)    # default slower for path tracking 0.25
-        self.declare_parameter('max_angular_speed', 0.2)        # cap turning a bit more conservatively 0.15
+        self.declare_parameter('max_angular_speed', 0.18)        # cap turning a bit more conservatively 0.15
         self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.06) #0.35
@@ -98,10 +98,10 @@ class Controller(Node):
         self.declare_parameter('tf_staleness_warn_s', 0.08)     # s
 
         self.declare_parameter('final_nominal_speed', 0.12)                # duty-equivalent for close approach
-        self.declare_parameter('final_turn_gain', 0.8)                     # steering gain during close approach
+        self.declare_parameter('final_turn_gain', 0.2)                     # steering gain during close approach
         self.declare_parameter('final_max_angular_speed', 0.18)            # keep final approach conservative
         self.declare_parameter('final_turn_in_place_yaw_thresh', 0.35)     # rad
-        self.declare_parameter('final_stop_distance', 0.16)                 #0.17 gold
+        self.declare_parameter('final_stop_distance', 0.155)                 #0.17 gold
         self.declare_parameter('final_lateral_offset', 0.02)                # m
         self.declare_parameter('final_target_timeout', 1.5)                # s
 
