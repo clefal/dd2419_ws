@@ -56,7 +56,7 @@ CONTROL_RATE_HZ = 10.0
 TARGET_PIXEL_X = 300
 TARGET_PIXEL_Y = 420 #400
 LARGEST_START_PIXEL_Y = 410
-SMALLEST_START_PIXEL_Y = 200
+SMALLEST_START_PIXEL_Y = 190
 
 ALIGN_X_TOLERANCE = 25  #25
 ALIGN_Y_TOLERANCE = 20
@@ -71,13 +71,13 @@ START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
 ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
-REQUIRED_DETECTIONS = 4 #3
-STABLE_X_TOLERANCE = 3
-STABLE_Y_TOLERANCE = 3
+REQUIRED_DETECTIONS = 5 #3
+STABLE_X_TOLERANCE = 10
+STABLE_Y_TOLERANCE = 10
 
 VISION_TIMEOUT_SEC = 2.0 #1 
 
-PICKUP_TIMEOUT_SEC = 20.0
+PICKUP_TIMEOUT_SEC = 15.0
 
 
 #DEBUG:
@@ -177,9 +177,6 @@ class ArmControlNode(Node):
             if command == 'START':
                 self.handle_start_command()
             elif command == 'PICK_UP':
-                self.pickup_timer = self.create_timer(
-                PICKUP_TIMEOUT_SEC, self.pickup_timeout
-                )
                 self.handle_pickup_command()
             elif command == 'DROP':
                 self.handle_drop_command()
@@ -208,6 +205,9 @@ class ArmControlNode(Node):
             return
         
         if self.state == State.RETURN_TO_IDLE:
+            if self.pickup_timer is not None:
+                self.pickup_timer.cancel()
+                self.pickup_timer = None
             self.command_named_pose(IDLE_POSE)
             self.transition_to(State.MOVING_TO_IDLE)
             return
@@ -230,6 +230,9 @@ class ArmControlNode(Node):
             return
         
         if self.state == State.CLOSING_GRIPPER:
+            if self.pickup_timer is not None:
+                self.pickup_timer.cancel()
+                self.pickup_timer = None
             self.command_named_pose(LIFTING_POSE)
             self.transition_to(State.LIFTING)
             return
@@ -274,6 +277,10 @@ class ArmControlNode(Node):
         if self.state != State.IDLE:
             self.publish_result(Result.PICK_UP_FAIL_NO_IDLE)
             return
+        
+        self.pickup_timer = self.create_timer(
+            PICKUP_TIMEOUT_SEC, self.pickup_timeout
+        )
 
         self.command_observe_pose()
         self.transition_to(State.MOVING_TO_OBSERVE)
@@ -355,7 +362,12 @@ class ArmControlNode(Node):
             if self.vision_is_stale():
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_NO_DETECTION)
+            self.get_logger().info('No stable detection yet')
             return
+        
+        self.get_logger().info(
+            f'Using stable detection: x={detection.center_x} y={detection.center_y} angle={detection.angle}'
+        )
 
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
@@ -457,19 +469,22 @@ class ArmControlNode(Node):
         ys = [d.center_y for d in self.detection_history]
         angles = [d.angle for d in self.detection_history]
 
+        sorted_xs = sorted(xs)
+        sorted_ys = sorted(ys)
+        if sorted_xs[-2] - sorted_xs[1] > STABLE_X_TOLERANCE:
+            return None
+        if sorted_ys[-2] - sorted_ys[1] > STABLE_Y_TOLERANCE:
+            return None
+
         if max(xs) - min(xs) > STABLE_X_TOLERANCE:
             return None
         if max(ys) - min(ys) > STABLE_Y_TOLERANCE:
             return None
 
-
-        center_x = sum(xs) // len(xs)
-        center_y = sum(ys) // len(ys)
-        angle = sum(angles) // len(angles)
-
-        self.get_logger().info(
-            f'Stable detection: x={center_x} y={center_y} angle={angle}'
-        )
+        #use median instead of mean to be more robust to outliers
+        center_x = sorted_xs[len(sorted_xs) // 2]
+        center_y = sorted_ys[len(sorted_ys) // 2]
+        angle = sorted(angles)[len(angles) // 2]
 
         return VisionDetection(
             center_x=center_x,
