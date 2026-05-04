@@ -336,17 +336,20 @@ class ObjectManager(Node):
         closest_obj_yaw = 0.0
         for obj in self.object_list:
             if obj.status == 'available' and (obj.type == 'box' or obj.type == 'map_box'):
-                if closest_obj_id == None:
-                    closest_obj_id = obj.id
-                    closest_obj_x = obj.last_x
-                    closest_obj_y = obj.last_y
-                    closest_obj_yaw = obj.last_yaw
-                    closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
-                if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
-                    closest_obj_id = obj.id
-                    closest_obj_x = obj.last_x
-                    closest_obj_y = obj.last_y
-                    closest_obj_yaw = obj.last_yaw
+                if obj.confidence < 3:
+                    continue
+                else:
+                    if closest_obj_id == None:
+                        closest_obj_id = obj.id
+                        closest_obj_x = obj.last_x
+                        closest_obj_y = obj.last_y
+                        closest_obj_yaw = obj.last_yaw
+                        closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
+                    if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
+                        closest_obj_id = obj.id
+                        closest_obj_x = obj.last_x
+                        closest_obj_y = obj.last_y
+                        closest_obj_yaw = obj.last_yaw
 
         if closest_obj_id is not None:
             for obj in self.object_list:
