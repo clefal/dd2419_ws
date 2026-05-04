@@ -226,7 +226,6 @@ class Odometry(Node):
 
         # Publish both odom trees at IMU rate so scan-timestamped TF lookups do not
         # outrun the latest encoder-stamped odom_temp sample between encoder updates.
-        # self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, False)
 
 
     def encoder_callback(self, msg: Encoders):
@@ -249,7 +248,7 @@ class Odometry(Node):
                 self._have_encoders = True
                 self._last_imu_t = stamp_to_sec(msg.header.stamp)
 
-            self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, True)
+            self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
             self.publish_path(msg.header.stamp, self._x, self._y, self._yaw)
             return
 
@@ -284,32 +283,13 @@ class Odometry(Node):
 
         # Publish TF
         stamp = msg.header.stamp
-        self.broadcast_transform(stamp, self._x, self._y, self._yaw, True)
+        self.broadcast_transform(stamp, self._x, self._y, self._yaw)
 
         # Path at encoder rate
         self.publish_path(stamp, self._x, self._y, self._yaw)
 
-    def broadcast_transform(self, stamp, x, y, yaw, temp=False):
-        #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
-        tfs: List[TransformStamped] = []
+    def broadcast_transform(self, stamp, x, y, yaw):
         q = quaternion_from_euler(0.0, 0.0, yaw)
-
-        # Temporary odom frame
-        if temp:
-            t_temp = TransformStamped()
-            t_temp.header.stamp = stamp
-            t_temp.header.frame_id = 'odom_temp'
-            t_temp.child_frame_id = 'base_link_temp'
-
-            t_temp.transform.translation.x = x
-            t_temp.transform.translation.y = y
-            t_temp.transform.translation.z = 0.0
-
-            t_temp.transform.rotation.x = q[0]
-            t_temp.transform.rotation.y = q[1]
-            t_temp.transform.rotation.z = q[2]
-            t_temp.transform.rotation.w = q[3]
-            tfs.append(t_temp)
 
 
         t = TransformStamped()
@@ -325,9 +305,8 @@ class Odometry(Node):
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
-        tfs.append(t)
 
-        self._tf_broadcaster.sendTransform(tfs)
+        self._tf_broadcaster.sendTransform(t)
 
     def publish_path(self, stamp, x, y, yaw):
         t = stamp_to_sec(stamp)

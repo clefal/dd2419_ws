@@ -553,11 +553,11 @@ class IcpScanToLine(Node):
         # Debug point cloud topic for publishing stacked scan points used by ICP.
         self.declare_parameter("stacked_points_topic", "/localization/stacked_points")
         # Robot base frame used when composing poses.
-        self.declare_parameter("base_frame", "base_link_temp")
+        self.declare_parameter("base_frame", "base_link")
         # Rigid mount frame used to relate the laser frame to the robot body.
         self.declare_parameter("laser_mount_frame", "base_link")
         # Odometry frame used as the short-term motion prior.
-        self.declare_parameter("odom_frame", "odom_temp")  # changed to odom_temp
+        self.declare_parameter("odom_frame", "odom")  # changed to odom_temp
         # Global frame where the line map is expressed.
         self.declare_parameter("map_frame", "map")
 
