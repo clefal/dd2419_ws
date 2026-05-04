@@ -1,3 +1,5 @@
+from enum import Enum
+
 import cv2
 import numpy as np
 import rclpy
@@ -9,7 +11,7 @@ import colour as co
 from std_msgs.msg import String
 
 MIN_CONTOUR_AREA = 450.0
-MIN_HOLDING_WIDTH = 130
+MIN_HOLDING_SIZE = 130.0
 HOLDING_TIMEOUT_SEC = 2.0
 
 #TOPICS
@@ -19,6 +21,12 @@ DEBUG_IMAGE_TOPIC = '/arm/vision/debug_image'
 MASK_TOPIC_TEMPLATE = '/arm/vision/{color}_mask'
 HOLDING_CHECK_TOPIC = '/arm/vision/holding_check'
 HOLDING_ANSWER_TOPIC = '/arm/vision/holding_answer'
+ACTION_TOPIC = '/arm/action'
+RESULT_TOPIC = '/arm/result'
+
+#Pick up messages
+PICK_UP_START_MSG = 'PICK_UP'
+PICK_UP_END_MSGS = ['PICK_UP_SUCCSESS', 'PICK_UP_FAIL_NO_IDLE', 'PICK_UP_FAIL_NO_HOLDING', 'PICK_UP_FAIL_NO_DETECTION', 'PICK_UP_FAIL_OUT_OF_REACH']    
 
 #Holding messages
 CHECK_HOLDING_MSG = 'CHECK_HOLDING'
@@ -58,12 +66,16 @@ CANNY_THRESH = {
     'high': 80,
 }
 
+class State(Enum):
+    CHECK_HOLDING = 'CHECK_HOLDING'
+    DETECT_CUBES = 'DETECT_CUBES'
+    IDLE = 'IDLE'
+
 class ArmVisionNode(Node):
     def __init__(self):
         super().__init__('arm_vision')
 
-        self.holding = False
-
+        self.state = State.IDLE
         self.smoothed_angles = {color: None for color in ARM_COLORS_RGB}
 
         self.bridge = CvBridge()
@@ -99,33 +111,46 @@ class ArmVisionNode(Node):
 
         self.holding_pub = self.create_publisher(String, HOLDING_ANSWER_TOPIC, 10)
         self.create_subscription(String, HOLDING_CHECK_TOPIC, self.holding_callback, 10)
+        self.create_subscription(String, ACTION_TOPIC, self.initialize_callback, 10)
+        self.create_subscription(String, RESULT_TOPIC, self.terminate_callback, 10)
+
+    def initialize_callback(self, msg):
+        if msg.data.strip().upper() == PICK_UP_START_MSG:
+            self.state = State.DETECT_CUBES
+
+    def terminate_callback(self, msg):
+        if msg.data.strip().upper() in PICK_UP_END_MSGS:
+            self.state = State.IDLE
 
     def holding_callback(self, msg):
         if msg.data == CHECK_HOLDING_MSG:
-            self.holding = True
+            self.state = State.CHECK_HOLDING
             self.holding_timer = self.create_timer(
                 HOLDING_TIMEOUT_SEC, self._holding_timeout
             )
 
     def _holding_timeout(self):
-        if self.holding:
+        if self.state == State.CHECK_HOLDING:
             result = String()
             result.data = HOLDING_FAIL_MSG
             self.holding_pub.publish(result)
-            self.holding = False
+            self.state = State.IDLE
 
         if self.holding_timer is not None:
             self.holding_timer.cancel()
             self.holding_timer = None
 
     def image_callback_color(self, msg: Image):
+        if self.state == State.IDLE:
+            return
+
         frame = self._ros_image_to_bgr(msg)
         if frame is None:
             return
 
-        if self.holding:
+        if self.state == State.CHECK_HOLDING:
             h, w = frame.shape[:2]
-            frame = frame[h // 2:, int(w * 0.3):int(w * 0.8)]
+            frame = frame[h // 2:, int(w * 0.2):int(w * 0.8)]
 
         if DEBUG_COLOR_PICKER_ENABLED:
             cv2.imshow("debug", frame)
@@ -157,12 +182,13 @@ class ArmVisionNode(Node):
 
             detections.append({'detection': detection, 'color': color_name, 'confidence': detection['confidence']})
 
-            if self.holding:
-                if detection['box_w'] >= MIN_HOLDING_WIDTH:
+            if self.state == State.CHECK_HOLDING:
+                box_size = max(detection['box_w'], detection['box_h'])
+                if box_size >= MIN_HOLDING_SIZE:
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG
                     self.holding_pub.publish(msg)
-                    self.holding = False
+                    self.state = State.IDLE
 
         if detections:
             best = max(detections, key=lambda x: x['confidence'])
@@ -270,7 +296,8 @@ class ArmVisionNode(Node):
             'mask': mask,
             'center': center,
             'bbox': cv2.boundingRect(largest_contour),  
-            'box_w': box_w,          
+            'box_w': box_w, 
+            'box_h': box_h,
             'angle': angle,          
             'box_points': box_points, 
             'edges': edges,

@@ -288,7 +288,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
         if not trigger_ready:
             if self.publish_wait_debug:
                 stacked_wait = self.build_accumulated_points(T_odom_laser)
-                self.publish_stacked_points_in_map(stacked_wait, T_map_laser_init, stamp)
+                # self.publish_stacked_points_in_map(stacked_wait, T_map_laser_init, stamp)
             self.publish_map_lines_markers(stamp)
             self.publish_map_to_odom(stamp)
             self.restart_map_to_odom_republish_timer(stamp)
@@ -303,7 +303,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
 
         if not self.initialized or len(self.map_lines) < self.init_min_lines:
             scans_used_for_init = len(self.accumulated_scans)
-            self.publish_stacked_points_in_map(stacked_points_laser, T_map_laser_init, stamp)
+            # self.publish_stacked_points_in_map(stacked_points_laser, T_map_laser_init, stamp)
             candidate_lines = self.build_lines_from_scan(stacked_points_laser, T_map_laser_init)
             if not self.has_initialization_geometry(candidate_lines):
                 self.get_logger().info(
@@ -356,7 +356,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             max_step_rotation_deg=self.icp_accept_max_rotation_deg,
             line_cache=self.line_map_cache,
         )
-        self.publish_stacked_points_in_map(stacked_points_laser, result.T, stamp)
+        # self.publish_stacked_points_in_map(stacked_points_laser, result.T, stamp)
 
         accepted = self.accept_icp_result(T_map_laser_init, result)
 

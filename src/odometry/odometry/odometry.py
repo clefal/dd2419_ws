@@ -235,7 +235,7 @@ class Odometry(Node):
         lag = (now - msg_time).nanoseconds * 1e-9
 
         if lag > 0.05:
-            self.get_logger().info(f"Encoder callback lag: {lag:.3f} s")
+            self.get_logger().warn(f"Encoder callback lag: {lag:.3f} s")
 
         encoder_left = msg.encoder_left
         encoder_right = msg.encoder_right

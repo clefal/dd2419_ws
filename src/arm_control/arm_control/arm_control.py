@@ -7,7 +7,7 @@ import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from robp_interfaces.msg import ArmControl
+from robp_interfaces.msg import ArmControl, ArmFeedback
 from std_msgs.msg import Int32MultiArray
 from std_msgs.msg import String
 
@@ -47,32 +47,37 @@ VISION_TOPIC = '/arm/vision/cube_center'
 ACTION_TOPIC = '/arm/action'
 RESULT_TOPIC = '/arm/result'
 CONTROL_TOPIC = '/arm/control'
+FEEDBACK_TOPIC = '/arm/feedback'
+
+FEEDBACK_ERROR_TOLERANCE = 10.0  #Prob needs tuning 
 
 CONTROL_RATE_HZ = 10.0
 
-TARGET_PIXEL_X = 310
-TARGET_PIXEL_Y = 420 #400
+TARGET_PIXEL_X = 300
+TARGET_PIXEL_Y = 400 #400
 LARGEST_START_PIXEL_Y = 410
-SMALLEST_START_PIXEL_Y = 280
+SMALLEST_START_PIXEL_Y = 190
 
-ALIGN_X_TOLERANCE = 15  #25
-ALIGN_Y_TOLERANCE = 15
+ALIGN_X_TOLERANCE = 30  #25
+ALIGN_Y_TOLERANCE = 20
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
-MAX_RHO_STEP_MM = 6.0
+MAX_RHO_STEP_MM = 5.0 #4.0
 MAX_ALPHA_STEP_DEG = 1.0    #2.0
 
 DESCENT_STEP_MM = 10.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
-START_PICKUP_Z = IDLE_Z - 55.0  # higher starting point
-ALIGNMENT_Z = FINAL_PICKUP_Z + 20.0  # stop aligning below this Z to avoid vision issues
+START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
+ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
-REQUIRED_DETECTIONS = 4 #3
-STABLE_X_TOLERANCE = 5
-STABLE_Y_TOLERANCE = 5
+REQUIRED_DETECTIONS = 7 #3
+STABLE_X_TOLERANCE = 10
+STABLE_Y_TOLERANCE = 10
 
 VISION_TIMEOUT_SEC = 2.0 #1 
+
+PICKUP_TIMEOUT_SEC = 20.0
 
 
 #DEBUG:
@@ -105,6 +110,7 @@ class Result(Enum):
     PICK_UP_FAIL_NO_HOLDING = 'PICK_UP_FAIL_NO_HOLDING'
     PICK_UP_FAIL_NO_DETECTION = 'PICK_UP_FAIL_NO_DETECTION'
     PICK_UP_FAIL_OUT_OF_REACH = 'PICK_UP_FAIL_OUT_OF_REACH'
+    PICK_UP_FAIL_TIMEOUT = 'PICK_UP_FAIL_TIMEOUT'
     DROP_FAIL_NO_OBJECT = 'DROP_FAIL_NO_OBJECT'
 
 @dataclass
@@ -118,9 +124,12 @@ class ArmControlNode(Node):
         super().__init__('arm_control')
 
         self.state = State.START
+        self.old_position = [float(value) for value in INITIAL_POSITION]
         self.position = [float(value) for value in INITIAL_POSITION]
         self.new_position = self.position.copy()
         self.motion_complete_time = self.get_clock().now()
+
+        self.feedback_positions = [None] * 6
 
         self.current_target_rho = None
         self.current_target_alpha = None
@@ -133,13 +142,13 @@ class ArmControlNode(Node):
 
         self.is_initial_out_of_reach_check_done = False
 
-        qos = QoSProfile(
-            depth=10,
-            reliability=ReliabilityPolicy.RELIABLE 
-        )
+        # qos = QoSProfile(
+        #     depth=10,
+        #     reliability=ReliabilityPolicy.RELIABLE 
+        # )
 
         #Publishers
-        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, qos)
+        self.control_pub = self.create_publisher(ArmControl, CONTROL_TOPIC, 10)
         self.result_pub = self.create_publisher(String, RESULT_TOPIC, 10)
         self.holding_pub = self.create_publisher(String, HOLDING_CHECK_TOPIC, 10)
 
@@ -147,6 +156,7 @@ class ArmControlNode(Node):
         self.create_subscription(String, HOLDING_ANSWER_TOPIC, self.holding_answer_callback, 10)
         self.create_subscription(String, ACTION_TOPIC, self.action_callback, 10)
         self.create_subscription(Int32MultiArray, VISION_TOPIC, self.vision_callback, 10)
+        self.sub = self.create_subscription(ArmFeedback, FEEDBACK_TOPIC, self.feedback_callback, 10)
 
         #Control timer
         self.control_timer = self.create_timer(1.0 / CONTROL_RATE_HZ, self.control_loop)
@@ -171,18 +181,44 @@ class ArmControlNode(Node):
             elif command == 'DROP':
                 self.handle_drop_command()
 
+    def pickup_timeout(self):
+        if self.state in [State.ALIGNING]:
+            self.publish_result(Result.PICK_UP_FAIL_TIMEOUT)
+            self.transition_to(State.RETURN_TO_IDLE)
+
+        if self.pickup_timer is not None:
+            self.pickup_timer.cancel()
+            self.pickup_timer = None
+
     def control_loop(self):
         if self.is_motion_active():
             return
         
-        if self.state == State.MOVING_TO_START_SAFE or self.state == State.RETURN_TO_IDLE:
+        if self.state == State.MOVING_TO_START_SAFE:
+            if self.at_target():
+                self.command_named_pose(IDLE_POSE)
+                self.transition_to(State.MOVING_TO_IDLE)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.START)
+                self.handle_start_command()
+            return
+        
+        if self.state == State.RETURN_TO_IDLE:
+            if self.pickup_timer is not None:
+                self.pickup_timer.cancel()
+                self.pickup_timer = None
             self.command_named_pose(IDLE_POSE)
             self.transition_to(State.MOVING_TO_IDLE)
             return
 
         if self.state == State.MOVING_TO_IDLE:
-            self.transition_to(State.IDLE)
-            self.publish_result(Result.IDLE_SUCCESS)
+            if self.at_target():
+                self.transition_to(State.IDLE)
+                self.publish_result(Result.IDLE_SUCCESS)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.RETURN_TO_IDLE)
             return
 
         if self.state == State.MOVING_TO_OBSERVE:
@@ -194,6 +230,9 @@ class ArmControlNode(Node):
             return
         
         if self.state == State.CLOSING_GRIPPER:
+            if self.pickup_timer is not None:
+                self.pickup_timer.cancel()
+                self.pickup_timer = None
             self.command_named_pose(LIFTING_POSE)
             self.transition_to(State.LIFTING)
             return
@@ -211,8 +250,13 @@ class ArmControlNode(Node):
             return
 
         if self.state == State.MOVING_TO_DROP:
-            self.command_gripper(OPEN_GRIPPER_ANGLE)
-            self.transition_to(State.OPENING_FOR_DROP)
+            if self.at_target():
+                self.command_gripper(OPEN_GRIPPER_ANGLE)
+                self.transition_to(State.OPENING_FOR_DROP)
+            else:
+                self.position = self.feedback_positions.copy()
+                self.transition_to(State.HOLDING)
+                self.handle_drop_command()
             return
 
         if self.state == State.OPENING_FOR_DROP:
@@ -233,6 +277,10 @@ class ArmControlNode(Node):
         if self.state != State.IDLE:
             self.publish_result(Result.PICK_UP_FAIL_NO_IDLE)
             return
+        
+        self.pickup_timer = self.create_timer(
+            PICKUP_TIMEOUT_SEC, self.pickup_timeout
+        )
 
         self.command_observe_pose()
         self.transition_to(State.MOVING_TO_OBSERVE)
@@ -245,7 +293,6 @@ class ArmControlNode(Node):
         self.command_named_pose(DROP_POSE)
         self.transition_to(State.MOVING_TO_DROP)
 
-    #TODO: rotation
     def vision_callback(self, msg: Int32MultiArray):
         if len(msg.data) < 2:
             return
@@ -316,6 +363,10 @@ class ArmControlNode(Node):
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_NO_DETECTION)
             return
+        
+        self.get_logger().info(
+            f'Using stable detection: x={detection.center_x} y={detection.center_y} angle={detection.angle}'
+        )
 
         error_x = TARGET_PIXEL_X - detection.center_x
         error_y = TARGET_PIXEL_Y - detection.center_y
@@ -357,8 +408,12 @@ class ArmControlNode(Node):
                 new_z = self.current_target_z
                 scale = max(0.4, self.current_target_z/ IDLE_Z)
                 pixel_to_mm = PIXEL_TO_MM * scale
-                delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
-                delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                delta_rho = 0.0
+                delta_alpha = 0.0
+                if abs(error_x) > ALIGN_X_TOLERANCE:
+                    delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                if abs(error_y) > ALIGN_Y_TOLERANCE:
+                    delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
                 rho = self.current_target_rho + delta_rho
                 alpha = self.current_target_alpha + delta_alpha
 
@@ -370,6 +425,7 @@ class ArmControlNode(Node):
                 wrist_angle=angle
             )
         except ValueError as exc:
+            self.get_logger().warn(f'Alignment error: {exc}')
             if self.current_target_z > FINAL_PICKUP_Z:
                 # If joint limits reached at high Z, descend and try again at lower height
                 fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
@@ -379,7 +435,8 @@ class ArmControlNode(Node):
                         alpha_deg=self.current_target_alpha,
                         z=fallback_z
                     )
-                except ValueError:
+                except ValueError as exc:
+                    self.get_logger().warn(f'Fallback alignment error: {exc}')
                     self.transition_to(State.RETURN_TO_IDLE)
                     self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
             else:
@@ -394,6 +451,7 @@ class ArmControlNode(Node):
         msg.time = self.compute_move_times(self.position, self.new_position)
         self.control_pub.publish(msg)
 
+        self.old_position = self.position.copy()
         self.position = self.new_position.copy()
         max_move_time_ms = max(msg.time) if len(msg.time) > 0 else MIN_TIME_MS
         self.motion_complete_time = self.get_clock().now() + Duration(seconds=max_move_time_ms / 1000.0)
@@ -407,7 +465,6 @@ class ArmControlNode(Node):
             move_times.append(move_time)
         return move_times
 
-    #TODO: add rotation 
     def get_stable_detection(self):
         if len(self.detection_history) < REQUIRED_DETECTIONS:
             return None
@@ -416,19 +473,17 @@ class ArmControlNode(Node):
         ys = [d.center_y for d in self.detection_history]
         angles = [d.angle for d in self.detection_history]
 
-        if max(xs) - min(xs) > STABLE_X_TOLERANCE:
+        sorted_xs = sorted(xs)
+        sorted_ys = sorted(ys)
+        if sorted_xs[-2] - sorted_xs[1] > STABLE_X_TOLERANCE:
             return None
-        if max(ys) - min(ys) > STABLE_Y_TOLERANCE:
+        if sorted_ys[-2] - sorted_ys[1] > STABLE_Y_TOLERANCE:
             return None
 
-
-        center_x = sum(xs) // len(xs)
-        center_y = sum(ys) // len(ys)
-        angle = sum(angles) // len(angles)
-
-        self.get_logger().info(
-            f'Stable detection: x={center_x} y={center_y} angle={angle}'
-        )
+        #use median instead of mean to be more robust to outliers
+        center_x = sorted_xs[len(sorted_xs) // 2]
+        center_y = sorted_ys[len(sorted_ys) // 2]
+        angle = sorted(angles)[len(angles) // 2]
 
         return VisionDetection(
             center_x=center_x,
@@ -457,6 +512,17 @@ class ArmControlNode(Node):
         msg.data = text.value
         self.result_pub.publish(msg)
         self.get_logger().info(f'Arm result: {text.value}')
+
+    def feedback_callback(self, msg: ArmFeedback):
+        if self.state not in [State.MOVING_TO_IDLE, State.MOVING_TO_START_SAFE, State.MOVING_TO_DROP]:
+            return
+        self.feedback_positions = msg.position
+
+    def at_target(self, tolerance: float = FEEDBACK_ERROR_TOLERANCE) -> bool:
+        return all(
+            abs(pos - feedback_pos) < tolerance
+            for pos, feedback_pos in zip(self.position, self.feedback_positions)
+        )
 
 def main():
     rclpy.init()
