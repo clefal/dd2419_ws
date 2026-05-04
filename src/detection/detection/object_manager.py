@@ -75,7 +75,7 @@ class ObjectManager(Node):
         #self.create_timer(2,self.debugging_msg)
         self.similarity_threshold = 0.3 # distance of detections that are combined into one object
         self.box_similarity_threshold = 0.45 # boxes are larger, so allow looser box-to-box/map-box matching
-        self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
+        self.cube_box_exclusion_threshold = 0.3 # reject cube detections that are too close to a box
         self.output_map_min_confidence = 4 # only export objects that have been seen at least this many extra times
 
 # ----------------------------------
