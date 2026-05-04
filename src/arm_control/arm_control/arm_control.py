@@ -71,7 +71,7 @@ START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
 ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
 
 #STABLE DETECTION PARAMETERS
-REQUIRED_DETECTIONS = 5 #3
+REQUIRED_DETECTIONS = 7 #3
 STABLE_X_TOLERANCE = 10
 STABLE_Y_TOLERANCE = 10
 
@@ -474,11 +474,6 @@ class ArmControlNode(Node):
         if sorted_xs[-2] - sorted_xs[1] > STABLE_X_TOLERANCE:
             return None
         if sorted_ys[-2] - sorted_ys[1] > STABLE_Y_TOLERANCE:
-            return None
-
-        if max(xs) - min(xs) > STABLE_X_TOLERANCE:
-            return None
-        if max(ys) - min(ys) > STABLE_Y_TOLERANCE:
             return None
 
         #use median instead of mean to be more robust to outliers
