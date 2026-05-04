@@ -250,12 +250,14 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
         T_odom_base = self.lookup_T(self.odom_frame, self.base_frame, stamp)
         if T_odom_base is None:
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         laser_frame = scan.header.frame_id
         T_base_laser = self.lookup_T(self.laser_mount_frame, laser_frame, stamp)
         if T_base_laser is None:
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         T_odom_laser = T_odom_base @ T_base_laser
@@ -263,6 +265,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
         _, current_points_laser = self.preprocess_scan(scan)
         if current_points_laser.shape[0] < 20:
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         T_map_laser_init = self.T_map_odom @ T_odom_laser
@@ -271,6 +274,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
             self.reset_accumulation(current_points_laser, T_odom_laser, T_odom_base)
             self.publish_map_lines_markers(stamp)
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         self.accumulated_scans.append(
@@ -287,12 +291,14 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
                 self.publish_stacked_points_in_map(stacked_wait, T_map_laser_init, stamp)
             self.publish_map_lines_markers(stamp)
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         stacked_points_laser = self.build_accumulated_points(T_odom_laser)
         if stacked_points_laser.shape[0] < 20:
             self.reset_accumulation(current_points_laser, T_odom_laser, T_odom_base)
             self.publish_map_to_odom(stamp)
+            self.restart_map_to_odom_republish_timer(stamp)
             return
 
         if not self.initialized or len(self.map_lines) < self.init_min_lines:
@@ -309,6 +315,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
                 )
                 self.continue_accumulation_after_failed_init(T_odom_base)
                 self.publish_map_to_odom(stamp)
+                self.restart_map_to_odom_republish_timer(stamp)
                 self.publish_map_lines_markers(stamp)
                 return
 
@@ -405,6 +412,7 @@ class IcpScanToLineMotionTriggered(IcpScanToLine):
         self.get_logger().info(f"ICP time: {(finish_time - init_time) * 1000.0:.2f}ms")
 
         self.publish_map_to_odom(stamp)
+        self.restart_map_to_odom_republish_timer(stamp)
         self.publish_map_lines_markers(stamp)
         self.reset_accumulation(current_points_laser, T_odom_laser, T_odom_base)
 
