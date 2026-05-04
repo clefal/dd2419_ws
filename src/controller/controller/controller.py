@@ -162,8 +162,8 @@ class Controller(Node):
             out_left = clamp(target_left, self._last_left_cmd - max_delta, self._last_left_cmd + max_delta)
             out_right = clamp(target_right, self._last_right_cmd - max_delta, self._last_right_cmd + max_delta)
 
-        if max(abs(out_left), abs(out_right)) > 0.50:
-            self.get_logger().info(f'High wheel duty: left={out_left:.3f}, right={out_right:.3f}')
+        #if max(abs(out_left), abs(out_right)) > 0.50:
+        #    self.get_logger().info(f'High wheel duty: left={out_left:.3f}, right={out_right:.3f}')
 
         m = DutyCycles()
         m.duty_cycle_left = out_left
