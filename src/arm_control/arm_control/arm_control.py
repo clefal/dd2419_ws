@@ -58,7 +58,7 @@ TARGET_PIXEL_Y = 420 #400
 LARGEST_START_PIXEL_Y = 410
 SMALLEST_START_PIXEL_Y = 190
 
-ALIGN_X_TOLERANCE = 25  #25
+ALIGN_X_TOLERANCE = 30  #25
 ALIGN_Y_TOLERANCE = 20
 PIXEL_TO_MM = 0.22   #0.15
 PIXEL_TO_ALPHA_DEG = 0.055  #0.055
@@ -408,8 +408,12 @@ class ArmControlNode(Node):
                 new_z = self.current_target_z
                 scale = max(0.4, self.current_target_z/ IDLE_Z)
                 pixel_to_mm = PIXEL_TO_MM * scale
-                delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
-                delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                delta_rho = 0.0
+                delta_alpha = 0.0
+                if abs(error_x) > ALIGN_X_TOLERANCE:
+                    delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                if abs(error_y) > ALIGN_Y_TOLERANCE:
+                    delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
                 rho = self.current_target_rho + delta_rho
                 alpha = self.current_target_alpha + delta_alpha
 
@@ -421,7 +425,7 @@ class ArmControlNode(Node):
                 wrist_angle=angle
             )
         except ValueError as exc:
-            #self.get_logger().warn(f'Alignment error: {exc}')
+            self.get_logger().warn(f'Alignment error: {exc}')
             if self.current_target_z > FINAL_PICKUP_Z:
                 # If joint limits reached at high Z, descend and try again at lower height
                 fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
@@ -431,7 +435,8 @@ class ArmControlNode(Node):
                         alpha_deg=self.current_target_alpha,
                         z=fallback_z
                     )
-                except ValueError:
+                except ValueError as exc:
+                    self.get_logger().warn(f'Fallback alignment error: {exc}')
                     self.transition_to(State.RETURN_TO_IDLE)
                     self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
             else:
