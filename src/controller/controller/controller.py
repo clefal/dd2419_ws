@@ -67,6 +67,7 @@ class Controller(Node):
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._turn_recovery_logged = False
         self._final_target_behind_logged = False
         self._last_tf_stale_log_wall = 0.0
 
@@ -93,6 +94,7 @@ class Controller(Node):
 
         self.declare_parameter('min_linear_speed', 0.1)         # duty-equivalent (keep > deadzone margin)
         self.declare_parameter('turn_gain', 0.2)                # duty-per-rad for in-place turning
+        self.declare_parameter('turn_recovery_yaw_thresh', 2.1) # rad, turn in place if lookahead is far behind
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
         self.declare_parameter('tf_staleness_warn_s', 0.08)     # s
@@ -213,6 +215,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._turn_recovery_logged = False
             self._final_target_behind_logged = False
             self.publish_status('FAILED')
             return
@@ -222,6 +225,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._turn_recovery_logged = False
             self._final_target_behind_logged = False
             self.publish_status('IDLE')
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
@@ -230,6 +234,7 @@ class Controller(Node):
         self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
         self._start_alignment_pending = True
         self._start_turn_logged = False
+        self._turn_recovery_logged = False
         self._final_target_behind_logged = False
 
         # Final yaw (planner now provides orientation)
@@ -258,6 +263,7 @@ class Controller(Node):
         self._goal_yaw = None
         self._start_alignment_pending = False
         self._start_turn_logged = False
+        self._turn_recovery_logged = False
         self._final_target_behind_logged = False
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
@@ -271,6 +277,7 @@ class Controller(Node):
             self._goal_yaw = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._turn_recovery_logged = False
             self._final_target_xy = None
             self._final_target_last_seen_wall = None
             self._final_target_request_pending = False
@@ -281,6 +288,7 @@ class Controller(Node):
             self.stop()
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._turn_recovery_logged = False
             self._final_target_request_pending = False
             #self.get_logger().info('Final approach disabled.')
 
@@ -564,6 +572,7 @@ class Controller(Node):
             if start_heading is None:
                 self._start_alignment_pending = False
                 self._start_turn_logged = False
+                self._turn_recovery_logged = False
             else:
                 yaw_err = wrap_angle(start_heading - ryaw)
                 if abs(yaw_err) > self._turn_in_place_yaw_thresh:
@@ -581,6 +590,7 @@ class Controller(Node):
 
                 self._start_alignment_pending = False
                 self._start_turn_logged = False
+                self._turn_recovery_logged = False
 
         if dist_to_goal <= goal_tol:
             if bool(self.get_parameter('align_final_yaw').value) and (self._goal_yaw is not None):
@@ -591,6 +601,7 @@ class Controller(Node):
                     self._path_xy = []
                     self._start_alignment_pending = False
                     self._start_turn_logged = False
+                    self._turn_recovery_logged = False
                     self._final_target_behind_logged = False
                     return
 
@@ -607,6 +618,7 @@ class Controller(Node):
             self._path_xy = []
             self._start_alignment_pending = False
             self._start_turn_logged = False
+            self._turn_recovery_logged = False
             self._final_target_behind_logged = False
             return
 
@@ -628,6 +640,24 @@ class Controller(Node):
         x_r = cos_y * dx + sin_y * dy
         y_r = -sin_y * dx + cos_y * dy
 
+        yaw_err = wrap_angle(math.atan2(dy, dx) - ryaw)
+        turn_recovery_thresh = float(self.get_parameter('turn_recovery_yaw_thresh').value)
+        if abs(yaw_err) > turn_recovery_thresh:
+            if not self._turn_recovery_logged:
+                self.get_logger().warn(
+                    f'Lookahead target is far behind heading; turning in place (yaw_err={yaw_err:.2f} rad).'
+                )
+                self._turn_recovery_logged = True
+
+            wmax = float(self.get_parameter('max_angular_speed').value)
+            k_turn = float(self.get_parameter('turn_gain').value)
+            w = clamp(k_turn * yaw_err, -wmax, wmax)
+            left, right = self.enforce_motor_deadzone_pair(-w, w, self._dc_min)
+            self.send_duty(left, right)
+            return
+
+        self._turn_recovery_logged = False
+
         is_final_target = (tgt[2] >= len(self._path_xy) - 1)
         if is_final_target and x_r < 0.0:
             if not self._final_target_behind_logged:
@@ -636,7 +666,6 @@ class Controller(Node):
                 )
                 self._final_target_behind_logged = True
 
-            yaw_err = wrap_angle(math.atan2(dy, dx) - ryaw)
             wmax = float(self.get_parameter('max_angular_speed').value)
             k_turn = float(self.get_parameter('turn_gain').value)
             w = clamp(k_turn * yaw_err, -wmax, wmax)
