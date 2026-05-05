@@ -80,7 +80,7 @@ class Odometry(Node):
         self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
         sensor_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
-            depth=1,
+            depth=5,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         # Subscriptions
