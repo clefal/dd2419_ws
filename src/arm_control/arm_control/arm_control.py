@@ -189,6 +189,7 @@ class ArmControlNode(Node):
 
     def pickup_timeout(self):
         if self.state in [State.ALIGNING]:
+            self.pickup_height_index = 0
             self.publish_result(Result.PICK_UP_FAIL_TIMEOUT)
             self.transition_to(State.RETURN_TO_IDLE)
 
