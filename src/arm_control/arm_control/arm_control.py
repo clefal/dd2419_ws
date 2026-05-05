@@ -411,8 +411,10 @@ class ArmControlNode(Node):
                 delta_alpha = 0.0
                 if abs(error_x) > ALIGN_X_TOLERANCE:
                     delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
+                    self.get_logger().info(f'error_x: {error_x}, delta_alpha: {delta_alpha}')
                 if abs(error_y) > ALIGN_Y_TOLERANCE:
                     delta_rho = self.clamp_step(error_y * PIXEL_TO_MM, MAX_RHO_STEP_MM)
+                    self.get_logger().info(f'error_y: {error_y}, delta_rho: {delta_rho}')
                 rho = self.current_target_rho + delta_rho
                 alpha = self.current_target_alpha + delta_alpha
         elif self.pickup_height_index == 3:
