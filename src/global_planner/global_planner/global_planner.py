@@ -39,7 +39,7 @@ class GlobalPlannerNode(Node):
         self.declare_parameter("path_smoothing_enabled", True)
         self.declare_parameter("path_smoothing_max_shortcut_m", 0.1)
         self.declare_parameter("workspace_border_width", 0.01)
-        self.declare_parameter("coarse_object_standoff", 0.50)
+        self.declare_parameter("coarse_object_standoff", 0.60)
         self.declare_parameter("robot_radius", 0.02)
         self.declare_parameter("inflation_margin", 0.01)
         self.declare_parameter("soft_halo_m", 0.40)
