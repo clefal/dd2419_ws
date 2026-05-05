@@ -87,7 +87,7 @@ class Controller(Node):
         self.declare_parameter('lookahead_distance', 0.22)        # m
         self.declare_parameter('nominal_linear_speed', 0.30)    # default slower for path tracking 0.25
         self.declare_parameter('max_angular_speed', 0.18)        # cap turning a bit more conservatively 0.15
-        self.declare_parameter('goal_tolerance', 0.1)  #0.08        # m
+        self.declare_parameter('goal_tolerance', 0.12)  #0.08        # m
         self.declare_parameter('align_final_yaw', True)
         self.declare_parameter('steering_gain', 0.06) #0.35
 
@@ -130,6 +130,7 @@ class Controller(Node):
         self._backup_start_xy = None
         self._backup_duty = 0.12
         self._backup_direction = -1.0
+        self._backup_reverse_right_boost = 1.1
 
         self._final_controller = FinalApproachController(
             nominal_speed=float(self.get_parameter('final_nominal_speed').value),
@@ -471,7 +472,11 @@ class Controller(Node):
                 return
 
             drive_duty = self._backup_direction * self._backup_duty
-            left, right = self.enforce_motor_deadzone_pair(drive_duty, drive_duty, self._dc_min)
+            left = drive_duty
+            right = drive_duty
+            if self._backup_direction < 0.0:
+                right *= self._backup_reverse_right_boost
+            left, right = self.enforce_motor_deadzone_pair(left, right, self._dc_min)
             self.send_duty(left, right)
             return
 
