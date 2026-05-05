@@ -587,9 +587,9 @@ class IcpScanToLine(Node):
         # Huber loss transition point; larger residuals are down-weighted.
         self.declare_parameter("icp_huber_delta", 0.05)
         # Maximum translation correction allowed relative to the odometry-based initial guess.
-        self.declare_parameter("icp_accept_max_translation", 0.50)
+        self.declare_parameter("icp_accept_max_translation", 0.30)
         # Maximum rotation correction allowed relative to the odometry-based initial guess.
-        self.declare_parameter("icp_accept_max_rotation_deg", 30.0)
+        self.declare_parameter("icp_accept_max_rotation_deg", 15.0)
         # Reject ICP if the median absolute residual is above this threshold.
         self.declare_parameter("icp_accept_max_median_residual", 0.08)
         # Reject ICP if the mean absolute residual is above this threshold.
@@ -702,7 +702,7 @@ class IcpScanToLine(Node):
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
         )
         self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, scan_qos)
-        self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 1)
+        self.create_subscription(Bool, self.is_turning_topic, self.is_turning_callback, 10)
         self.map_lines_pub = self.create_publisher(MarkerArray, self.map_lines_topic, 1)
         self.stacked_points_pub = self.create_publisher(PointCloud2, self.stacked_points_topic, 1)
 
