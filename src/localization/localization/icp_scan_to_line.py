@@ -587,9 +587,9 @@ class IcpScanToLine(Node):
         # Huber loss transition point; larger residuals are down-weighted.
         self.declare_parameter("icp_huber_delta", 0.05)
         # Maximum translation correction allowed relative to the odometry-based initial guess.
-        self.declare_parameter("icp_accept_max_translation", 0.30)
+        self.declare_parameter("icp_accept_max_translation", 0.20)
         # Maximum rotation correction allowed relative to the odometry-based initial guess.
-        self.declare_parameter("icp_accept_max_rotation_deg", 15.0)
+        self.declare_parameter("icp_accept_max_rotation_deg", 10.0)
         # Reject ICP if the median absolute residual is above this threshold.
         self.declare_parameter("icp_accept_max_median_residual", 0.08)
         # Reject ICP if the mean absolute residual is above this threshold.
