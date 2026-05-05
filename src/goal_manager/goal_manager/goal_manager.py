@@ -222,22 +222,22 @@ class GoalManager(Node):
             elif not self.manual_goal and self._state == AutoState.SNOWPLOW_FORWARD:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Snowplow forward push complete. Reversing out.')
+                    self._state = AutoState.SNOWPLOW_BACKWARD
+                    self.publish_backup_distance(0.035)
                 else:
                     self.get_logger().warn(
                         f'Snowplow forward push ended with status={msg.data}. Reversing out anyway.'
                     )
-                self._state = AutoState.SNOWPLOW_BACKWARD
-                self.publish_backup_distance(0.035)
             elif not self.manual_goal and self._state == AutoState.SNOWPLOW_BACKWARD:
                 if msg.data == 'REACHED':
                     self.get_logger().info('Snowplow maneuver complete. Restarting normal pickup sequence.')
+                    self.publish_arm_status('PICK_UP')
+                    self._state = AutoState.WAIT_PICKUP_RESULT
                 else:
                     self.get_logger().warn(
                         f'Snowplow reverse ended with status={msg.data}. Trying pickup sequence anyway.'
                     )
                 
-                    self.publish_arm_status('PICK_UP')
-                    self._state = AutoState.WAIT_PICKUP_RESULT
 
     # ----------------------------
 
