@@ -55,8 +55,8 @@ CONTROL_RATE_HZ = 10.0
 
 TARGET_PIXEL_X = 300
 TARGET_PIXEL_Y = 410 #400
-LARGEST_START_PIXEL_Y = 430
-SMALLEST_START_PIXEL_Y = 190
+LARGEST_START_PIXEL_Y = 420
+SMALLEST_START_PIXEL_Y = 250
 
 ALIGN_X_TOLERANCE = 30  #25
 ALIGN_Y_TOLERANCE = 20
@@ -69,6 +69,9 @@ DESCENT_STEP_MM = 10.0
 FINAL_PICKUP_Z = DEFAULT_PICKUP_Z   #  current low value
 START_PICKUP_Z = IDLE_Z - 50.0  # higher starting point
 ALIGNMENT_Z = FINAL_PICKUP_Z + 5.0  # stop aligning below this Z to avoid vision issues
+
+# Inital look, high align, low align, rotate gripper, close gripper. 
+PICKUP_HEIGHTS = [65.0, 40.0, 20.0, 15.0, 10.0]
 
 #STABLE DETECTION PARAMETERS
 REQUIRED_DETECTIONS = 7 #3
@@ -100,6 +103,7 @@ class State(Enum):
     PICK_UP_TO_IDLE = 'PICK_UP_TO_IDLE'
     WAITING_FOR_HOLD_CONFIRM = 'WAITING_FOR_HOLD_CONFIRM'
     CHECK_HOLDING = 'CHECK_HOLDING'
+    ALIGNMNET_IN_PROGRESS = 'ALIGNMNET_IN_PROGRESS'
 
 class Result(Enum):
     IDLE_SUCCESS = 'IDLE_SUCCESS'
@@ -141,6 +145,8 @@ class ArmControlNode(Node):
         self.detection_history = deque(maxlen=REQUIRED_DETECTIONS)
 
         self.is_initial_out_of_reach_check_done = False
+
+        self.pickup_height_index = 0
 
         # qos = QoSProfile(
         #     depth=10,
@@ -228,6 +234,7 @@ class ArmControlNode(Node):
 
         if self.state == State.ALIGNING:
             self.update_alignment()
+            self.transition_to(State.ALIGNMNET_IN_PROGRESS)
             return
         
         if self.state == State.CLOSING_GRIPPER:
@@ -357,8 +364,14 @@ class ArmControlNode(Node):
         self.current_target_z = planar_target.z
         self.publish_arm_control(target_position)
 
+#PICKUP_HEIGHTS = [65.0, 40.0, 20.0, 15.0, 10.0]
+
     def update_alignment(self):
-        detection = self.get_stable_detection()
+        if self.pickup_height_index == 0:
+            detection = self.get_stable_detection(required_count=10)
+        else:
+            detection = self.get_stable_detection()
+
         if detection is None:
             if self.vision_is_stale():
                 self.transition_to(State.RETURN_TO_IDLE)
@@ -375,48 +388,51 @@ class ArmControlNode(Node):
 
         aligned = abs(error_x) <= ALIGN_X_TOLERANCE and abs(error_y) <= ALIGN_Y_TOLERANCE
 
-        if self.current_target_z == START_PICKUP_Z:
+        if self.pickup_height_index == 0:
             if detection.center_y > LARGEST_START_PIXEL_Y or detection.center_y < SMALLEST_START_PIXEL_Y:
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
                 return
             else:
-                new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                self.pickup_height_index = 1
+                new_z = max(PICKUP_HEIGHTS[len(PICKUP_HEIGHTS) - 1], PICKUP_HEIGHTS[self.pickup_height_index])
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
-
-        elif self.current_target_z <= FINAL_PICKUP_Z:
-            self.command_gripper(CLOSED_GRIPPER_ANGLE)
-            self.transition_to(State.CLOSING_GRIPPER)
-            return
-        elif self.current_target_z <= ALIGNMENT_Z:
-            if not aligned:
-                self.transition_to(State.RETURN_TO_IDLE)
-                self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
-                return
-            else:
-                new_z = FINAL_PICKUP_Z
-                rho = self.current_target_rho
-                alpha = self.current_target_alpha
-                angle = WRIST_BASE_ANGLE + detection.angle
-        else:
-            # Above ALIGNMENT_Z: align step-by-step
+        elif self.pickup_height_index <= 2:
             if aligned:
-                new_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                self.pickup_height_index += 1
+                new_z = max(PICKUP_HEIGHTS[len(PICKUP_HEIGHTS) - 1], PICKUP_HEIGHTS[self.pickup_height_index])
                 rho = self.current_target_rho
                 alpha = self.current_target_alpha
             else:
                 new_z = self.current_target_z
-                scale = max(0.4, self.current_target_z/ IDLE_Z)
-                pixel_to_mm = PIXEL_TO_MM * scale
+                # scale = max(0.4, self.current_target_z/ IDLE_Z)
+                # pixel_to_mm = PIXEL_TO_MM * scale
                 delta_rho = 0.0
                 delta_alpha = 0.0
                 if abs(error_x) > ALIGN_X_TOLERANCE:
                     delta_alpha = self.clamp_step(error_x * PIXEL_TO_ALPHA_DEG, MAX_ALPHA_STEP_DEG)
                 if abs(error_y) > ALIGN_Y_TOLERANCE:
-                    delta_rho = self.clamp_step(error_y * pixel_to_mm, MAX_RHO_STEP_MM)
+                    delta_rho = self.clamp_step(error_y * PIXEL_TO_MM, MAX_RHO_STEP_MM)
                 rho = self.current_target_rho + delta_rho
                 alpha = self.current_target_alpha + delta_alpha
+        elif self.pickup_height_index == 3:
+            if not aligned:
+                self.pickup_height_index = 0
+                self.transition_to(State.RETURN_TO_IDLE)
+                self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
+                return
+            else:
+                self.pickup_height_index = 4
+                new_z = PICKUP_HEIGHTS[self.pickup_height_index]
+                rho = self.current_target_rho
+                alpha = self.current_target_alpha
+                angle = WRIST_BASE_ANGLE + detection.angle
+        elif self.pickup_height_index == 4:
+            self.pickup_height_index = 0
+            self.command_gripper(CLOSED_GRIPPER_ANGLE)
+            self.transition_to(State.CLOSING_GRIPPER)
+            return
 
         try:
             self.command_planar_target(
@@ -425,22 +441,27 @@ class ArmControlNode(Node):
                 z=new_z,
                 wrist_angle=angle
             )
+            self.transition_to(State.ALIGNING)
         except ValueError as exc:
             self.get_logger().warn(f'Alignment error: {exc}')
-            if self.current_target_z > FINAL_PICKUP_Z:
+            if self.pickup_height_index <= 2:
+                self.pickup_height_index += 1
                 # If joint limits reached at high Z, descend and try again at lower height
-                fallback_z = max(FINAL_PICKUP_Z, self.current_target_z - DESCENT_STEP_MM)
+                fallback_z = max(PICKUP_HEIGHTS[3], PICKUP_HEIGHTS[self.pickup_height_index])
                 try:
                     self.command_planar_target(
                         rho=self.current_target_rho,
                         alpha_deg=self.current_target_alpha,
                         z=fallback_z
                     )
+                    self.transition_to(State.ALIGNING)
                 except ValueError as exc:
+                    self.pickup_height_index = 0
                     self.get_logger().warn(f'Fallback alignment error: {exc}')
                     self.transition_to(State.RETURN_TO_IDLE)
                     self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
             else:
+                self.pickup_height_index = 0
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_OUT_OF_REACH)
 
@@ -466,8 +487,8 @@ class ArmControlNode(Node):
             move_times.append(move_time)
         return move_times
 
-    def get_stable_detection(self):
-        if len(self.detection_history) < REQUIRED_DETECTIONS:
+    def get_stable_detection(self, required_count=REQUIRED_DETECTIONS) -> VisionDetection:
+        if len(self.detection_history) < required_count:
             return None
 
         xs = [d.center_x for d in self.detection_history]
