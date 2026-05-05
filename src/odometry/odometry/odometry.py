@@ -248,7 +248,7 @@ class Odometry(Node):
                 self._have_encoders = True
                 self._last_imu_t = stamp_to_sec(msg.header.stamp)
 
-            self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, True)
+            self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw)
             self.publish_path(msg.header.stamp, self._x, self._y, self._yaw)
             return
 
