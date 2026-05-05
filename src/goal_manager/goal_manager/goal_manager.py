@@ -180,8 +180,8 @@ class GoalManager(Node):
                 if msg.data == 'REACHED':
                     self.get_logger().info('Final object approach reached. Triggering arm pickup.')
                     self.stop_final_approach()
-                    self.publish_arm_status('PICK_UP')
-                    self._state = AutoState.WAIT_PICKUP_RESULT
+                    self._state = AutoState.SNOWPLOW_FORWARD
+                    self.publish_backup_distance(-0.06)
                 else:
                     self.get_logger().warn('Final object approach failed. Returning to search.')
                     self.stop_final_approach()
@@ -235,7 +235,9 @@ class GoalManager(Node):
                     self.get_logger().warn(
                         f'Snowplow reverse ended with status={msg.data}. Trying pickup sequence anyway.'
                     )
-                self._retry_final_object_approach()
+                
+                    self.publish_arm_status('PICK_UP')
+                    self._state = AutoState.WAIT_PICKUP_RESULT
 
     # ----------------------------
 
