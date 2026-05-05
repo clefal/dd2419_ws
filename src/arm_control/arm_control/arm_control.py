@@ -56,7 +56,7 @@ CONTROL_RATE_HZ = 10.0
 TARGET_PIXEL_X = 300
 TARGET_PIXEL_Y = 410 #400
 LARGEST_START_PIXEL_Y = 420
-SMALLEST_START_PIXEL_Y = 250
+SMALLEST_START_PIXEL_Y = 190
 
 ALIGN_X_TOLERANCE = 30  #25
 ALIGN_Y_TOLERANCE = 20
@@ -366,7 +366,7 @@ class ArmControlNode(Node):
 
     def update_alignment(self):
         if self.pickup_height_index == 0:
-            detection = self.get_stable_detection(required_count=10)
+            detection = self.get_stable_detection(required_count=7)
         else:
             detection = self.get_stable_detection()
 
