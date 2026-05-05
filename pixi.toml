@@ -25,6 +25,7 @@ realsense = { cmd = "ros2 launch robp_launch realsense_launch.yaml" }
 driver = { cmd = "ros2 run driver driver" }
 odometry = { cmd = "ros2 run odometry odometry" }
 controller = { cmd = "ros2 run controller controller" }
+gamepad = { cmd = "ros2 launch controller gamepad.launch.py" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
 global_planner = { cmd = "ros2 run global_planner global_planner" }
 callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
@@ -79,6 +80,7 @@ ros-jazzy-rqt-common-plugins = ">=1.2.0,<2"
 ros-jazzy-ros2cli = ">=0.32.7,<0.33"
 ros-jazzy-ros2cli-common-extensions = ">=0.3.1,<0.4"
 ros-jazzy-rosidl-cli = ">=4.6.7,<5"
+ros-jazzy-joy = ">=3.3.0,<4"
 
 # Workspace
 # ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
