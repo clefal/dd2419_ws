@@ -97,7 +97,7 @@ class Controller(Node):
         self.declare_parameter('turn_recovery_yaw_thresh', 2.1) # rad, turn in place if lookahead is far behind
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
-        self.declare_parameter('tf_staleness_warn_s', 0.08)     # s
+        self.declare_parameter('tf_staleness_warn_s', 0.2)     # s
 
         self.declare_parameter('final_nominal_speed', 0.15)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.2)                     # steering gain during close approach
