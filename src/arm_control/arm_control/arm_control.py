@@ -103,7 +103,6 @@ class State(Enum):
     PICK_UP_TO_IDLE = 'PICK_UP_TO_IDLE'
     WAITING_FOR_HOLD_CONFIRM = 'WAITING_FOR_HOLD_CONFIRM'
     CHECK_HOLDING = 'CHECK_HOLDING'
-    ALIGNMNET_IN_PROGRESS = 'ALIGNMNET_IN_PROGRESS'
 
 class Result(Enum):
     IDLE_SUCCESS = 'IDLE_SUCCESS'
@@ -234,7 +233,6 @@ class ArmControlNode(Node):
 
         if self.state == State.ALIGNING:
             self.update_alignment()
-            self.transition_to(State.ALIGNMNET_IN_PROGRESS)
             return
         
         if self.state == State.CLOSING_GRIPPER:
@@ -376,7 +374,6 @@ class ArmControlNode(Node):
             if self.vision_is_stale():
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_NO_DETECTION)
-            self.transition_to(State.ALIGNING)
             return
         
         self.get_logger().info(
@@ -442,7 +439,6 @@ class ArmControlNode(Node):
                 z=new_z,
                 wrist_angle=angle
             )
-            self.transition_to(State.ALIGNING)
         except ValueError as exc:
             self.get_logger().warn(f'Alignment error: {exc}')
             if self.pickup_height_index <= 2:
@@ -455,7 +451,6 @@ class ArmControlNode(Node):
                         alpha_deg=self.current_target_alpha,
                         z=fallback_z
                     )
-                    self.transition_to(State.ALIGNING)
                 except ValueError as exc:
                     self.pickup_height_index = 0
                     self.get_logger().warn(f'Fallback alignment error: {exc}')
