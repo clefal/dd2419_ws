@@ -60,9 +60,10 @@ class Controller(Node):
         self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._fixed_frame = 'map'
+        self._path_frame = 'odom'
         self._base_frame = 'base_link'
 
-        # Latest path (map frame)
+        # Latest coarse path, transformed once into the odom frame.
         self._path_xy = []
         self._goal_yaw = None
         self._start_alignment_pending = False
@@ -183,12 +184,15 @@ class Controller(Node):
     def stop(self):
         self.send_duty(0.0, 0.0)
 
-    def get_pose_2d(self):
+    def get_pose_2d(self, fixed_frame: Optional[str] = None):
+        if fixed_frame is None:
+            fixed_frame = self._fixed_frame
+
         self._last_pose_rejected_stale = False
         try:
-            t = self._tf_buffer.lookup_transform(self._fixed_frame, self._base_frame, rclpy.time.Time())
+            t = self._tf_buffer.lookup_transform(fixed_frame, self._base_frame, rclpy.time.Time())
         except Exception as ex:
-            self.get_logger().warn(f'TF lookup failed ({self._fixed_frame}->{self._base_frame}): {ex}')
+            self.get_logger().warn(f'TF lookup failed ({fixed_frame}->{self._base_frame}): {ex}')
             return None
 
         tf_time = rclpy.time.Time.from_msg(t.header.stamp)
@@ -211,6 +215,20 @@ class Controller(Node):
         q = t.transform.rotation
         yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
         return x, y, yaw
+
+    @staticmethod
+    def transform_xy_yaw(t, x: float, y: float, yaw: float) -> Tuple[float, float, float]:
+        q = t.transform.rotation
+        tf_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        c = math.cos(tf_yaw)
+        s = math.sin(tf_yaw)
+        tx = t.transform.translation.x
+        ty = t.transform.translation.y
+        return (
+            tx + c * x - s * y,
+            ty + s * x + c * y,
+            wrap_angle(tf_yaw + yaw),
+        )
 
     def path_callback(self, msg: Path):
         frame = (msg.header.frame_id or '').strip()
@@ -239,7 +257,32 @@ class Controller(Node):
             self.get_logger().warn('Received empty /nav/global_path. Controller stopping until non-empty path arrives.')
             return
 
-        self._path_xy = [(ps.pose.position.x, ps.pose.position.y) for ps in msg.poses]
+        try:
+            path_tf = self._tf_buffer.lookup_transform(self._path_frame, frame, rclpy.time.Time())
+        except Exception as ex:
+            self._path_xy = []
+            self._goal_yaw = None
+            self._start_alignment_pending = False
+            self._start_turn_logged = False
+            self._turn_recovery_logged = False
+            self._final_target_behind_logged = False
+            self.publish_status('FAILED')
+            self.get_logger().warn(
+                f'Could not transform /nav/global_path from "{frame}" to "{self._path_frame}": {ex}'
+            )
+            return
+
+        path_xy = []
+        for ps in msg.poses:
+            px, py, _ = self.transform_xy_yaw(
+                path_tf,
+                ps.pose.position.x,
+                ps.pose.position.y,
+                0.0,
+            )
+            path_xy.append((px, py))
+
+        self._path_xy = path_xy
         self._start_alignment_pending = True
         self._start_turn_logged = False
         self._turn_recovery_logged = False
@@ -247,7 +290,13 @@ class Controller(Node):
 
         # Final yaw (planner now provides orientation)
         q = msg.poses[-1].pose.orientation
-        self._goal_yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        goal_yaw_map = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
+        _, _, self._goal_yaw = self.transform_xy_yaw(
+            path_tf,
+            msg.poses[-1].pose.position.x,
+            msg.poses[-1].pose.position.y,
+            goal_yaw_map,
+        )
 
         self._final_approach_enabled = False
         self.publish_status('RUNNING')
@@ -255,7 +304,8 @@ class Controller(Node):
         sx, sy = self._path_xy[0]
         gx, gy = self._path_xy[-1]
         self.get_logger().info(
-            f"Received path: {len(msg.poses)} poses, start=({sx:.2f},{sy:.2f}), goal=({gx:.2f},{gy:.2f}), goal_yaw={self._goal_yaw:.2f} rad"
+            f"Received path: {len(msg.poses)} poses, transformed {frame}->{self._path_frame}, "
+            f"start=({sx:.2f},{sy:.2f}), goal=({gx:.2f},{gy:.2f}), goal_yaw={self._goal_yaw:.2f} rad"
         )
 
     def backup_callback(self, msg: Float32):
@@ -569,13 +619,13 @@ class Controller(Node):
             self.stop()
             return
 
-        pose = self.get_pose_2d()
+        pose = self.get_pose_2d(self._path_frame)
         if pose is None:
             self.stop()
             if self._last_pose_rejected_stale:
                 return
             self.publish_status('FAILED')
-            self.get_logger().warn('No TF pose available (map->base_link).')
+            self.get_logger().warn(f'No TF pose available ({self._path_frame}->base_link).')
             return
 
         rx, ry, ryaw = pose
