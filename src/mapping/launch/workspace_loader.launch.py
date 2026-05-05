@@ -19,8 +19,8 @@ def generate_launch_description():
 
     pkg_share = get_package_share_directory('mapping')
 
-    workspace_file = _prefer_src_config('final_workspace3.csv', pkg_share)
-    map_file = _prefer_src_config('final_map3.csv', pkg_share)
+    workspace_file = _prefer_src_config('workspace_tilde.csv', pkg_share)
+    map_file = _prefer_src_config('map_tilde.csv', pkg_share)
 
     return LaunchDescription([
         DeclareLaunchArgument(
