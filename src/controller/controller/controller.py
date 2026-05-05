@@ -133,7 +133,7 @@ class Controller(Node):
         self._backup_start_xy = None
         self._backup_duty = 0.12
         self._backup_direction = -1.0
-        self._backup_reverse_right_boost = 1.1
+        self._backup_reverse_right_boost = 1.05
 
         self._final_controller = FinalApproachController(
             nominal_speed=float(self.get_parameter('final_nominal_speed').value),
