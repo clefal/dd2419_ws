@@ -331,6 +331,7 @@ class Controller(Node):
     def final_approach_enable_callback(self, msg: Bool):
         self._final_approach_enabled = bool(msg.data)
         if self._final_approach_enabled:
+            self._final_approach_enabled_wall = None
             self._path_xy = []
             self._goal_yaw = None
             self._start_alignment_pending = False
@@ -344,6 +345,7 @@ class Controller(Node):
             #self.get_logger().info('Final approach enabled.')
         else:
             self.stop()
+            self._final_approach_enabled_wall = None
             self._start_alignment_pending = False
             self._start_turn_logged = False
             self._turn_recovery_logged = False
@@ -384,7 +386,26 @@ class Controller(Node):
             )
             return
 
-        self._final_target_xy = (res.obj_x, res.obj_y)
+        try:
+            target_tf = self._tf_buffer.lookup_transform(
+                self._path_frame,
+                self._fixed_frame,
+                rclpy.time.Time(),
+            )
+        except Exception as exc:
+            self.get_logger().warn(
+                f'Failed to transform final target {self._final_target_id} '
+                f'from {self._fixed_frame} to {self._path_frame}: {exc}'
+            )
+            return
+
+        tx, ty, _ = self.transform_xy_yaw(
+            target_tf,
+            res.obj_x,
+            res.obj_y,
+            res.obj_yaw,
+        )
+        self._final_target_xy = (tx, ty)
         self._final_target_last_seen_wall = time.time()
 
 
@@ -547,14 +568,16 @@ class Controller(Node):
                 self.stop()
                 return
 
-            pose = self.get_pose_2d()
+            pose = self.get_pose_2d(self._path_frame)
             if pose is None:
                 self.stop()
                 if self._last_pose_rejected_stale:
                     return
                 self.publish_status('FAILED')
                 self._final_approach_enabled = False
-                self.get_logger().warn('Final approach failed: no TF pose available (map->base_link).')
+                self.get_logger().warn(
+                    f'Final approach failed: no TF pose available ({self._path_frame}->base_link).'
+                )
                 return
 
             if self._final_target_id is None:
