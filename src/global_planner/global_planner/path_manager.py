@@ -755,7 +755,7 @@ class PathManager:
                         continue
 
                 penalty = self.cell_penalty(nx, ny, occ, meta)
-                tentative_g = g_score[current] + step_cost + penalty
+                tentative_g = g_score[current] + step_cost * 0.75 + penalty #penalize step cost 25% less
 
                 neighbor = (nx, ny)
                 if tentative_g < g_score.get(neighbor, float("inf")):
