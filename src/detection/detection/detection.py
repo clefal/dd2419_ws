@@ -500,7 +500,7 @@ class Detection(Node):
         tol_red = 0.035   
         tol_green = 0.015
         tol_blue = 0.017
-        tol_box = 0.02
+        tol_box = 0.03
 
         # strict thresholds
         # tol_red = 0.02 tol_green = 0.01 tol_blue = 0.015 tol_wood = 0.01 tol_box = 0.02  
@@ -526,7 +526,7 @@ class Detection(Node):
         thresh_blue_b_low = comp_colors_oklab[2,2] - tol_blue
         thresh_blue_b_high = comp_colors_oklab[2,2] + tol_blue
 
-        thresh_box_L_low = 0.42
+        thresh_box_L_low = 0.4
         thresh_box_L_high = 0.6
         thresh_box_a_low = comp_colors_oklab[3,1] - tol_box
         thresh_box_a_high = comp_colors_oklab[3,1] + tol_box
