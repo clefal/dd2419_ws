@@ -80,7 +80,7 @@ class Odometry(Node):
         self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
         sensor_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
-            depth=5,
+            depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         # Subscriptions
@@ -250,7 +250,7 @@ class Odometry(Node):
                 self._last_imu_t = stamp_to_sec(msg.header.stamp)
 
             self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, True)
-            self.publish_path(msg.header.stamp, self._x, self._y, self._yaw)
+            #self.publish_path(msg.header.stamp, self._x, self._y, self._yaw)
             return
 
         # Ticks since last encoder message, calculated from absolute tick counts.
@@ -287,7 +287,7 @@ class Odometry(Node):
         self.broadcast_transform(stamp, self._x, self._y, self._yaw, True)
 
         # Path at encoder rate
-        self.publish_path(stamp, self._x, self._y, self._yaw)
+        #self.publish_path(stamp, self._x, self._y, self._yaw)
 
     def broadcast_transform(self, stamp, x, y, yaw, temp=False):
         #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
