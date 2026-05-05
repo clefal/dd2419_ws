@@ -70,6 +70,7 @@ class Controller(Node):
         self._turn_recovery_logged = False
         self._final_target_behind_logged = False
         self._last_tf_stale_log_wall = 0.0
+        self._last_pose_rejected_stale = False
 
         self._final_approach_enabled = False
         self._final_target_id = None
@@ -98,6 +99,7 @@ class Controller(Node):
         self.declare_parameter('control_period', 0.05)          # s (0.05=20Hz, 0.1=10Hz)
         self.declare_parameter('wheel_slew_rate', 1.5)          # duty/s max per-wheel change (except stop)
         self.declare_parameter('tf_staleness_warn_s', 0.2)     # s
+        self.declare_parameter('tf_staleness_stop_s', 1.0)     # s, ignore pose until TF catches up
 
         self.declare_parameter('final_nominal_speed', 0.15)                # duty-equivalent for close approach
         self.declare_parameter('final_turn_gain', 0.2)                     # steering gain during close approach
@@ -182,6 +184,7 @@ class Controller(Node):
         self.send_duty(0.0, 0.0)
 
     def get_pose_2d(self):
+        self._last_pose_rejected_stale = False
         try:
             t = self._tf_buffer.lookup_transform(self._fixed_frame, self._base_frame, rclpy.time.Time())
         except Exception as ex:
@@ -191,6 +194,7 @@ class Controller(Node):
         tf_time = rclpy.time.Time.from_msg(t.header.stamp)
         tf_age = (self.get_clock().now() - tf_time).nanoseconds * 1e-9
         stale_warn_s = float(self.get_parameter('tf_staleness_warn_s').value)
+        stale_stop_s = float(self.get_parameter('tf_staleness_stop_s').value)
         if tf_age > stale_warn_s:
             now_wall = time.time()
             if (now_wall - self._last_tf_stale_log_wall) >= 1.0:
@@ -198,6 +202,9 @@ class Controller(Node):
                     f'TF pose is stale: age={tf_age:.3f} s'
                 )
                 self._last_tf_stale_log_wall = now_wall
+        if tf_age > stale_stop_s:
+            self._last_pose_rejected_stale = True
+            return None
 
         x = t.transform.translation.x
         y = t.transform.translation.y
@@ -451,6 +458,8 @@ class Controller(Node):
             pose = self.get_pose_2d()
             if pose is None:
                 self.stop()
+                if self._last_pose_rejected_stale:
+                    return
                 self.publish_status('FAILED')
                 self.get_logger().warn('Backup failed: no TF pose available (map->base_link).')
                 self._backup_active = False
@@ -491,6 +500,8 @@ class Controller(Node):
             pose = self.get_pose_2d()
             if pose is None:
                 self.stop()
+                if self._last_pose_rejected_stale:
+                    return
                 self.publish_status('FAILED')
                 self._final_approach_enabled = False
                 self.get_logger().warn('Final approach failed: no TF pose available (map->base_link).')
@@ -561,6 +572,8 @@ class Controller(Node):
         pose = self.get_pose_2d()
         if pose is None:
             self.stop()
+            if self._last_pose_rejected_stale:
+                return
             self.publish_status('FAILED')
             self.get_logger().warn('No TF pose available (map->base_link).')
             return
