@@ -37,7 +37,7 @@ class Mapping(Node):
         self.declare_parameter("range_max_free_update", 2.0)
         self.declare_parameter("median_filter_kernel_size", 5)
         self.declare_parameter("log_odds_increase_occ", 1.2)
-        self.declare_parameter("log_odds_decrease_free", -0.25)
+        self.declare_parameter("log_odds_decrease_free", -0.1)
         self.declare_parameter("log_odds_min", -5.0)
         self.declare_parameter("log_odds_max", 5.0)
         self.declare_parameter("hit_thickening_enabled", False)
