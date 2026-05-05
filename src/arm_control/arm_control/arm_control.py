@@ -376,6 +376,7 @@ class ArmControlNode(Node):
             if self.vision_is_stale():
                 self.transition_to(State.RETURN_TO_IDLE)
                 self.publish_result(Result.PICK_UP_FAIL_NO_DETECTION)
+            self.transition_to(State.ALIGNING)
             return
         
         self.get_logger().info(
