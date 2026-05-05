@@ -73,9 +73,9 @@ class ObjectManager(Node):
         self._static_loaded = False
         self.create_timer(5, self.get_points_from_csv_once)
         #self.create_timer(2,self.debugging_msg)
-        self.similarity_threshold = 0.2 # distance of detections that are combined into one object
+        self.similarity_threshold = 0.3 # distance of detections that are combined into one object
         self.box_similarity_threshold = 0.45 # boxes are larger, so allow looser box-to-box/map-box matching
-        self.cube_box_exclusion_threshold = 0.2 # reject cube detections that are too close to a box
+        self.cube_box_exclusion_threshold = 0.3 # reject cube detections that are too close to a box
         self.output_map_min_confidence = 4 # only export objects that have been seen at least this many extra times
 
 # ----------------------------------
@@ -336,17 +336,20 @@ class ObjectManager(Node):
         closest_obj_yaw = 0.0
         for obj in self.object_list:
             if obj.status == 'available' and (obj.type == 'box' or obj.type == 'map_box'):
-                if closest_obj_id == None:
-                    closest_obj_id = obj.id
-                    closest_obj_x = obj.last_x
-                    closest_obj_y = obj.last_y
-                    closest_obj_yaw = obj.last_yaw
-                    closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
-                if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
-                    closest_obj_id = obj.id
-                    closest_obj_x = obj.last_x
-                    closest_obj_y = obj.last_y
-                    closest_obj_yaw = obj.last_yaw
+                if obj.confidence < 3:
+                    continue
+                else:
+                    if closest_obj_id == None:
+                        closest_obj_id = obj.id
+                        closest_obj_x = obj.last_x
+                        closest_obj_y = obj.last_y
+                        closest_obj_yaw = obj.last_yaw
+                        closest_distance = math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y)
+                    if math.hypot(obj.last_x - req.robot_x, obj.last_y - req.robot_y) < closest_distance:
+                        closest_obj_id = obj.id
+                        closest_obj_x = obj.last_x
+                        closest_obj_y = obj.last_y
+                        closest_obj_yaw = obj.last_yaw
 
         if closest_obj_id is not None:
             for obj in self.object_list:
@@ -436,9 +439,9 @@ class ObjectManager(Node):
 
             rows.append([
                 map_type,
-                int(round(obj.last_x * 100.0)),
-                int(round(obj.last_y * 100.0)),
-                int(round(math.degrees(obj.last_yaw))),
+                int(round(obj.first_x * 100.0)),
+                int(round(obj.first_y * 100.0)),
+                int(round(math.degrees(obj.first_yaw))),
             ])
 
         with output_path.open('w', newline='') as csv_file:

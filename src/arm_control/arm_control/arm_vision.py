@@ -184,6 +184,7 @@ class ArmVisionNode(Node):
 
             if self.state == State.CHECK_HOLDING:
                 box_size = max(detection['box_w'], detection['box_h'])
+                self.get_logger().info(f'CHECK_HOLDING: detected cube with size {box_size:.1f}')
                 if box_size >= MIN_HOLDING_SIZE:
                     msg = String()
                     msg.data = HOLDING_SUCCESS_MSG

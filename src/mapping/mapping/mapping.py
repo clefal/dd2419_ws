@@ -37,7 +37,7 @@ class Mapping(Node):
         self.declare_parameter("range_max_free_update", 2.0)
         self.declare_parameter("median_filter_kernel_size", 5)
         self.declare_parameter("log_odds_increase_occ", 1.2)
-        self.declare_parameter("log_odds_decrease_free", -0.25)
+        self.declare_parameter("log_odds_decrease_free", -0.1)
         self.declare_parameter("log_odds_min", -5.0)
         self.declare_parameter("log_odds_max", 5.0)
         self.declare_parameter("hit_thickening_enabled", False)
@@ -436,7 +436,7 @@ if __name__ == '__main__':
 
 
 class OcupancyGridData:
-    def __init__(self, width, height, resolution, origin, l_occ=0.85, l_free=-0.4, l_min=-5, l_max=5):
+    def __init__(self, width, height, resolution, origin, l_occ=0.85, l_free=-0.4, l_min=-5, l_max=5, initial_occupancy=0.3):
         self.resolution = resolution
         self.width = int(width)
         self.height = int(height)
@@ -445,7 +445,8 @@ class OcupancyGridData:
         self.size_y = float(self.height) * float(self.resolution)
 
         # Log-odds grid (float)
-        self.log_odds = np.zeros((self.height, self.width), dtype=np.float32)
+        initial_log_odds = math.log(initial_occupancy / (1.0 - initial_occupancy))
+        self.log_odds = np.full((self.height, self.width), initial_log_odds, dtype=np.float32)
         self.inside_workspace_mask = None
 
         # Parameters
