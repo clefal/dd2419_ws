@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<launch>
+
+  <arg name="publish_workspace_odom_frames" default="false"/>
+  <arg name="use_odom_freezer" default="true"/>
+
+
+  <!-- Workspace/mapfile TF frames -->
+  <include file="$(find-pkg-share mapping)/launch/workspace_loader.launch.py">
+    <arg name="publish_odom_frames" value="$(var publish_workspace_odom_frames)"/>
+  </include>
+
+  <!-- Hardware/sensors -->
+  <include file="$(find-pkg-share robp_launch)/launch/arm_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/arm_camera_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/realsense_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
+
+  <!-- Nodes -->
+  <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
+  <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
+  <node pkg="localization" exec="map_odom_freezer" name="map_odom_freezer" output="log" if="$(var use_odom_freezer)"/>
+  <node pkg="mapping" exec="mapping" name="mapping" output="log"/>
+
+  <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
+  <node pkg="arm_control" exec="arm_vision" name="arm_vision" output="log"/>
+  <node pkg="controller" exec="controller" name="controller" output="log"/>
+  <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>
+  <node pkg="global_planner" exec="global_planner" name="global_planner" output="log">
+    <param name="freeze_odom_before_planning" value="$(var use_odom_freezer)"/>
+  </node>
+  <node pkg="detection" exec="detection" name="detection" output="log"/>
+  <node pkg="detection" exec="object_manager" name="object_manager" output="log"/>
+
+
+</launch>

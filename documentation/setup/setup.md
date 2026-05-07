@@ -11,10 +11,18 @@ echo $ROS_DOMAIN_ID
 2. Connect with ssh to robot. Make sure it is the right ip
 
 run without pixi run:
+(1) A235
+(2) Diego
+(3) Diego new
+
 ```bash
 ssh group3@{ip}
-ssh group3@10.97.32.242
-sshpass -p 'group3' ssh group3@10.97.32.242
+ssh group3@192.168.1.63
+sshpass -p 'group3' ssh group3@192.168.1.63
+sshpass -p 'group3' ssh group3@10.94.192.242
+sshpass -p 'group3' ssh group3@10.238.43.242 
+sshpass -p 'group3' ssh group3@10.72.177.242 
+sshpass -p 'group3' ssh group3@10.82.172.242
 ```
 
 1. Run any launch. For example
@@ -24,3 +32,10 @@ pixi run lidar
 ```
 
 1. Open rviz or rqt to send commands or visualize data
+
+Full system launch file:
+
+```bash
+pixi run full_system_launch
+```
+comment out which nodes you want to run or not.

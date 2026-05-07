@@ -6,9 +6,7 @@ channels = [
   "https://prefix.dev/robostack-jazzy",
 ]
 platforms = [
-  "osx-arm64",
-  "win-64",
-  "linux-64",
+  "linux-64", "osx-arm64",
 ]
 version = "1.0.0"
 preview = ["pixi-build"]
@@ -19,6 +17,7 @@ flash_arm = { cmd = "platformio run --target upload", cwd = "PlatformIO/Projects
 foxglove_server = { cmd = "ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765" }
 
 arm = { cmd = "ros2 launch robp_launch arm_launch.yaml" }
+arm_control = { cmd ="ros2 run arm_control arm_control" }
 arm_camera = { cmd = "ros2 launch robp_launch arm_camera_launch.yaml" }
 lidar = { cmd = "ros2 launch robp_launch lidar_launch.yaml" }
 phidgets = { cmd = "ros2 launch robp_launch phidgets_launch.yaml" }
@@ -27,6 +26,19 @@ driver = { cmd = "ros2 run driver driver" }
 odometry = { cmd = "ros2 run odometry odometry" }
 controller = { cmd = "ros2 run controller controller" }
 goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
+global_planner = { cmd = "ros2 run global_planner global_planner" }
+callibration_helper = { cmd = "ros2 run callibration_helper callibration_helper" }
+localization =  { cmd = "ros2 run localization localization_motion_triggered" }
+static_transforms = { cmd = "ros2 launch robp_launch frames_launch.xml" }
+workspace = { cmd = "ros2 launch src/mapping/launch/workspace_loader.launch.py workspace_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/workspace_1.csv map_csv:=$PIXI_PROJECT_ROOT/src/mapping/config/map_1_1.csv" }
+mapping = { cmd = "ros2 run mapping mapping" }
+full_system_launch = { cmd = "ros2 launch robp_launch full_system_launch.xml" }
+launch_localization = { cmd = "ros2 launch robp_launch localization_launch.xml" }
+detection = { cmd = "ros2 run detection detection" }
+object_manager = { cmd = "ros2 run detection object_manager" }
+is_turning = { cmd = "ros2 run controller is_turning" }
+filter_scan = { cmd = "ros2 run localization filter_scan" }
+full_arm_launch = { cmd = "ros2 launch robp_launch arm_control_launch.xml" }
 
 [tasks.install_udev_rules]
 cmd = '''
@@ -69,27 +81,39 @@ ros-jazzy-ros2cli-common-extensions = ">=0.3.1,<0.4"
 ros-jazzy-rosidl-cli = ">=4.6.7,<5"
 
 # Workspace
-ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
+# ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
 
 # Course packages
 ros-jazzy-robp-autocomplete = { path = "src/robp_autocomplete" }
-ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp_launch" }
+# ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp_launch" }
 ros-jazzy-robp-interfaces = { path = "src/robp_interfaces" }
 ros-jazzy-robp-launch = { path = "src/robp_launch" }
 ros-jazzy-driver = { path = "src/driver" }
 ros-jazzy-controller = { path = "src/controller" }
 ros-jazzy-goal-manager = { path = "src/goal_manager" }
+ros-jazzy-arm-control = { path = "src/arm_control" }
+ros-jazzy-global-planner = { path = "src/global_planner" }
+
+ros-jazzy-mapping = { path = "src/mapping" }
+ros-jazzy-callibration-helper = { path = "src/callibration_helper" }
+ros-jazzy-localization = { path = "src/localization" }
+
 
 # Boot camp
 ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }
 ros-jazzy-odometry = { path = "src/odometry" }
-ros-jazzy-display-markers = { path = "src/display_markers" }
+# ros-jazzy-display-markers = { path = "src/display_markers" }
 ros-jazzy-detection = { path = "src/detection" }
 
 # Other
 argcomplete = ">=3.6.3,<4"
 colcon-common-extensions = ">=0.3.0,<0.4"
 pynput = ">=1.8.1,<2"
+scipy = "*"
+ros-jazzy-std-msgs = ">=5.3.6,<6"
+colour-science = ">=0.4.7,<0.5"
+scikit-learn = ">=1.8.0,<2"
+open3d = "*"
 
 [target.linux-64.dependencies]
 # ROS
