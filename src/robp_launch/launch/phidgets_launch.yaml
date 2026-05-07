@@ -1,0 +1,23 @@
+%YAML 1.2
+---
+launch:
+  - node:
+      pkg: "robp_phidgets"
+      exec: "robp_phidgets"
+      name: "robp_phidgets"
+      namespace: "phidgets"
+      output: "screen"
+      emulate_tty: true
+      param:
+        - name: "motors_acceleration"
+          value: 100.0
+        - name: "motors_braking_strength"
+          value: 1.0
+        - name: "motors_data_rate"
+          value: 10.0
+        - name: "motors_failsafe_timeout_ms"
+          value: 10000
+        - name: "motors_native_failsafe"
+          value: false
+        - name: "motors_native_failsafe_extra_timeout_ms"
+          value: 100

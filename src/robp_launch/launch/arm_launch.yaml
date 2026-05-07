@@ -1,0 +1,15 @@
+%YAML 1.2
+---
+launch:
+  - node:
+      pkg: "robp_arm"
+      exec: "robp_arm"
+      name: "robp_arm"
+      namespace: "robp_arm"
+      output: "screen"
+      emulate_tty: true
+      param:
+        - name: "device"
+          value: "/dev/hiwonder_arm"
+        - name: "baudrate"
+          value: 115200

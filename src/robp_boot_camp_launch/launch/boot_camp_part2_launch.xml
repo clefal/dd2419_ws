@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<launch>
+	<!-- run rviz -->
+	<node pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share robp_boot_camp_launch)/rviz/boot_camp_part2.rviz" />
+
+	<node pkg="robot_state_publisher" exec="robot_state_publisher" name="robot_state_publisher" output="screen">
+    <param name="robot_description" value="$(command 'xacro $(find-pkg-share realsense2_description)/urdf/test_d435_camera.urdf.xacro use_nominal_extrinsics:=false')"/>
+    <param name="publish_frequency" value="30.0" />
+  </node>
+
+	<node name="marker_1" pkg="tf2_ros" exec="static_transform_publisher" args="--x -1 --y -1 --z 0.18 --frame-id map --child-frame-id aruco/marker1" />
+	<node name="marker_2" pkg="tf2_ros" exec="static_transform_publisher" args="--x 2 --y 0 --z 0.18 --yaw 3.14159265359 --frame-id map --child-frame-id aruco/marker2" />
+
+	<node name="aruco" pkg="aruco_ros" exec="marker_publisher" output='screen'>
+		<remap from="/camera_info" to="/camera/color/camera_info"/>
+		<remap from="/image" to="/camera/color/image_raw"/>
+		
+		<param name="image_is_rectified" value="True"/>
+		<param name="marker_size"        value="0.157"/> <!-- in m -->
+		<param name="reference_frame"    value=""/>   <!-- frame in which the marker pose will be refered -->
+		<param name="camera_frame"       value="camera_color_optical_frame"/>
+	</node>
+</launch>

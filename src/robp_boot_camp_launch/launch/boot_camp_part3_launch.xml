@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+	<!-- run rviz -->
+	<node pkg="rviz2" exec="rviz2" name="rviz" args="-d $(find-pkg-share robp_boot_camp_launch)/rviz/boot_camp_part3.rviz" />
+
+	<node pkg="robot_state_publisher" exec="robot_state_publisher" name="robot_state_publisher" output="screen">
+    <param name="robot_description" value="$(command 'xacro $(find-pkg-share realsense2_description)/urdf/test_d435_camera.urdf.xacro use_nominal_extrinsics:=false')"/>
+    <param name="publish_frequency" value="30.0" />
+  </node>
+
+	<node name="odometry" pkg="odometry" exec="odometry" output="screen" />
+</launch>

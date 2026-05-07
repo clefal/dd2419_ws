@@ -1,0 +1,155 @@
+%YAML 1.2
+---
+launch:
+  - node:
+      pkg: "realsense2_camera"
+      exec: "realsense2_camera_node"
+      name: "realsense"
+      namespace: ""
+      output: "screen"
+      emulate_tty: true
+      param:
+        - name: "camera_name"
+          value: ""
+        - name: "serial_no"
+          value: ""
+        - name: "usb_port_id"
+          value: ""
+        - name: "device_type"
+          value: ""
+        - name: "initial_reset"
+          value: true
+        - name: "accelerate_gpu_with_glsl"
+          value: false
+        - name: "rosbag_filename"
+          value: ""
+        - name: "enable_color"
+          value: true
+        - name: "rgb_camera.color_profile"
+          value: "848,480,6"
+        - name: "rgb_camera.color_format"
+          value: "RGB8"
+        - name: "rgb_camera.enable_auto_exposure"
+          value: true
+        - name: "enable_depth"
+          value: true
+        - name: "enable_infra"
+          value: false
+        - name: "enable_infra1"
+          value: false
+        - name: "enable_infra2"
+          value: false
+        - name: "depth_module.depth_profile"
+          value: "848,480,6"
+        - name: "depth_module.depth_format"
+          value: "Z16"
+        - name: "depth_module.infra_profile"
+          value: "848,480,6"
+        - name: "depth_module.infra_format"
+          value: "RGB8"
+        - name: "depth_module.infra1_format"
+          value: "Y8"
+        - name: "depth_module.infra2_format"
+          value: "Y8"
+        - name: "depth_module.color_profile"
+          value: "848,480,6"
+        - name: "depth_module.color_format"
+          value: "RGB8"
+        - name: "depth_module.exposure"
+          value: 8500
+        - name: "depth_module.gain"
+          value: 16
+        - name: "depth_module.hdr_enabled"
+          value: false
+        - name: "depth_module.enable_auto_exposure"
+          value: true
+        - name: "depth_module.exposure.1"
+          value: 7500
+        - name: "depth_module.gain.1"
+          value: 16
+        - name: "depth_module.exposure.2"
+          value: 1
+        - name: "depth_module.gain.2"
+          value: 16
+        - name: "enable_sync"
+          value: true
+        - name: "depth_module.inter_cam_sync_mode"
+          value: 0
+        - name: "enable_rgbd"
+          value: true
+        - name: "enable_gyro"
+          value: false
+        - name: "enable_accel"
+          value: false
+        - name: "gyro_fps"
+          value: 0
+        - name: "enable_motion"
+          value: false
+        - name: "accel_fps"
+          value: 0
+        - name: "unite_imu_method"
+          value: 0
+        - name: "clip_distance"
+          value: -2
+        - name: "angular_velocity_cov"
+          value: 0.01
+        - name: "linear_accel_cov"
+          value: 0.01
+        - name: "diagnostics_period"
+          value: 0.0
+        - name: "publish_tf"
+          value: true
+        - name: "tf_publish_rate"
+          value: 0.0
+        - name: "pointcloud.enable"
+          value: true
+        - name: "pointcloud.stream_filter"
+          value: 2
+        - name: "pointcloud.stream_index_filter"
+          value: 0
+        - name: "pointcloud.ordered_pc"
+          value: false
+        - name: "pointcloud.allow_no_texture_points"
+          value: false
+        - name: "align_depth.enable"
+          value: true
+        - name: "colorizer.enable"
+          value: false
+        - name: "decimation_filter.enable"
+          value: false
+        - name: "rotation_filter.enable"
+          value: false
+        - name: "rotation_filter.rotation"
+          value: 0.0
+        - name: "spatial_filter.enable"
+          value: false
+        - name: "temporal_filter.enable"
+          value: false
+        - name: "disparity_filter.enable"
+          value: false
+        - name: "hole_filling_filter.enable"
+          value: false
+        - name: "hdr_merge.enable"
+          value: false
+        - name: "wait_for_device_timeout"
+          value: -1.0
+        - name: "reconnect_timeout"
+          value: 6.0
+        - name: "base_frame_id"
+          value: "link"
+        - name: "tf_prefix"
+          value: "realsense_camera"
+        - name: "decimation_filter.filter_magnitude"
+          value: 2
+        - name: "enable_safety"
+          value: false
+        - name: "safety_camera.safety_mode"
+          value: 0
+        - name: "enable_labeled_point_cloud"
+          value: false
+        - name: "depth_mapping_camera.labeled_point_cloud_profile"
+          value: 0.0
+        - name: "enable_occupancy"
+          value: false
+        - name: "depth_mapping_camera.occupancy_profile"
+          value: "0,0,0"

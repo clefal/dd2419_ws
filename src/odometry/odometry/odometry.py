@@ -31,7 +31,7 @@ class Odometry(Node):
 
         # Subscribe to encoder topic and call callback function on each recieved message
         self.create_subscription(
-            Encoders, '/motor/encoders', self.encoder_callback, 10)
+            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 10)
 
         # 2D pose
         self._x = 0.0
@@ -49,24 +49,22 @@ class Odometry(Node):
         msg -- An encoders ROS message. To see more information about it 
         run 'ros2 interface show robp_interfaces/msg/Encoders' in a terminal.
         """
-
-        # The kinematic parameters for the differential configuration
-        dt = 50 / 1000
         ticks_per_rev = 48 * 64
-        wheel_radius = 0.0  # TODO: Fill in
-        base = 0.0  # TODO: Fill in
+        wheel_radius = 0.04921 # TODO: Fill in
+        base = 0.3075 # TODO: Fill in
 
         # Ticks since last message
         delta_ticks_left = msg.delta_encoder_left
         delta_ticks_right = msg.delta_encoder_right
+        v_dt = wheel_radius/2 * 2*math.pi/ticks_per_rev * (delta_ticks_left+delta_ticks_right)
+        omega_dt = wheel_radius/base * 2*math.pi/ticks_per_rev * (delta_ticks_right-delta_ticks_left)
 
         # TODO: Fill in
+        self._x = self._x + v_dt * math.cos(self._yaw) # TODO: Fill in
+        self._y = self._y + v_dt * math.sin(self._yaw) # TODO: Fill in
 
-        self._x = self._x  # TODO: Fill in
-        self._y = self._y  # TODO: Fill in
-        self._yaw = self._yaw  # TODO: Fill in
-        
-        stamp = None # TODO: Fill in
+        self._yaw = self._yaw + omega_dt # TODO: Fill in
+        stamp = msg.header.stamp # TODO: Fill in
 
         self.broadcast_transform(stamp, self._x, self._y, self._yaw)
         self.publish_path(stamp, self._x, self._y, self._yaw)
@@ -83,7 +81,7 @@ class Odometry(Node):
         y -- y coordinate of the 2D pose
         yaw -- yaw of the 2D pose (in radians)
         """
-
+        # self.get_logger().info(f'entered broadcast transform')
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'

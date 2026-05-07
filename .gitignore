@@ -1,6 +1,8 @@
 devel/
 logs/
 build/
+install/
+log/
 bin/
 lib/
 msg_gen/
@@ -57,3 +59,8 @@ CATKIN_IGNORE
 bags/*
 *.db3
 *.mcap
+
+# VS Code
+.vscode
+
+/rosbags

@@ -1,0 +1,88 @@
+rosbag2_bagfile_information:
+  version: 9
+  storage_identifier: mcap
+  duration:
+    nanoseconds: 54621685311
+  starting_time:
+    nanoseconds_since_epoch: 1770391900900643213
+  message_count: 1825
+  topics_with_message_count:
+    - topic_metadata:
+        name: /lidar/scan
+        type: sensor_msgs/msg/LaserScan
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: keep_last
+            depth: 10
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_64c191398013af96509d518dac71d5164f9382553fce5c1f8cca5be7924bd828
+      message_count: 403
+    - topic_metadata:
+        name: /phidgets/motor/encoders
+        type: robp_interfaces/msg/Encoders
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: keep_last
+            depth: 1
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_0aa27ba5c091def0d132936ea542089f271642002ee162506c869535cc40da5f
+      message_count: 1094
+    - topic_metadata:
+        name: /realsense/depth/color/points
+        type: sensor_msgs/msg/PointCloud2
+        serialization_format: cdr
+        offered_qos_profiles:
+          - history: keep_last
+            depth: 10
+            reliability: reliable
+            durability: volatile
+            deadline:
+              sec: 9223372036
+              nsec: 854775807
+            lifespan:
+              sec: 9223372036
+              nsec: 854775807
+            liveliness: automatic
+            liveliness_lease_duration:
+              sec: 9223372036
+              nsec: 854775807
+            avoid_ros_namespace_conventions: false
+        type_description_hash: RIHS01_9198cabf7da3796ae6fe19c4cb3bdd3525492988c70522628af5daa124bae2b5
+      message_count: 328
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - obj_det_odom_opti_rosbag_0.mcap
+  files:
+    - path: obj_det_odom_opti_rosbag_0.mcap
+      starting_time:
+        nanoseconds_since_epoch: 1770391900900643213
+      duration:
+        nanoseconds: 54621685311
+      message_count: 1825
+  custom_data: ~
+  ros_distro: jazzy

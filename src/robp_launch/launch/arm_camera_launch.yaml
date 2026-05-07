@@ -1,0 +1,47 @@
+%YAML 1.2
+---
+launch:
+  - node:
+      pkg: "usb_cam"
+      exec: "usb_cam_node_exe"
+      name: "arm_camera"
+      namespace: "arm/camera"
+      output: "screen"
+      emulate_tty: true
+      param:
+        - name: "video_device"
+          value: "/dev/arm_camera"
+        - name: "frame_id"
+          value: "arm_camera_link"
+        - name: "camera_name"
+          value: "arm_camera"
+        - name: "pixel_format"
+          value: "yuyv"
+        - name: "framerate"
+          value: 30.0
+        - name: "image_width"
+          value: 640
+        - name: "image_height"
+          value: 480
+        - name: "brightness"
+          value: -1
+        - name: "contrast"
+          value: -1
+        - name: "saturation"
+          value: -1
+        - name: "sharpness"
+          value: -1
+        - name: "gain"
+          value: -1
+        - name: "auto_white_balance"
+          value: true
+        - name: "white_balance"
+          value: 4000
+        - name: "autoexposure"
+          value: true
+        - name: "exposure"
+          value: 100
+        - name: "focus_auto"
+          value: false
+        - name: "focus"
+          value: -1

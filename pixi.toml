@@ -2,9 +2,8 @@
 authors = ["Daniel Duberg <danielduberg@gmail.com>"]
 name = "dd2419_ws"
 channels = [
-	"https://prefix.dev/pixi-build-backends",
-	"https://prefix.dev/conda-forge",
-	"https://prefix.dev/robostack-jazzy",
+  "https://prefix.dev/conda-forge",
+  "https://prefix.dev/robostack-jazzy",
 ]
 platforms = [
   "osx-arm64",
@@ -15,40 +14,102 @@ version = "1.0.0"
 preview = ["pixi-build"]
 
 [tasks]
-executors_1 = { cmd = "ros2 run learning_tf2_py executors" }
-executors_2 = { cmd = "ros2 service call /first_srv example_interfaces/srv/AddTwoInts" }
-executors_3 = { cmd = "ros2 service call /second_srv example_interfaces/srv/AddTwoInts" }
+flash_arm = { cmd = "platformio run --target upload", cwd = "PlatformIO/Projects/dd2419" }
+
+foxglove_server = { cmd = "ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765" }
+
+arm = { cmd = "ros2 launch robp_launch arm_launch.yaml" }
+arm_camera = { cmd = "ros2 launch robp_launch arm_camera_launch.yaml" }
+lidar = { cmd = "ros2 launch robp_launch lidar_launch.yaml" }
+phidgets = { cmd = "ros2 launch robp_launch phidgets_launch.yaml" }
+realsense = { cmd = "ros2 launch robp_launch realsense_launch.yaml" }
+driver = { cmd = "ros2 run driver driver" }
+odometry = { cmd = "ros2 run odometry odometry" }
+controller = { cmd = "ros2 run controller controller" }
+goal_manager = { cmd = "ros2 run goal_manager goal_manager" }
+
+[tasks.install_udev_rules]
+cmd = '''
+echo "Copying udev rules" &&
+sudo cp 99-robp.rules /etc/udev/rules.d/99-robp.rules &&
+echo "Restarting udev" &&
+sudo service udev reload &&
+sudo service udev restart &&
+sudo udevadm control --reload &&
+sudo udevadm trigger &&
+echo "Finished"
+'''
+
+[tasks.uninstall_udev_rules]
+cmd = '''
+echo "Removing udev rules" &&
+sudo rm /etc/udev/rules.d/99-robp.rules &&
+echo "Restarting udev" &&
+sudo service udev reload &&
+sudo service udev restart &&
+sudo udevadm control --reload &&
+sudo udevadm trigger &&
+echo "Finished"
+'''
 
 [dependencies]
 # ROS
+ros2-distro-mutex = ">=0.13,<0.14"
 ros-jazzy-ros2run = ">=0.32.6,<0.33"
+ros-jazzy-ros2interface = ">=0.32.6,<0.33"
 ros-jazzy-rviz2 = ">=14.1.16,<15"
 ros-jazzy-tf2-ros = ">=0.36.15,<0.37"
 ros-jazzy-tf2-tools = ">=0.36.15,<0.37"
 ros-jazzy-turtlesim = ">=1.8.3,<2"
+ros-jazzy-image-transport-plugins = ">=4.0.6,<5"
+ros-jazzy-rqt-gui = ">=1.6.2,<2"
+ros-jazzy-rqt-common-plugins = ">=1.2.0,<2"
+ros-jazzy-ros2cli = ">=0.32.7,<0.33"
+ros-jazzy-ros2cli-common-extensions = ">=0.3.1,<0.4"
+ros-jazzy-rosidl-cli = ">=4.6.7,<5"
 
-# Course packages
-ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp/robp_boot_camp_launch" }
-ros-jazzy-robp-interfaces = { path = "src/robp_robot/robp_interfaces" }
-
-# Aruco
-ros-jazzy-aruco = { path = "src/aruco_ros/aruco" }
-ros-jazzy-aruco-msgs = { path = "src/aruco_ros/aruco_msgs" }
+# Workspace
 ros-jazzy-aruco-ros = { path = "src/aruco_ros/aruco_ros" }
 
-# Boot camp part 1
-ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }
+# Course packages
+ros-jazzy-robp-autocomplete = { path = "src/robp_autocomplete" }
+ros-jazzy-robp-boot-camp-launch = { path = "src/robp_boot_camp_launch" }
+ros-jazzy-robp-interfaces = { path = "src/robp_interfaces" }
+ros-jazzy-robp-launch = { path = "src/robp_launch" }
+ros-jazzy-driver = { path = "src/driver" }
+ros-jazzy-controller = { path = "src/controller" }
+ros-jazzy-goal-manager = { path = "src/goal_manager" }
 
-# Boot camp part 2
+# Boot camp
+ros-jazzy-learning-tf2-py = { path = "src/learning_tf2_py" }
 ros-jazzy-odometry = { path = "src/odometry" }
 ros-jazzy-display-markers = { path = "src/display_markers" }
-
-# Boot camp part 3
 ros-jazzy-detection = { path = "src/detection" }
 
-[activation.env]
-ROS_AUTOMATIC_DISCOVERY_RANGE = "LOCALHOST"
+# Other
+argcomplete = ">=3.6.3,<4"
+colcon-common-extensions = ">=0.3.0,<0.4"
+pynput = ">=1.8.1,<2"
 
-[target.osx.activation.env]
-# Required for the RVIZ2 to properly startup on osx
+[target.linux-64.dependencies]
+# ROS
+ros-jazzy-usb-cam = ">=0.8.1,<0.9"
+ros-jazzy-foxglove-bridge = ">=3.2.2,<4"
+
+# Workspace
+ros-jazzy-realsense2-camera = { path = "src/realsense-ros/realsense2_camera" }
+ros-jazzy-rplidar-ros = { path = "src/rplidar_ros" }
+
+# Course packages
+ros-jazzy-robp-arm = { path = "src/robp_arm" }
+ros-jazzy-robp-phidgets = { path = "src/robp_phidgets" }
+
+# Flashing arm
+pyserial = ">=3.5,<4"
+platformio = ">=6.1.18,<7"
+
+[activation.env]
+# Works with Linux and macOS
 RMW_IMPLEMENTATION = "rmw_cyclonedds_cpp"
+ROS_AUTOMATIC_DISCOVERY_RANGE = "SUBNET"  # LOCALHOST, SUBNET
+ROS_DOMAIN_ID = "3"                       # Change to group number

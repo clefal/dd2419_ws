@@ -1,0 +1,27 @@
+%YAML 1.2
+---
+launch:
+  - node:
+      pkg: "rplidar_ros"
+      exec: "rplidar_node"
+      name: "rplidar_node"
+      namespace: "lidar"
+      output: "screen"
+      emulate_tty: true
+      param:
+        - name: "channel_type"
+          value: "serial"
+        - name: "serial_port"
+          value: "/dev/rplidar"
+        - name: "serial_baudrate"
+          value: 115200
+        - name: "frame_id"
+          value: "lidar_link"
+        - name: "inverted"
+          value: false
+        - name: "angle_compensate"
+          value: true
+        - name: "scan_frequency"
+          value: 10.0
+        # - name: "scan_mode"
+        #   value: "" # Legacy, Express, Boost, Sensitivity, Stability
