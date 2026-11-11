@@ -7,8 +7,8 @@ version = "*"
 
 [package.build.config]
 extra-input-globs = [
-    "msgs/**/*.msg",
-    "srvs/**/*.srv"
+    "msg/**/*.msg",
+    "srv/**/*.srv"
 ]
 
 [package.host-dependencies]

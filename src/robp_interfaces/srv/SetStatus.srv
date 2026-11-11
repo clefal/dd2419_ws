@@ -1,0 +1,4 @@
+int64 obj_id
+string status
+---
+# no return statement needed

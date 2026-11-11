@@ -1,19 +1,37 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import math
 
-import numpy as np
-
 import rclpy
 from rclpy.node import Node
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from typing import List
 
 from tf2_ros import TransformBroadcaster
-from tf_transformations import quaternion_from_euler, euler_from_quaternion
+from tf_transformations import quaternion_from_euler
 
 from geometry_msgs.msg import TransformStamped
 from robp_interfaces.msg import Encoders
+from sensor_msgs.msg import Imu
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
+from tf_transformations import quaternion_matrix
+
+from tf_transformations import euler_from_quaternion
+
+
+def wrap_angle(a: float) -> float:
+    while a > math.pi:
+        a -= 2.0 * math.pi
+    while a < -math.pi:
+        a += 2.0 * math.pi
+    return a
+
+
+def stamp_to_sec(stamp) -> float:
+    return float(stamp.sec) + float(stamp.nanosec) * 1e-9
 
 
 class Odometry(Node):
@@ -21,99 +39,301 @@ class Odometry(Node):
     def __init__(self):
         super().__init__('odometry')
 
-        # Initialize the transform broadcaster
+        #self._yaw_file = open("yaw_log.txt", "a")
+
+        # -------------------------
+        # Parameters
+        # -------------------------
+        self.declare_parameter('encoder_correction_gain', 0) # Encoder correction gain (0..1). Smaller = trust IMU more.
+        self.declare_parameter('ticks_per_rev', 48 * 64) # measured: 3200, not 3074
+        self.declare_parameter('wheel_radius', 0.04921)
+        self.declare_parameter('base', 0.3075)
+        self.declare_parameter('fix_tilt', True)
+        self.declare_parameter('gyro_bias_duration', 3.0)
+        self.declare_parameter('path_publish_period', 0.1)
+        self.declare_parameter('max_path_poses', 500)
+
+        # -------------------------
+        # Robot model constants
+        # -------------------------
+        self._ticks_per_rev = self.get_parameter('ticks_per_rev').value 
+        self._wheel_radius = self.get_parameter('wheel_radius').value
+        self._base = self.get_parameter('base').value
+        # -------------------------
+        # Complementary params
+        # -------------------------
+        self._k = self.get_parameter('encoder_correction_gain').value
+        self._fix_tilt = self.get_parameter('fix_tilt').value
+        self._gyro_bias_duration = self.get_parameter('gyro_bias_duration').value
+        self._path_publish_period = self.get_parameter('path_publish_period').value
+        self._max_path_poses = self.get_parameter('max_path_poses').value
+
+
+        # TF broadcaster
         self._tf_broadcaster = TransformBroadcaster(self)
 
-        # Initialize the path publisher
+        # Path publisher
         self._path_pub = self.create_publisher(Path, 'path', 10)
-        # Store the path here
         self._path = Path()
+        self._last_path_pub_t = None
 
-        # Subscribe to encoder topic and call callback function on each recieved message
+        self.mut_ex_callback_group = MutuallyExclusiveCallbackGroup()
+        sensor_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        # Subscriptions
         self.create_subscription(
-            Encoders, '/phidgets/motor/encoders', self.encoder_callback, 10)
+            Encoders, '/phidgets/motor/encoders', self.encoder_callback, sensor_qos, callback_group=self.mut_ex_callback_group
+        )
+        self.create_subscription(
+            Imu, '/phidgets/imu/data_raw', self.imu_callback, sensor_qos, callback_group=self.mut_ex_callback_group
+        )
 
-        # 2D pose
+        # -------------------------
+        # State
+        # -------------------------
         self._x = 0.0
         self._y = 0.0
+
+        # Encoder yaw (pure wheel odom)
+        self._yaw_enc = 0.0
+
+        # Fused yaw
         self._yaw = 0.0
 
+        # Gyro integration bookkeeping
+        self._last_imu_t = None
+        # TODO: Run imu data collection for some seconds to calculate bias
+        self._gyro_bias_initialized = False
+        self._gyro_bias_init_time = None
+        self._gyro_bias_count = 0
+        self._gyro_bias = 0.0
+        if self._fix_tilt:
+            self._gyro_bias_duration = 0.0
+
+        # To handle startup nicely
+        self._have_encoders = False
+        self._last_encoder_left = None
+        self._last_encoder_right = None
+
+
+        # Init 
+        self._initial_yaw_imu = None
+
+        # -------------------------
+        # Complementary filter gains
+        # -------------------------
+        # Encoder correction gain (0..1). Smaller = trust IMU more.
+
+        # -------------------------
+        # Robot model constants
+        # -------------------------
+        self._ticks_per_rev = self.get_parameter("ticks_per_rev").value   # measured: 3200, not 3074
+        self._wheel_radius = self.get_parameter("wheel_radius").value
+        self._base = self.get_parameter("base").value
+
+    def imu_callback(self, msg: Imu):
+
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
+
+        if lag > 0.05:
+            self.get_logger().warn(f"IMU callback lag: {lag:.3f} s")
+
+        t = stamp_to_sec(msg.header.stamp)
+
+        # Calculate gyro bias        
+        if not self._gyro_bias_initialized:
+            if self._gyro_bias_duration == 0.0:
+                self._gyro_bias = 0.0
+                self._gyro_bias_initialized = True
+            elif self._gyro_bias_init_time is None:
+                self._gyro_bias_init_time = t
+                return
+            elif t - self._gyro_bias_init_time < self._gyro_bias_duration:
+                self._gyro_bias += msg.angular_velocity.z
+                self._gyro_bias_count += 1
+                return
+            else:
+                self._gyro_bias = self._gyro_bias / self._gyro_bias_count
+                self._gyro_bias_initialized = True
+                self.get_logger().info('--------------------------------')
+                self.get_logger().info('IMU gyro bias calculated: %f with %d samples' % (self._gyro_bias, self._gyro_bias_count))
+                self.get_logger().info('--------------------------------')
+        
+
+        
+        # Wait until we have encoder yaw to initialize nicely
+        if not self._have_encoders:
+            self._last_imu_t = t
+            return
+
+        if self._last_imu_t is None:
+            self._last_imu_t = t
+            return
+
+        dt = t - self._last_imu_t
+        if dt <= 0.0:
+            # Skip weird timing jumps (startup / clock issues)
+            self._last_imu_t = t
+            return
+        elif dt > 0.5:
+            self._last_imu_t = t
+            self.get_logger().warn('Large dt between IMU messages: %f seconds' % dt)
+            return
+
+
+        self._last_imu_t = t
+
+
+        if self._fix_tilt:
+            # Yaw from IMU transforming the angular velocity with the orientation of the robot
+            q = [msg.orientation.x,
+                msg.orientation.y,
+                msg.orientation.z,
+                msg.orientation.w]
+
+            R = quaternion_matrix(q)[:3, :3]
+
+            # Angular velocity in body frame
+            omega_body = [msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z]
+
+            # Rotate gyro vector to world frame and use -Z as planar yaw rate
+            omega_z = -(R @ omega_body)[2]
+        else:
+            # Yaw from IMU angular velocity
+            # Gyro z (yaw rate)
+            omega_z = - msg.angular_velocity.z
+        
+        # Predict (integrate gyro)
+        self._yaw = wrap_angle(self._yaw + (omega_z - self._gyro_bias) * dt)
+        # self._yaw_file.write(f"{dt}: {self._yaw}\n")
+        # self._yaw_file.flush()  # ensures it's written immediately
+
+
+
+
+
+        # # ---- Yaw from IMU orientation ----
+        # if self._initial_yaw_imu is None:
+        #     self._initial_yaw_imu = wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2])
+        
+        # self._yaw = - wrap_angle(euler_from_quaternion([msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w])[2] - self._initial_yaw_imu)
+        # # ----------------------------------
+
+        # Publish both odom trees at IMU rate so scan-timestamped TF lookups do not
+        # outrun the latest encoder-stamped odom_temp sample between encoder updates.
+        # self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, False)
+
+
     def encoder_callback(self, msg: Encoders):
-        """Takes encoder readings and updates the odometry.
 
-        This function is called every time the encoders are updated (i.e., when a message is published on the '/motor/encoders' topic).
+        now = self.get_clock().now()
+        msg_time = rclpy.time.Time.from_msg(msg.header.stamp)
+        lag = (now - msg_time).nanoseconds * 1e-9
 
-        Your task is to update the odometry based on the encoder data in 'msg'. You are allowed to add/change things outside this function.
+        if lag > 0.05:
+            self.get_logger().warn(f"Encoder callback lag: {lag:.3f} s")
 
-        Keyword arguments:
-        msg -- An encoders ROS message. To see more information about it 
-        run 'ros2 interface show robp_interfaces/msg/Encoders' in a terminal.
-        """
-        ticks_per_rev = 48 * 64
-        wheel_radius = 0.04921 # TODO: Fill in
-        base = 0.3075 # TODO: Fill in
+        encoder_left = msg.encoder_left
+        encoder_right = msg.encoder_right
 
-        # Ticks since last message
-        delta_ticks_left = msg.delta_encoder_left
-        delta_ticks_right = msg.delta_encoder_right
-        v_dt = wheel_radius/2 * 2*math.pi/ticks_per_rev * (delta_ticks_left+delta_ticks_right)
-        omega_dt = wheel_radius/base * 2*math.pi/ticks_per_rev * (delta_ticks_right-delta_ticks_left)
+        if self._last_encoder_left is None or self._last_encoder_right is None:
+            self._last_encoder_left = encoder_left
+            self._last_encoder_right = encoder_right
 
-        # TODO: Fill in
-        self._x = self._x + v_dt * math.cos(self._yaw) # TODO: Fill in
-        self._y = self._y + v_dt * math.sin(self._yaw) # TODO: Fill in
+            if not self._have_encoders:
+                self._have_encoders = True
+                self._last_imu_t = stamp_to_sec(msg.header.stamp)
 
-        self._yaw = self._yaw + omega_dt # TODO: Fill in
-        stamp = msg.header.stamp # TODO: Fill in
+            self.broadcast_transform(msg.header.stamp, self._x, self._y, self._yaw, True)
+            #self.publish_path(msg.header.stamp, self._x, self._y, self._yaw)
+            return
 
-        self.broadcast_transform(stamp, self._x, self._y, self._yaw)
-        self.publish_path(stamp, self._x, self._y, self._yaw)
+        # Ticks since last encoder message, calculated from absolute tick counts.
+        delta_ticks_left = encoder_left - self._last_encoder_left
+        delta_ticks_right = encoder_right - self._last_encoder_right
+        self._last_encoder_left = encoder_left
+        self._last_encoder_right = encoder_right
 
-    def broadcast_transform(self, stamp, x, y, yaw):
-        """Takes a 2D pose and broadcasts it as a ROS transform.
+        meters_per_tick = (2.0 * math.pi * self._wheel_radius) / self._ticks_per_rev
+        d_left = meters_per_tick * delta_ticks_left
+        d_right = meters_per_tick * delta_ticks_right
 
-        Broadcasts a 3D transform with z, roll, and pitch all zero. 
-        The transform is stamped with the current time and is between the frames 'odom' -> 'base_link'.
+        d_s = 0.5 * (d_left + d_right)
+        d_theta = (d_right - d_left) / self._base
 
-        Keyword arguments:
-        stamp -- timestamp of the transform
-        x -- x coordinate of the 2D pose
-        y -- y coordinate of the 2D pose
-        yaw -- yaw of the 2D pose (in radians)
-        """
-        # self.get_logger().info(f'entered broadcast transform')
+        # ---- Update yaw ----
+        self._yaw_enc = wrap_angle(self._yaw_enc + d_theta)
+
+        # ---- Correct fused yaw using encoder yaw ----
+        err = wrap_angle(self._yaw_enc - self._yaw)
+        self._yaw = wrap_angle(self._yaw + self._k * err)
+
+        mid_yaw = self._yaw + 0.5 * d_theta
+        self._x += d_s * math.cos(mid_yaw)
+        self._y += d_s * math.sin(mid_yaw)
+
+        # ---- Initialize fused yaw ----
+        if not self._have_encoders:
+            self._have_encoders = True
+            self._last_imu_t = stamp_to_sec(msg.header.stamp)
+
+        # Publish TF
+        stamp = msg.header.stamp
+        self.broadcast_transform(stamp, self._x, self._y, self._yaw, True)
+
+        # Path at encoder rate
+        #self.publish_path(stamp, self._x, self._y, self._yaw)
+
+    def broadcast_transform(self, stamp, x, y, yaw, temp=False):
+        #print(f'Distance to origin: {math.sqrt(x * x + y * y)} meters')
+        tfs: List[TransformStamped] = []
+        q = quaternion_from_euler(0.0, 0.0, yaw)
+
+        # Temporary odom frame
+        if temp:
+            t_temp = TransformStamped()
+            t_temp.header.stamp = stamp
+            t_temp.header.frame_id = 'odom_temp'
+            t_temp.child_frame_id = 'base_link_temp'
+
+            t_temp.transform.translation.x = x
+            t_temp.transform.translation.y = y
+            t_temp.transform.translation.z = 0.0
+
+            t_temp.transform.rotation.x = q[0]
+            t_temp.transform.rotation.y = q[1]
+            t_temp.transform.rotation.z = q[2]
+            t_temp.transform.rotation.w = q[3]
+            tfs.append(t_temp)
+
+
         t = TransformStamped()
         t.header.stamp = stamp
         t.header.frame_id = 'odom'
         t.child_frame_id = 'base_link'
 
-        # The robot only exists in 2D, thus we set x and y translation
-        # coordinates and set the z coordinate to 0
         t.transform.translation.x = x
         t.transform.translation.y = y
         t.transform.translation.z = 0.0
 
-        # For the same reason, the robot can only rotate around one axis
-        # and this why we set rotation in x and y to 0 and obtain
-        # rotation in z axis from the message
-        q = quaternion_from_euler(0.0, 0.0, yaw)
         t.transform.rotation.x = q[0]
         t.transform.rotation.y = q[1]
         t.transform.rotation.z = q[2]
         t.transform.rotation.w = q[3]
+        tfs.append(t)
 
-        # Send the transformation
-        self._tf_broadcaster.sendTransform(t)
+        self._tf_broadcaster.sendTransform(tfs)
 
     def publish_path(self, stamp, x, y, yaw):
-        """Takes a 2D pose appends it to the path and publishes the whole path.
-
-        Keyword arguments:
-        stamp -- timestamp of the transform
-        x -- x coordinate of the 2D pose
-        y -- y coordinate of the 2D pose
-        yaw -- yaw of the 2D pose (in radians)
-        """
+        t = stamp_to_sec(stamp)
+        if self._last_path_pub_t is not None and t - self._last_path_pub_t < self._path_publish_period:
+            return
+        self._last_path_pub_t = t
 
         self._path.header.stamp = stamp
         self._path.header.frame_id = 'odom'
@@ -123,7 +343,7 @@ class Odometry(Node):
 
         pose.pose.position.x = x
         pose.pose.position.y = y
-        pose.pose.position.z = 0.01  # 1 cm up so it will be above ground level
+        pose.pose.position.z = 0.01
 
         q = quaternion_from_euler(0.0, 0.0, yaw)
         pose.pose.orientation.x = q[0]
@@ -132,15 +352,21 @@ class Odometry(Node):
         pose.pose.orientation.w = q[3]
 
         self._path.poses.append(pose)
-
+        if self._max_path_poses > 0 and len(self._path.poses) > self._max_path_poses:
+            self._path.poses = self._path.poses[-self._max_path_poses:]
         self._path_pub.publish(self._path)
 
 
 def main():
     rclpy.init()
     node = Odometry()
+
+    ex = MultiThreadedExecutor()
+    ex.add_node(node)
+
     try:
-        rclpy.spin(node)
+        # rclpy.spin(node)
+        ex.spin()
     except KeyboardInterrupt:
         pass
 

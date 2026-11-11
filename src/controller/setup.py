@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'controller = controller.controller:main',
+            'is_turning = controller.is_turning:main',
         ],
     },
 )

@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Hardware/sensors -->
+  <include file="$(find-pkg-share robp_launch)/launch/arm_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/arm_camera_launch.yaml"/>
+
+  <!-- Nodes -->
+  <node pkg="arm_control" exec="arm_vision" name="arm_vision" output="log"/>
+  <node pkg="arm_control" exec="arm_control" name="arm_control" output="log"/>
+</launch>

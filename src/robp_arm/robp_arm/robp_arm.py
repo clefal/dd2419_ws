@@ -3,6 +3,7 @@ import struct
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from robp_interfaces.msg import ArmControl, ArmFeedback
 from std_msgs.msg import Empty
@@ -14,6 +15,11 @@ class Arm(Node):
     self.ser = serial.Serial("/dev/hiwonder_arm", baudrate=115200)
 
     self.pub = self.create_publisher(ArmFeedback, "/arm/feedback", 10)
+
+    # qos = QoSProfile(
+    #     depth=10,
+    #     reliability=ReliabilityPolicy.RELIABLE 
+    # )
     self.sub = self.create_subscription(ArmControl, "/arm/control", self.arm_control, 10)
     self.reset_sub = self.create_subscription(Empty, "/arm/reset", self.arm_reset, 10)
 
