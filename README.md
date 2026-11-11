@@ -6,12 +6,9 @@ This ROS 2 project implements an autonomous mobile robot that explores a bounded
 
 ## Final run
 
-The supplied demonstration is included at 2× speed (about 2 min 20 sec; the original is about 4 min 40 sec). The player below is supported by many Markdown hosts; if it does not appear in your viewer, use the download link.
+The supplied demonstration is included at 2× speed (about 2 min 20 sec; the original is about 4 min 40 sec). The animated preview links to the full video, which you can download and play locally.
 
-<video controls width="800" poster="media/video/performance-preview.jpg">
-  <source src="media/video/final_result_ms3_2x.mp4" type="video/mp4">
-  Your browser does not support embedded video. [Download the video](media/video/final_result_ms3_2x.mp4).
-</video>
+[![10-second performance preview (click to open the full video)](media/video/performance-preview.gif)](media/video/final_result_ms3_2x.mp4)
 
 [Download the 2× performance video](media/video/final_result_ms3_2x.mp4)
 
