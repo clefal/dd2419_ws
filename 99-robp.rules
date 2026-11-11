@@ -1,0 +1,12 @@
+# All current and future Phidgets - Vendor = 0x06c2, Product = 0x0030 - 0x00af
+SUBSYSTEMS=="usb", ACTION=="add", ATTRS{idVendor}=="06c2", ATTRS{idProduct}=="00[3-a][0-f]", MODE="666"
+
+# SLAMTEC RPLIDAR
+KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", MODE:="0777", SYMLINK+="rplidar"
+
+# Hiwonder arm
+KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}!="0001", MODE:="0777", SYMLINK+="hiwonder_arm"
+
+# Arm camera
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="32e6", ATTRS{idProduct}=="9005", ATTR{index}=="0", SYMLINK+="arm_camera"
+SUBSYSTEM=="video4linux", ATTRS{idVendor}=="090c", ATTRS{idProduct}=="b371", ATTR{index}=="0", SYMLINK+="arm_camera"

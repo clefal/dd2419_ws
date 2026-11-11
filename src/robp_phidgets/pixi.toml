@@ -1,0 +1,24 @@
+[package.build.backend]
+channels = [
+  "https://prefix.dev/conda-forge",
+]
+name = "pixi-build-ros"
+version = "*"
+
+[package.host-dependencies]
+ros2-distro-mutex = ">=0.13,<0.14"
+ros-jazzy-phidgets-api = { path = "../phidgets_drivers/phidgets_api" }
+ros-jazzy-phidgets-msgs = { path = "../phidgets_drivers/phidgets_msgs" }
+ros-jazzy-robp-interfaces = { path = "../robp_interfaces" }
+
+[package.build-dependencies]
+ros2-distro-mutex = ">=0.13,<0.14"
+ros-jazzy-phidgets-api = { path = "../phidgets_drivers/phidgets_api" }
+ros-jazzy-phidgets-msgs = { path = "../phidgets_drivers/phidgets_msgs" }
+ros-jazzy-robp-interfaces = { path = "../robp_interfaces" }
+
+[package.run-dependencies]
+ros2-distro-mutex = ">=0.13,<0.14"
+ros-jazzy-phidgets-api = { path = "../phidgets_drivers/phidgets_api" }
+ros-jazzy-phidgets-msgs = { path = "../phidgets_drivers/phidgets_msgs" }
+ros-jazzy-robp-interfaces = { path = "../robp_interfaces" }

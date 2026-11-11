@@ -1,11 +1,17 @@
-[submodule "src/robp_robot"]
-	path = src/robp_robot
-	url = https://github.com/KTH-CAS-UAV/robp_robot.git
-	branch = vt26
 [submodule "src/aruco_ros"]
 	path = src/aruco_ros
 	url = https://github.com/KTH-CAS-UAV/aruco_ros.git
-[submodule "src/robp_boot_camp"]
-	path = src/robp_boot_camp
-	url = https://github.com/KTH-CAS-UAV/robp_boot_camp.git
-	branch = vt26
+[submodule "src/librealsense"]
+	path = src/librealsense
+	url = https://github.com/KTH-CAS-UAV/librealsense.git
+[submodule "src/realsense-ros"]
+	path = src/realsense-ros
+	url = https://github.com/KTH-CAS-UAV/realsense-ros.git
+[submodule "src/rplidar_ros"]
+	path = src/rplidar_ros
+	url = https://github.com/KTH-CAS-UAV/rplidar_ros.git
+	branch = ros2
+[submodule "src/phidgets_drivers"]
+	path = src/phidgets_drivers
+	url = https://github.com/KTH-CAS-UAV/phidgets_drivers.git
+	branch = jazzy

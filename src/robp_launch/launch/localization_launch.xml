@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="publish_workspace_odom_frames" default="true"/>
+  <!-- <arg name="update_map_lines" default="true"/> -->
+
+  <!-- Workspace/mapfile TF frames -->
+  <include file="$(find-pkg-share mapping)/launch/workspace_loader.launch.py">
+    <!-- <arg name="workspace_csv" value="$(var workspace_csv)"/>
+    <arg name="map_csv" value="$(var map_csv)"/>
+    <arg name="input_units" value="$(var input_units)"/> -->
+    <arg name="publish_odom_frames" value="$(var publish_workspace_odom_frames)"/>
+  </include>
+
+  <!-- Hardware/sensors -->
+  <include file="$(find-pkg-share robp_launch)/launch/phidgets_launch.yaml"/>
+  <include file="$(find-pkg-share robp_launch)/launch/lidar_launch.yaml"/>
+
+  <!-- Localization stack -->
+  <node pkg="controller" exec="is_turning" name="is_turning" output="log"/>
+  <node pkg="localization" exec="filter_scan" name="filter_scan" output="log"/>
+  <node pkg="odometry" exec="odometry" name="odometry" output="log"/>
+  <!-- <node pkg="localization" exec="localization_motion_triggered" name="localization" output="log"/> -->
+
+</launch>
